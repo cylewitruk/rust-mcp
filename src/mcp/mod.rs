@@ -1,8 +1,11 @@
+mod docs_intel;
 mod graph;
 mod index;
 mod intel;
 mod local_cache;
+mod metrics;
 mod models;
+mod query_cache;
 mod search;
 mod security;
 mod server;

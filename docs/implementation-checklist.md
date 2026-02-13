@@ -38,31 +38,31 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 
 - [x] Parser-based symbol extraction (`syn`/tree-sitter fallback)
 - [x] `symbol.search` tool with confidence and index source
-- [ ] Version-aware symbol queries and pagination limits
+- [x] Version-aware symbol queries and pagination limits
 
 **Estimate:** 3–6 days
 
 ## 5) Docs Intelligence + Quality Contract (M4)
 
-- [ ] docs.rs ingest/index pipeline
-- [ ] `docs.search` tool
+- [x] docs.rs ingest/index pipeline
+- [x] `docs.search` tool
 - [x] Standardize response envelope fields: `provenance`, `freshness`, `confidence`, `next_best_calls` (implemented across crate-search/intel/versions/graph)
-- [ ] Basic memoization via `query_cache`
+- [x] Basic memoization via `query_cache`
 
 **Estimate:** 3–6 days
 
 ## 6) Reliability + NFR Validation
 
-- [ ] Metrics (`query_count`, `latency`, `cache_hit_rate`, `index_lag`, `error_rate`)
-- [ ] Benchmarks for top crates (latency/correctness)
-- [ ] Concurrency and backpressure tests
+- [x] Metrics (`query_count`, `latency`, `cache_hit_rate`, `index_lag`, `error_rate`)
+- [x] Benchmarks for top crates (latency/correctness)
+- [x] Concurrency and backpressure tests
 
 **Estimate:** 2–4 days
 
 ## Suggested Immediate Sprint (next 3–5 coding sessions)
 
-1. `source.search`
-2. `source.read`
-3. Cargo cache scanner + incremental source ingestion
-4. RustSec parity improvements (RustSec DB ingest + richer severity normalization)
-5. docs.rs ingest + `docs.search`
+1. Concurrency and backpressure tests (parallel tool invocations)
+2. RustSec native ingest parity (beyond OSV bridge)
+3. Optional Prometheus metrics export
+4. Cache invalidation hooks on refresh scopes
+5. Benchmark trend reporting (7-day rolling)

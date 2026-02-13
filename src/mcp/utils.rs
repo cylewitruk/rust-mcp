@@ -36,6 +36,12 @@ pub(super) fn symbol_search_limit(value: Option<u32>) -> u32 {
         .clamp(1, 200)
 }
 
+pub(super) fn docs_search_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(25)
+        .clamp(1, 200)
+}
+
 pub(super) fn source_read_end_line(value: Option<u32>) -> u32 {
     value
         .unwrap_or(200)

@@ -57,6 +57,8 @@ struct OsvReference {
 
 #[derive(Debug, Deserialize)]
 struct OsvSeverity {
+    #[serde(rename = "type")]
+    severity_type: Option<String>,
     score: Option<String>,
 }
 
@@ -130,6 +132,67 @@ fn fixed_versions(affected: &[OsvAffected]) -> Value {
             .map(Value::String)
             .collect(),
     )
+}
+
+fn first_rustsec_alias(aliases: &[String]) -> Option<String> {
+    aliases
+        .iter()
+        .find(|alias| alias.starts_with("RUSTSEC-"))
+        .cloned()
+}
+
+fn advisory_identity(vuln: &OsvVulnerability) -> (String, String) {
+    if let Some(rustsec_id) = first_rustsec_alias(&vuln.aliases) {
+        return (rustsec_id, "rustsec_osv".to_string());
+    }
+    (vuln.id.clone(), "osv".to_string())
+}
+
+fn extract_first_float(text: &str) -> Option<f64> {
+    let mut token = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            token.push(ch);
+        } else if !token.is_empty() {
+            break;
+        }
+    }
+    if token.is_empty() { None } else { token.parse::<f64>().ok() }
+}
+
+fn normalize_severity_label(severity: &[OsvSeverity]) -> Option<String> {
+    for item in severity {
+        if let Some(score_text) = item.score.as_deref()
+            && let Some(score) = extract_first_float(score_text)
+        {
+            let normalized = if score >= 9.0 {
+                "critical"
+            } else if score >= 7.0 {
+                "high"
+            } else if score >= 4.0 {
+                "medium"
+            } else if score > 0.0 {
+                "low"
+            } else {
+                "unknown"
+            };
+            return Some(normalized.to_string());
+        }
+
+        if let Some(kind) = item
+            .severity_type
+            .as_deref()
+            .map(|v| v.to_ascii_lowercase())
+            && (kind.contains("critical")
+                || kind.contains("high")
+                || kind.contains("medium")
+                || kind.contains("low"))
+        {
+            return Some(kind);
+        }
+    }
+
+    None
 }
 
 impl McpServer {
@@ -217,24 +280,24 @@ impl McpServer {
                 .touched_crates
                 .push(krate.name.clone());
 
-            sqlx::query("DELETE FROM advisory_matches WHERE crate_id = $1 AND source = 'osv'")
-                .bind(krate.id)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| format!("failed to clear OSV advisories for {}: {e}", krate.name))?;
+            sqlx::query(
+                "DELETE FROM advisory_matches
+                 WHERE crate_id = $1 AND source IN ('osv', 'rustsec_osv')",
+            )
+            .bind(krate.id)
+            .execute(&self.state.db)
+            .await
+            .map_err(|e| format!("failed to clear OSV advisories for {}: {e}", krate.name))?;
 
             for vuln in osv.vulns {
+                let (advisory_id, advisory_source) = advisory_identity(&vuln);
                 let title = vuln
                     .summary
                     .clone()
                     .or(vuln.details.clone())
                     .or_else(|| vuln.aliases.first().cloned())
                     .unwrap_or_else(|| vuln.id.clone());
-                let severity = vuln
-                    .severity
-                    .iter()
-                    .find_map(|s| s.score.clone())
-                    .map(|s| if s.len() > 255 { s.chars().take(255).collect() } else { s });
+                let severity = normalize_severity_label(&vuln.severity);
                 let url = vuln
                     .references
                     .first()
@@ -253,9 +316,9 @@ impl McpServer {
                             sqlx::query(
                                 "INSERT INTO advisory_matches (
                                     crate_id, version_id, advisory_id, severity, title, url,
-                                    affected_range, fixed_versions, source, created_at
+                                                affected_range, fixed_versions, source, created_at
                                  ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, 'osv', NOW()
+                                                $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
                                  )
                                  ON CONFLICT (crate_id, version_id, advisory_id)
                                  DO UPDATE SET
@@ -269,12 +332,13 @@ impl McpServer {
                             )
                             .bind(krate.id)
                             .bind(version_id)
-                            .bind(&vuln.id)
+                            .bind(&advisory_id)
                             .bind(severity.as_deref())
                             .bind(&title)
                             .bind(url.as_deref())
                             .bind(&affected_range)
                             .bind(fixed_versions_json.clone())
+                            .bind(&advisory_source)
                             .execute(&self.state.db)
                             .await
                             .map_err(|e| {
@@ -294,16 +358,17 @@ impl McpServer {
                             crate_id, version_id, advisory_id, severity, title, url,
                             affected_range, fixed_versions, source, created_at
                          ) VALUES (
-                            $1, NULL, $2, $3, $4, $5, $6, $7, 'osv', NOW()
+                                     $1, NULL, $2, $3, $4, $5, $6, $7, $8, NOW()
                          )",
                     )
                     .bind(krate.id)
-                    .bind(&vuln.id)
+                    .bind(&advisory_id)
                     .bind(severity.as_deref())
                     .bind(&title)
                     .bind(url.as_deref())
                     .bind(&affected_range)
                     .bind(fixed_versions_json)
+                    .bind(&advisory_source)
                     .execute(&self.state.db)
                     .await
                     .map_err(|e| {

@@ -10,10 +10,11 @@ use tracing::{error, warn};
 
 use super::models::{
     CratesIoCrateDetailResponse, CratesIoDependenciesResponse, CratesIoDependency,
-    CratesIoSearchResponse, IndexCoverage, IndexFailureByScope, IndexFreshness, IndexQueue,
-    IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
-    IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
-    IndexSyncCratesResponse, ResponseFreshnessSource, SyncCrateOutcome,
+    CratesIoSearchResponse, IndexCoverage, IndexFailureByScope, IndexFreshness,
+    IndexOperationalMetrics, IndexQueue, IndexRefreshRequest, IndexRefreshResponse,
+    IndexRefreshResult, IndexRefreshScope, IndexRetryDistribution, IndexStatusRequest,
+    IndexStatusResponse, IndexSyncCratesRequest, IndexSyncCratesResponse, ResponseFreshnessSource,
+    SyncCrateOutcome,
 };
 use super::server::McpServer;
 use super::utils::{
@@ -1085,6 +1086,65 @@ impl McpServer {
         .await
         .map_err(|e| format!("index.status failed to read advisory freshness: {e}"))?;
 
+        let query_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)::BIGINT
+             FROM tool_invocations
+             WHERE created_at >= NOW() - INTERVAL '24 hours'",
+        )
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.status failed to compute query_count: {e}"))?;
+
+        let average_latency_ms = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT AVG(latency_ms)::DOUBLE PRECISION
+             FROM tool_invocations
+             WHERE created_at >= NOW() - INTERVAL '24 hours'",
+        )
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.status failed to compute average latency: {e}"))?;
+
+        let error_rate = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT
+                CASE WHEN COUNT(*) = 0 THEN NULL
+                     ELSE (COUNT(*) FILTER (WHERE success = FALSE))::DOUBLE PRECISION / COUNT(*)
+                END
+             FROM tool_invocations
+             WHERE created_at >= NOW() - INTERVAL '24 hours'",
+        )
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.status failed to compute error_rate: {e}"))?;
+
+        let cache_hit_rate = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT
+                CASE WHEN COUNT(*) = 0 THEN NULL
+                     ELSE (COUNT(*) FILTER (WHERE hit = TRUE))::DOUBLE PRECISION / COUNT(*)
+                END
+             FROM query_cache_events
+             WHERE created_at >= NOW() - INTERVAL '24 hours'",
+        )
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.status failed to compute cache_hit_rate: {e}"))?;
+
+        let index_lag_seconds = sqlx::query_scalar::<_, Option<i64>>(
+            "WITH latest AS (
+                 SELECT GREATEST(
+                     COALESCE((SELECT MAX(updated_at) FROM crates), TO_TIMESTAMP(0)),
+                     COALESCE((SELECT MAX(indexed_at) FROM source_files), TO_TIMESTAMP(0)),
+                     COALESCE((SELECT MAX(indexed_at) FROM symbols), TO_TIMESTAMP(0)),
+                     COALESCE((SELECT MAX(indexed_at) FROM docs_pages), TO_TIMESTAMP(0)),
+                     COALESCE((SELECT MAX(created_at) FROM advisory_matches), TO_TIMESTAMP(0))
+                 ) AS latest_ts
+             )
+             SELECT EXTRACT(EPOCH FROM (NOW() - latest_ts))::BIGINT
+             FROM latest",
+        )
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.status failed to compute index_lag_seconds: {e}"))?;
+
         Ok(Json(IndexStatusResponse {
             freshness: IndexFreshness {
                 crates_updated_at,
@@ -1101,6 +1161,14 @@ impl McpServer {
                 source_files,
                 symbols,
                 docs_pages,
+            },
+            operational_metrics: IndexOperationalMetrics {
+                window: "24h".to_string(),
+                query_count,
+                average_latency_ms,
+                error_rate,
+                cache_hit_rate,
+                index_lag_seconds,
             },
             queue: IndexQueue {
                 pending_jobs,
@@ -1342,30 +1410,49 @@ impl McpServer {
                     provenance: "cargo_registry + local_postgres_index".to_string(),
                 }))
             }
-            IndexRefreshScope::Docs => Ok(Json(IndexRefreshResponse {
-                job_id,
-                scope,
-                accepted: false,
-                status: "not_implemented".to_string(),
-                message: "scope is planned but not yet implemented".to_string(),
-                estimated_seconds: None,
-                started_at_epoch_ms,
-                finished_at_epoch_ms: Some(now_epoch_millis()),
-                result: None,
-                freshness: vec![
-                    ResponseFreshnessSource {
-                        source: "docs.rs".to_string(),
-                        status: "not_implemented".to_string(),
-                        checked_at: None,
+            IndexRefreshScope::Docs => {
+                let outcome = self
+                    .sync_docs_pages(request.crate_name, request.page, request.per_page)
+                    .await?;
+
+                Ok(Json(IndexRefreshResponse {
+                    job_id,
+                    scope,
+                    accepted: true,
+                    status: if outcome.errors.is_empty() {
+                        "completed".to_string()
+                    } else {
+                        "completed_with_errors".to_string()
                     },
-                    ResponseFreshnessSource {
-                        source: "local_postgres_index".to_string(),
-                        status: "unchanged".to_string(),
-                        checked_at: None,
-                    },
-                ],
-                provenance: "local_postgres_index".to_string(),
-            })),
+                    message: format!(
+                        "docs sync processed {} crate versions and wrote {} docs pages",
+                        outcome.versions_processed, outcome.pages_written
+                    ),
+                    estimated_seconds: Some(10),
+                    started_at_epoch_ms,
+                    finished_at_epoch_ms: Some(now_epoch_millis()),
+                    result: Some(IndexRefreshResult {
+                        synced_crates: outcome.versions_processed,
+                        synced_versions: outcome.pages_written,
+                        synced_dependencies: 0,
+                        selected_versions: outcome.touched_versions,
+                        errors: outcome.errors,
+                    }),
+                    freshness: vec![
+                        ResponseFreshnessSource {
+                            source: "docs.rs".to_string(),
+                            status: "refreshed".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "local_postgres_index".to_string(),
+                            status: "updated".to_string(),
+                            checked_at: None,
+                        },
+                    ],
+                    provenance: "docs.rs + local_postgres_index".to_string(),
+                }))
+            }
         }
     }
 }

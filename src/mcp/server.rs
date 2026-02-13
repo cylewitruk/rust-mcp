@@ -1,15 +1,19 @@
+use std::future::Future;
+use std::time::Instant;
+
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{Json, ServerHandler, tool, tool_handler, tool_router};
+use tracing::warn;
 
 use super::models::{
     CrateGraphRequest, CrateGraphResponse, CrateIntelRequest, CrateIntelResponse,
     CrateSearchRequest, CrateSearchResponse, CrateVersionsRequest, CrateVersionsResponse,
-    IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
-    IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest, SourceReadRequest,
-    SourceReadResponse, SourceSearchRequest, SourceSearchResponse, SymbolSearchRequest,
-    SymbolSearchResponse,
+    DocsSearchRequest, DocsSearchResponse, IndexRefreshRequest, IndexRefreshResponse,
+    IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest, IndexSyncCratesResponse,
+    PingRequest, SourceReadRequest, SourceReadResponse, SourceSearchRequest, SourceSearchResponse,
+    SymbolSearchRequest, SymbolSearchResponse,
 };
 use crate::state::AppState;
 
@@ -25,6 +29,22 @@ impl McpServer {
             state,
             tool_router: Self::tool_router(),
         }
+    }
+
+    async fn instrument_tool<T, F>(&self, tool_name: &str, future: F) -> Result<T, String>
+    where
+        F: Future<Output = Result<T, String>>,
+    {
+        let started = Instant::now();
+        let result = future.await;
+        let latency_ms = started.elapsed().as_millis() as i64;
+        if let Err(error) = self
+            .record_tool_invocation(tool_name, result.is_ok(), latency_ms)
+            .await
+        {
+            warn!(%error, tool_name, "failed to persist tool invocation metrics");
+        }
+        result
     }
 }
 
@@ -56,7 +76,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<IndexSyncCratesRequest>,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
-        self.handle_index_sync_crates(request)
+        self.instrument_tool("index.sync_crates", self.handle_index_sync_crates(request))
             .await
     }
 
@@ -68,7 +88,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
-        self.handle_index_status(request)
+        self.instrument_tool("index.status", self.handle_index_status(request))
             .await
     }
 
@@ -80,7 +100,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<IndexRefreshRequest>,
     ) -> Result<Json<IndexRefreshResponse>, String> {
-        self.handle_index_refresh(request)
+        self.instrument_tool("index.refresh", self.handle_index_refresh(request))
             .await
     }
 
@@ -92,7 +112,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
-        self.handle_crate_search(request)
+        self.instrument_tool("crate.search", self.handle_crate_search(request))
             .await
     }
 
@@ -105,7 +125,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
-        self.handle_crate_intel(request)
+        self.instrument_tool("crate.intel", self.handle_crate_intel(request))
             .await
     }
 
@@ -118,7 +138,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<CrateVersionsRequest>,
     ) -> Result<Json<CrateVersionsResponse>, String> {
-        self.handle_crate_versions(request)
+        self.instrument_tool("crate.versions", self.handle_crate_versions(request))
             .await
     }
 
@@ -131,7 +151,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
-        self.handle_crate_graph(request)
+        self.instrument_tool("crate.graph", self.handle_crate_graph(request))
             .await
     }
 
@@ -144,7 +164,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<SourceSearchRequest>,
     ) -> Result<Json<SourceSearchResponse>, String> {
-        self.handle_source_search(request)
+        self.instrument_tool("source.search", self.handle_source_search(request))
             .await
     }
 
@@ -157,7 +177,7 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<SourceReadRequest>,
     ) -> Result<Json<SourceReadResponse>, String> {
-        self.handle_source_read(request)
+        self.instrument_tool("source.read", self.handle_source_read(request))
             .await
     }
 
@@ -169,7 +189,20 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<SymbolSearchRequest>,
     ) -> Result<Json<SymbolSearchResponse>, String> {
-        self.handle_symbol_search(request)
+        self.instrument_tool("symbol.search", self.handle_symbol_search(request))
+            .await
+    }
+
+    #[tool(
+        name = "docs.search",
+        description = "Search indexed docs.rs pages by query with optional crate/version/path \
+                       filters."
+    )]
+    async fn docs_search(
+        &self,
+        Parameters(request): Parameters<DocsSearchRequest>,
+    ) -> Result<Json<DocsSearchResponse>, String> {
+        self.instrument_tool("docs.search", self.handle_docs_search(request))
             .await
     }
 }

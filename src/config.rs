@@ -51,6 +51,10 @@ pub struct Config {
     #[arg(long, env = "CRATES_IO_TIMEOUT_SECS", default_value_t = 20)]
     pub crates_io_timeout_secs: u64,
 
+    /// Base URL for docs.rs page fetches.
+    #[arg(long, env = "DOCS_RS_BASE_URL", default_value = "https://docs.rs")]
+    pub docs_rs_base_url: String,
+
     /// Minimum database connection pool size.
     #[arg(long, env = "DATABASE_MIN_CONNECTIONS", default_value_t = 1)]
     pub database_min_connections: u32,

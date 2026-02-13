@@ -184,16 +184,25 @@ pub struct SymbolSearchRequest {
     pub crate_name: Option<String>,
     pub version: Option<String>,
     pub kind: Option<String>,
+    pub include_all_versions: Option<bool>,
+    pub cursor: Option<String>,
+    pub page: Option<u32>,
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct SymbolSearchResponse {
     pub query: String,
     pub crate_name: Option<String>,
     pub version: Option<String>,
     pub kind: Option<String>,
+    pub include_all_versions: bool,
+    pub cursor: Option<String>,
+    pub next_cursor: Option<String>,
+    pub page: u32,
     pub limit: u32,
+    pub total_count: usize,
+    pub has_more: bool,
     pub count: usize,
     pub confidence: String,
     pub next_best_calls: Vec<String>,
@@ -201,7 +210,7 @@ pub struct SymbolSearchResponse {
     pub hits: Vec<SymbolSearchHit>,
 }
 
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct SymbolSearchHit {
     pub crate_name: String,
     pub version: String,
@@ -214,6 +223,40 @@ pub struct SymbolSearchHit {
     pub end_line: i32,
     pub index_source: String,
     pub indexed_at: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DocsSearchRequest {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub path_prefix: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct DocsSearchResponse {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub path_prefix: Option<String>,
+    pub limit: u32,
+    pub count: usize,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+    pub hits: Vec<DocsSearchHit>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct DocsSearchHit {
+    pub crate_name: String,
+    pub version: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub source_url: Option<String>,
+    pub indexed_at: String,
+    pub snippet: String,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -292,6 +335,7 @@ pub(super) struct SourceReadRow {
 
 #[derive(Debug, FromRow)]
 pub(super) struct SymbolSearchRow {
+    pub(super) _symbol_id: i64,
     pub(super) crate_name: String,
     pub(super) version: String,
     pub(super) source_path: String,
@@ -303,6 +347,24 @@ pub(super) struct SymbolSearchRow {
     pub(super) end_line: i32,
     pub(super) index_source: String,
     pub(super) indexed_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct DocsSearchRow {
+    pub(super) crate_name: String,
+    pub(super) version: String,
+    pub(super) path: String,
+    pub(super) title: Option<String>,
+    pub(super) source_url: Option<String>,
+    pub(super) indexed_at: String,
+    pub(super) content: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct DocsSyncCandidateRow {
+    pub(super) crate_name: String,
+    pub(super) version: String,
+    pub(super) crate_version_id: i64,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -379,11 +441,22 @@ pub struct IndexStatusRequest {}
 pub struct IndexStatusResponse {
     pub freshness: IndexFreshness,
     pub coverage: IndexCoverage,
+    pub operational_metrics: IndexOperationalMetrics,
     pub queue: IndexQueue,
     pub retry_distribution: IndexRetryDistribution,
     pub failures_by_scope: Vec<IndexFailureByScope>,
     pub last_errors: Vec<String>,
     pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexOperationalMetrics {
+    pub window: String,
+    pub query_count: i64,
+    pub average_latency_ms: Option<f64>,
+    pub error_rate: Option<f64>,
+    pub cache_hit_rate: Option<f64>,
+    pub index_lag_seconds: Option<i64>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
