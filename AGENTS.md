@@ -52,6 +52,15 @@ Each tool follows: **validate -> query -> transform -> envelope**.
 - Fuzzy: `pg_trgm` GIN indexes; score with `similarity()`
 - Lints: `missing_docs = "warn"`, `unused_trait_names = "deny"`, `unwrap_in_result = "warn"`
 
+## Running tests
+
+Prefer `nextest` which offers process isolation and is generally faster:
+
+```sh
+# cargo --locked nextest run --no-fail-fast --all-targets
+just test
+```
+
 ## Post-implementation checks
 
 Verify the following commands succeed after code changes:
@@ -63,7 +72,7 @@ just fmt && just lint && just test
 just cbuild
 ```
 
-Attempt to build the container:
+If `just lint` fails, try using `just fix` before attempting to resolve the remarks individually.
 
 ## Running
 

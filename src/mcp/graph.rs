@@ -10,6 +10,94 @@ use super::models::{
 use super::server::McpServer;
 use super::utils::{graph_depth, normalize_optional, normalize_required};
 
+fn detect_cycle_presence(edges: &[CrateGraphEdge]) -> bool {
+    let mut adjacency = HashMap::<&str, HashSet<&str>>::new();
+    for edge in edges {
+        adjacency
+            .entry(edge.from_crate.as_str())
+            .or_default()
+            .insert(edge.to_crate.as_str());
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
+
+    fn visit<'a>(
+        node: &'a str,
+        adjacency: &HashMap<&'a str, HashSet<&'a str>>,
+        colors: &mut HashMap<&'a str, Color>,
+    ) -> bool {
+        colors.insert(node, Color::Gray);
+
+        if let Some(neighbors) = adjacency.get(node) {
+            for neighbor in neighbors {
+                match colors
+                    .get(neighbor)
+                    .copied()
+                    .unwrap_or(Color::White)
+                {
+                    Color::Gray => return true,
+                    Color::Black => {}
+                    Color::White => {
+                        if visit(neighbor, adjacency, colors) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        colors.insert(node, Color::Black);
+        false
+    }
+
+    let mut colors = HashMap::<&str, Color>::new();
+    for node in adjacency.keys().copied() {
+        if colors
+            .get(node)
+            .copied()
+            .unwrap_or(Color::White)
+            == Color::White
+            && visit(node, &adjacency, &mut colors)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn cycle_safe_traversal_notes(edges: &[CrateGraphEdge], depth: u32) -> Vec<String> {
+    let mut notes = vec![
+        "Traversal is cycle-safe: edges are deduplicated and traversal depth is bounded."
+            .to_string(),
+        format!("Traversal depth cap applied: {depth}"),
+    ];
+
+    if edges
+        .iter()
+        .any(|edge| edge.from_crate == edge.to_crate)
+    {
+        notes.push("Self-referential edges detected in result set.".to_string());
+    }
+
+    if detect_cycle_presence(edges) {
+        notes.push(
+            "Cycle detected in returned graph; traversal remained bounded and avoided infinite \
+             loops."
+                .to_string(),
+        );
+    } else {
+        notes.push("No directed cycles detected in returned graph slice.".to_string());
+    }
+
+    notes
+}
+
 impl McpServer {
     async fn latest_versions_for_crates(
         &self,
@@ -355,6 +443,7 @@ impl McpServer {
         let freshness_check_result = freshness_outcome
             .freshness_check_result
             .clone();
+        let cycle_notes = cycle_safe_traversal_notes(&edges, depth);
 
         Ok(Json(CrateGraphResponse {
             crate_name: crate_row.name,
@@ -365,6 +454,7 @@ impl McpServer {
             edge_count: edges.len(),
             nodes,
             edges,
+            cycle_safe_traversal_notes: cycle_notes,
             freshness_check_performed: freshness_outcome.freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
             refresh_enqueued: freshness_outcome.refresh_enqueued,
@@ -389,5 +479,41 @@ impl McpServer {
             ],
             provenance: "local_postgres_index".to_string(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cycle_safe_traversal_notes, detect_cycle_presence};
+    use crate::mcp::models::CrateGraphEdge;
+
+    fn edge(from: &str, to: &str) -> CrateGraphEdge {
+        CrateGraphEdge {
+            from_crate: from.to_string(),
+            from_version: Some("1.0.0".to_string()),
+            to_crate: to.to_string(),
+            to_version: Some("1.0.0".to_string()),
+            requirement: "*".to_string(),
+            dependency_kind: "normal".to_string(),
+            optional: false,
+            depth: 1,
+        }
+    }
+
+    #[test]
+    fn cycle_detection_identifies_simple_cycle() {
+        let edges = vec![edge("a", "b"), edge("b", "c"), edge("c", "a")];
+        assert!(detect_cycle_presence(&edges));
+    }
+
+    #[test]
+    fn cycle_notes_include_no_cycle_message_when_acyclic() {
+        let edges = vec![edge("a", "b"), edge("b", "c")];
+        let notes = cycle_safe_traversal_notes(&edges, 2);
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("No directed cycles detected"))
+        );
     }
 }

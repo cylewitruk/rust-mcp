@@ -48,6 +48,7 @@ impl McpServer {
             "SELECT
                 id,
                 version,
+                rust_version,
                 published_at::TEXT AS published_at,
                 readme
              FROM crate_versions
@@ -79,6 +80,7 @@ impl McpServer {
                 "SELECT
                     id,
                     version,
+                    rust_version,
                     published_at::TEXT AS published_at,
                     readme
                  FROM crate_versions
@@ -110,6 +112,7 @@ impl McpServer {
                 "SELECT
                     id,
                     version,
+                    rust_version,
                     published_at::TEXT AS published_at,
                     readme
                  FROM crate_versions
@@ -139,6 +142,7 @@ impl McpServer {
                     "SELECT
                         id,
                         version,
+                        rust_version,
                         published_at::TEXT AS published_at,
                         readme
                      FROM crate_versions
@@ -190,6 +194,7 @@ impl McpServer {
         let version_history_rows = sqlx::query_as::<_, CrateVersionHistoryRow>(
             "SELECT
                 cv.version,
+                cv.rust_version,
                 cv.published_at::TEXT AS published_at,
                 cv.yanked,
                 cv.total_downloads,
@@ -299,6 +304,7 @@ impl McpServer {
             .into_iter()
             .map(|row| CrateIntelVersion {
                 version: row.version,
+                rust_version: row.rust_version,
                 published_at: row.published_at,
                 yanked: row.yanked,
                 downloads: row.total_downloads,
@@ -348,8 +354,10 @@ impl McpServer {
             selected_version: selected_version
                 .version
                 .clone(),
+            selected_rust_version: selected_version.rust_version,
             selected_version_published_at: selected_version.published_at,
             latest_version: latest_version.version,
+            latest_rust_version: latest_version.rust_version,
             total_downloads,
             last_updated_at,
             description: crate_row.description,

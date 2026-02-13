@@ -10,10 +10,11 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 
 ## Current baseline (honest status)
 
-- Core infrastructure and most MCP tools are implemented and usable.
-- Highest-impact gaps are in docs ingestion completeness and `index.refresh` scope completeness.
-- NFR gaps remain around outbound/request rate limiting and external metrics export.
-- Section 4 high-value capabilities are not yet implemented.
+- Core infrastructure and all MCP tools through M6 are implemented and usable.
+- Prometheus metrics export is operational via standalone `metrics-exporter-prometheus` HTTP listener on a dedicated port (default 9090). Tool call counters, latency histograms, and refresh job gauges are all exposed.
+- SQL-backed tool invocation history is retained for `index.status` operational metrics.
+- Remaining gaps are in high-value capabilities (P2) and agentic tools (P3).
+- Minor spec-compliance gap: `confidence` field uses string values but the spec suggests `high/medium/low` with reason — current implementation is functional but could be more structured.
 
 ## Prioritization
 
@@ -28,7 +29,7 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 1. `crate.features` tool — feature flags, defaults, transitive enables (prevents the most common agent error in Rust)
 2. Surface MSRV (`rust_version`) in `crate.intel` and `crate.versions`
 3. Add cycle-safe traversal notes to `crate.graph` output
-4. Add Prometheus metrics export (`/metrics`) — consider deferring; `index.status` already surfaces this data
+4. ~~Add Prometheus metrics export~~ — **Done.** Standalone `metrics-exporter-prometheus` HTTP listener on dedicated port; hand-rolled `/metrics` handler removed; refresh job gauges emitted from worker loop.
 5. Add request-level throttling/abuse guardrails — consider a simple concurrency semaphore over full rate limiting
 
 ### P2 (high-value capabilities from spec section 4)
@@ -47,6 +48,8 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 ## Milestones and acceptance criteria
 
 ### M5: Completeness + Safety (P0)
+
+Status: Completed (2026-02-13)
 
 ### Work items
 
@@ -69,12 +72,14 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 
 ### M6: Spec compliance + agent signal (P1)
 
+Status: Completed (2026-02-13)
+
 #### Work items
 
 - `crate.features` tool: fetch and return feature flags, defaults, and transitive enables per crate/version.
 - MSRV surfacing in `crate.intel` and `crate.versions` responses.
 - `crate.graph` cycle detection + response notes.
-- Prometheus `/metrics` endpoint via `metrics` crate (trivial wiring — register counters/histograms, expose via axum handler).
+- Prometheus metrics via standalone `metrics-exporter-prometheus` HTTP listener on dedicated port (default 9090). Refresh job gauges emitted from worker loop; tool call counters/histograms from `instrument_tool()`.
 - Concurrency semaphore or simple request throttle.
 
 #### Acceptance criteria
@@ -82,7 +87,7 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 - `crate.features` returns accurate feature flag data for indexed crates.
 - MSRV is present in `crate.intel` and `crate.versions` payloads where available.
 - `crate.graph` includes cycle-safe notes when applicable.
-- `/metrics` exposes tool call counters, latency histograms, and queue depth gauges.
+- Prometheus exporter on dedicated port exposes tool call counters, latency histograms, and refresh job queue depth gauges.
 
 ### M7: High-value capabilities (P2)
 
@@ -116,18 +121,18 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 
 ### Sprint 1 (focus: M5)
 
-- Implement docs.rs page discovery and incremental docs ingestion.
-- Implement remaining `index.refresh` scope handlers.
-- Add outbound per-source rate limiting hooks.
-- Add targeted tests for docs ingest discovery + refresh scope execution.
+- [x] Implement docs.rs page discovery and incremental docs ingestion.
+- [x] Implement remaining `index.refresh` scope handlers.
+- [x] Add outbound per-source rate limiting hooks.
+- [x] Add targeted tests for docs ingest discovery + refresh scope execution.
 
 ### Sprint 2 (focus: M6)
 
-- Implement `crate.features` tool.
-- Add MSRV fields to `crate.intel` and `crate.versions` responses.
-- Add cycle detection notes in `crate.graph`.
-- Wire `metrics` crate + Prometheus `/metrics` endpoint.
-- Add concurrency semaphore for request throttling.
+- [x] Implement `crate.features` tool.
+- [x] Add MSRV fields to `crate.intel` and `crate.versions` responses.
+- [x] Add cycle detection notes in `crate.graph`.
+- [x] Wire Prometheus metrics via standalone `metrics-exporter-prometheus` HTTP listener (port 9090). Removed hand-rolled `/metrics` handler and SQL-on-scrape queries.
+- [x] Add concurrency limiter for request throttling.
 
 ## Tracking and governance
 

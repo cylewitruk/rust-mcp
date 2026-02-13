@@ -239,6 +239,7 @@ Core env vars:
 - `DATABASE_URL` (default `postgres://postgres:postgres@postgres:5432/rust_mcp`)
 - `MCP_HTTP_BIND` (default `0.0.0.0:43173` in container)
 - `MCP_HTTP_PORT` (default `43173`, loopback-published)
+- `MAX_CONCURRENT_REQUESTS` (default `128`)
 - `MCP_TRANSPORT` (`http` or `stdio`, current scaffold focuses on `http`)
 - `MCP_SSE_KEEP_ALIVE_SECS` (default `15`)
 - `MCP_SSE_RETRY_MS` (default `3000`)

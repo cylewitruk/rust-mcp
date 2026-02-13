@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -52,6 +54,8 @@ pub(super) struct CratesIoVersionRecord {
     pub(super) downloads: Option<i64>,
     pub(super) checksum: Option<String>,
     pub(super) rust_version: Option<String>,
+    #[serde(default)]
+    pub(super) features: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -521,9 +525,43 @@ pub struct CrateVersionsRequest {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateFeaturesRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateFeaturesResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub default_features: Vec<String>,
+    pub feature_count: usize,
+    pub features: Vec<CrateFeatureFlag>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateFeatureFlag {
+    pub name: String,
+    pub is_default: bool,
+    pub enables_features: Vec<String>,
+    pub enables_dependencies: Vec<String>,
+    pub transitive_enables: Vec<String>,
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateVersionsResponse {
     pub crate_name: String,
+    pub latest_rust_version: Option<String>,
     pub count: usize,
     pub versions: Vec<CrateVersionTimelineItem>,
     pub freshness_check_performed: bool,
@@ -562,6 +600,7 @@ pub struct CrateGraphResponse {
     pub edge_count: usize,
     pub nodes: Vec<CrateGraphNode>,
     pub edges: Vec<CrateGraphEdge>,
+    pub cycle_safe_traversal_notes: Vec<String>,
     pub freshness_check_performed: bool,
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
@@ -595,6 +634,7 @@ pub struct CrateGraphEdge {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateVersionTimelineItem {
     pub version: String,
+    pub rust_version: Option<String>,
     pub published_at: Option<String>,
     pub yanked: bool,
     pub downloads: i64,
@@ -609,8 +649,10 @@ pub struct CrateVersionTimelineItem {
 pub struct CrateIntelResponse {
     pub crate_name: String,
     pub selected_version: String,
+    pub selected_rust_version: Option<String>,
     pub selected_version_published_at: Option<String>,
     pub latest_version: String,
+    pub latest_rust_version: Option<String>,
     pub total_downloads: i64,
     pub last_updated_at: Option<String>,
     pub description: Option<String>,
@@ -639,6 +681,7 @@ pub struct CrateIntelResponse {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateIntelVersion {
     pub version: String,
+    pub rust_version: Option<String>,
     pub published_at: Option<String>,
     pub yanked: bool,
     pub downloads: i64,
@@ -689,6 +732,7 @@ pub(super) struct CrateCoreRow {
 pub(super) struct CrateVersionSelectionRow {
     pub(super) id: i64,
     pub(super) version: String,
+    pub(super) rust_version: Option<String>,
     pub(super) published_at: Option<String>,
     pub(super) readme: Option<String>,
 }
@@ -696,6 +740,7 @@ pub(super) struct CrateVersionSelectionRow {
 #[derive(Debug, FromRow)]
 pub(super) struct CrateVersionHistoryRow {
     pub(super) version: String,
+    pub(super) rust_version: Option<String>,
     pub(super) published_at: Option<String>,
     pub(super) yanked: bool,
     pub(super) total_downloads: i64,
@@ -732,11 +777,18 @@ pub(super) struct CrateAdvisoryRow {
 #[derive(Debug, FromRow)]
 pub(super) struct CrateVersionTimelineRow {
     pub(super) version: String,
+    pub(super) rust_version: Option<String>,
     pub(super) published_at: Option<String>,
     pub(super) yanked: bool,
     pub(super) total_downloads: i64,
     pub(super) advisory_count: i64,
     pub(super) release_age_days: Option<i64>,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateFeatureRow {
+    pub(super) feature_name: String,
+    pub(super) enables: Value,
 }
 
 #[derive(Debug, FromRow)]

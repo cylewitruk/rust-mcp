@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
+use tower::limit::ConcurrencyLimitLayer;
 use tower_http::trace::TraceLayer;
 use tracing::warn;
 
@@ -26,6 +27,11 @@ pub fn router(state: AppState, config: Config) -> Router {
         .route("/readyz", get(readyz))
         .nest_service("/mcp", mcp_service)
         .with_state(state)
+        .layer(ConcurrencyLimitLayer::new(
+            config
+                .max_concurrent_requests
+                .max(1) as usize,
+        ))
         .layer(TraceLayer::new_for_http())
 }
 

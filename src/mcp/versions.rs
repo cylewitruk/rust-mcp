@@ -1,8 +1,8 @@
 use rmcp::Json;
 
 use super::models::{
-    CrateCoreRow, CrateVersionTimelineItem, CrateVersionTimelineRow, CrateVersionsRequest,
-    CrateVersionsResponse,
+    CrateCoreRow, CrateVersionSelectionRow, CrateVersionTimelineItem, CrateVersionTimelineRow,
+    CrateVersionsRequest, CrateVersionsResponse,
 };
 use super::server::McpServer;
 use super::utils::{normalize_required, version_limit};
@@ -50,15 +50,20 @@ impl McpServer {
             format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
         })?;
 
-        let latest_version = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT version
+        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
+            "SELECT
+                id,
+                version,
+                rust_version,
+                published_at::TEXT AS published_at,
+                readme
              FROM crate_versions
              WHERE crate_id = $1
              ORDER BY published_at DESC NULLS LAST, id DESC
              LIMIT 1",
         )
         .bind(crate_row.id)
-        .fetch_one(&self.state.db)
+        .fetch_optional(&self.state.db)
         .await
         .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
         .ok_or_else(|| {
@@ -69,19 +74,28 @@ impl McpServer {
         })?;
 
         let freshness_outcome = self
-            .ensure_freshness_for_interaction(crate_row.id, &crate_row.name, &latest_version)
+            .ensure_freshness_for_interaction(
+                crate_row.id,
+                &crate_row.name,
+                &latest_version.version,
+            )
             .await?;
 
         let latest_version = if freshness_outcome.freshness_check_result == "changed" {
-            sqlx::query_scalar::<_, Option<String>>(
-                "SELECT version
+            sqlx::query_as::<_, CrateVersionSelectionRow>(
+                "SELECT
+                    id,
+                    version,
+                    rust_version,
+                    published_at::TEXT AS published_at,
+                    readme
                  FROM crate_versions
                  WHERE crate_id = $1
                  ORDER BY published_at DESC NULLS LAST, id DESC
                  LIMIT 1",
             )
             .bind(crate_row.id)
-            .fetch_one(&self.state.db)
+            .fetch_optional(&self.state.db)
             .await
             .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
@@ -97,6 +111,7 @@ impl McpServer {
         let rows = sqlx::query_as::<_, CrateVersionTimelineRow>(
             "SELECT
                 cv.version,
+                cv.rust_version,
                 cv.published_at::TEXT AS published_at,
                 cv.yanked,
                 COALESCE(cv.total_downloads, 0)::BIGINT AS total_downloads,
@@ -122,7 +137,7 @@ impl McpServer {
             .into_iter()
             .map(|row| {
                 let mut markers = Vec::new();
-                let is_latest = row.version == latest_version;
+                let is_latest = row.version == latest_version.version;
 
                 if is_latest {
                     markers.push("latest".to_string());
@@ -141,6 +156,7 @@ impl McpServer {
 
                 CrateVersionTimelineItem {
                     version: row.version,
+                    rust_version: row.rust_version,
                     published_at: row.published_at,
                     yanked: row.yanked,
                     downloads: row.total_downloads,
@@ -159,6 +175,7 @@ impl McpServer {
 
         Ok(Json(CrateVersionsResponse {
             crate_name: crate_row.name,
+            latest_rust_version: latest_version.rust_version,
             count: versions.len(),
             versions,
             freshness_check_performed: freshness_outcome.freshness_check_performed,

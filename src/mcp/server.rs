@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::time::Instant;
 
+use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
@@ -8,12 +9,13 @@ use rmcp::{Json, ServerHandler, tool, tool_handler, tool_router};
 use tracing::warn;
 
 use super::models::{
-    CrateGraphRequest, CrateGraphResponse, CrateIntelRequest, CrateIntelResponse,
-    CrateSearchRequest, CrateSearchResponse, CrateVersionsRequest, CrateVersionsResponse,
-    DocsSearchRequest, DocsSearchResponse, IndexRefreshRequest, IndexRefreshResponse,
-    IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest, IndexSyncCratesResponse,
-    PingRequest, SourceReadRequest, SourceReadResponse, SourceSearchRequest, SourceSearchResponse,
-    SymbolSearchRequest, SymbolSearchResponse,
+    CrateFeaturesRequest, CrateFeaturesResponse, CrateGraphRequest, CrateGraphResponse,
+    CrateIntelRequest, CrateIntelResponse, CrateSearchRequest, CrateSearchResponse,
+    CrateVersionsRequest, CrateVersionsResponse, DocsSearchRequest, DocsSearchResponse,
+    IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
+    IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest, SourceReadRequest,
+    SourceReadResponse, SourceSearchRequest, SourceSearchResponse, SymbolSearchRequest,
+    SymbolSearchResponse,
 };
 use crate::state::AppState;
 
@@ -38,6 +40,20 @@ impl McpServer {
         let started = Instant::now();
         let result = future.await;
         let latency_ms = started.elapsed().as_millis() as i64;
+        let success_label = if result.is_ok() { "true" } else { "false" };
+
+        counter!(
+            "rust_mcp_tool_invocations_total",
+            "tool" => tool_name.to_string(),
+            "success" => success_label.to_string(),
+        )
+        .increment(1);
+        histogram!(
+            "rust_mcp_tool_latency_ms",
+            "tool" => tool_name.to_string(),
+        )
+        .record(latency_ms.max(0) as f64);
+
         if let Err(error) = self
             .record_tool_invocation(tool_name, result.is_ok(), latency_ms)
             .await
@@ -126,6 +142,19 @@ impl McpServer {
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
         self.instrument_tool("crate.intel", self.handle_crate_intel(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.features",
+        description = "Return indexed crate feature flags, defaults, and transitive feature \
+                       enables."
+    )]
+    async fn crate_features(
+        &self,
+        Parameters(request): Parameters<CrateFeaturesRequest>,
+    ) -> Result<Json<CrateFeaturesResponse>, String> {
+        self.instrument_tool("crate.features", self.handle_crate_features(request))
             .await
     }
 

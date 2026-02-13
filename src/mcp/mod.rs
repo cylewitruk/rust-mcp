@@ -1,4 +1,5 @@
 mod docs_intel;
+mod features;
 mod graph;
 mod index;
 mod intel;

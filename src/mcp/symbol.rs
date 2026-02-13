@@ -393,10 +393,14 @@ mod tests {
             osv_min_interval_ms: 1,
             database_min_connections: 1,
             database_max_connections: 2,
+            max_concurrent_requests: 16,
             auto_migrate: false,
             cargo_registry_dir: PathBuf::from("/tmp"),
             data_dir: PathBuf::from("/tmp"),
             rustsec_db_dir: None,
+            prometheus_bind: "127.0.0.1:9090"
+                .parse::<SocketAddr>()
+                .expect("valid socket address"),
             rust_log: "warn".to_string(),
             log_format: LogFormat::Pretty,
         }

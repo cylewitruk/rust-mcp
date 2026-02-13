@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
@@ -23,6 +24,13 @@ pub async fn run() -> Result<()> {
     } else {
         warn!("AUTO_MIGRATE=false, skipping migrations");
     }
+
+    PrometheusBuilder::new()
+        .with_http_listener(config.prometheus_bind)
+        .install()
+        .context("failed to install prometheus metrics exporter")?;
+
+    info!(bind = %config.prometheus_bind, "prometheus exporter listening");
 
     let listener = TcpListener::bind(config.http_bind)
         .await

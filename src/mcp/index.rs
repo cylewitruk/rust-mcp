@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use metrics::gauge;
 use reqwest::header::CONTENT_TYPE;
 use rmcp::Json;
 use serde::Deserialize;
@@ -104,6 +105,22 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
     const MAX_ATTEMPTS: i32 = 3;
 
     loop {
+        // Update refresh job gauges for Prometheus on each iteration.
+        if let Ok(counts) = sqlx::query_as::<_, (i64, i64, i64)>(
+            "SELECT
+                COUNT(*) FILTER (WHERE status = 'pending')::BIGINT,
+                COUNT(*) FILTER (WHERE status = 'running')::BIGINT,
+                COUNT(*) FILTER (WHERE status = 'failed')::BIGINT
+             FROM refresh_jobs",
+        )
+        .fetch_one(&state.db)
+        .await
+        {
+            gauge!("rust_mcp_refresh_jobs_pending").set(counts.0 as f64);
+            gauge!("rust_mcp_refresh_jobs_running").set(counts.1 as f64);
+            gauge!("rust_mcp_refresh_jobs_failed").set(counts.2 as f64);
+        }
+
         let next_job = sqlx::query_as::<_, RefreshJobRow>(
             "WITH next_job AS (
                  SELECT id
@@ -636,6 +653,59 @@ impl McpServer {
             .map_err(|e| {
                 format!("failed to upsert version {} for {crate_name}: {e}", version.num)
             })?;
+
+            sqlx::query("DELETE FROM crate_version_features WHERE crate_version_id = $1")
+                .bind(version_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to clear feature flags for {}@{}: {e}",
+                        detail.krate.name, version.num
+                    )
+                })?;
+
+            for (feature_name, enables) in &version.features {
+                if feature_name.trim().is_empty() {
+                    continue;
+                }
+
+                let enables_json = Value::Array(
+                    enables
+                        .iter()
+                        .map(|value| Value::String(value.trim().to_string()))
+                        .filter(|value| {
+                            value
+                                .as_str()
+                                .map(|text| !text.is_empty())
+                                .unwrap_or(false)
+                        })
+                        .collect::<Vec<_>>(),
+                );
+
+                sqlx::query(
+                    "INSERT INTO crate_version_features (
+                        crate_version_id,
+                        feature_name,
+                        enables,
+                        created_at,
+                        updated_at
+                     ) VALUES (
+                        $1, $2, $3, NOW(), NOW()
+                     )",
+                )
+                .bind(version_id)
+                .bind(feature_name.trim())
+                .bind(enables_json)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to persist feature '{}' for {}@{}: {e}",
+                        feature_name, detail.krate.name, version.num
+                    )
+                })?;
+            }
 
             version_ids.insert(version.num.clone(), version_id);
         }

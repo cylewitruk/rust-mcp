@@ -78,6 +78,14 @@ pub struct Config {
     #[arg(long, env = "DATABASE_MAX_CONNECTIONS", default_value_t = 10)]
     pub database_max_connections: u32,
 
+    /// Maximum number of concurrent inbound HTTP requests.
+    #[arg(long, env = "MAX_CONCURRENT_REQUESTS", default_value_t = 128)]
+    pub max_concurrent_requests: u32,
+
+    /// Bind address for the standalone Prometheus metrics exporter.
+    #[arg(long, env = "PROMETHEUS_BIND", default_value = "0.0.0.0:9090")]
+    pub prometheus_bind: SocketAddr,
+
     /// Whether to run SQL migrations during startup.
     #[arg(long, env = "AUTO_MIGRATE", default_value_t = true)]
     pub auto_migrate: bool,

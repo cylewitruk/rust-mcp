@@ -10,6 +10,8 @@ anyhow = "1.0"
 axum = { version = "0.8", features = ["json"] }
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.18.1", features = ["http-listener"] }
 rmcp = { version = "0.15.0", features = ["transport-streamable-http-server"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -20,7 +22,8 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "migra
 syn = { version = "2.0", features = ["full"] }
 thiserror = "2.0"
 tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "signal"] }
-toml = "0.8"
+toml = "0.9.8"
+tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
