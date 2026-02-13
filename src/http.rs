@@ -1,15 +1,19 @@
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::{Json, Router};
 use serde::Serialize;
 use tower_http::trace::TraceLayer;
 use tracing::warn;
 
-use crate::{
-    config::{Config, TransportMode},
-    error::ApiResult,
-    mcp,
-    state::AppState,
-};
+use crate::config::{Config, TransportMode};
+use crate::error::ApiResult;
+use crate::mcp;
+use crate::state::AppState;
 
+/// Builds the HTTP router with health/readiness endpoints and MCP transport
+/// mounting.
 pub fn router(state: AppState, config: Config) -> Router {
     if matches!(config.mcp_transport, TransportMode::Stdio) {
         warn!("MCP_TRANSPORT=stdio set; HTTP endpoints stay available for health/readiness checks");
@@ -35,6 +39,8 @@ async fn healthz() -> impl IntoResponse {
 }
 
 async fn readyz(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
-    state.readiness_check().await?;
+    state
+        .readiness_check()
+        .await?;
     Ok((StatusCode::OK, Json(StatusPayload { status: "ready" })))
 }

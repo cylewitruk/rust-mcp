@@ -1,9 +1,12 @@
-use anyhow::{Context, Result};
+use anyhow::{Context as _, Result};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-use crate::{config::Config, http, logging, mcp, state::AppState};
+use crate::config::Config;
+use crate::state::AppState;
+use crate::{http, logging, mcp};
 
+/// Runs the HTTP and MCP server lifecycle.
 pub async fn run() -> Result<()> {
     let config = Config::load();
     logging::init(&config)?;

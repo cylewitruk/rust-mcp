@@ -19,15 +19,21 @@ pub(super) fn normalize_required(value: String, field: &str) -> Result<String, S
 }
 
 pub(super) fn search_limit(value: Option<u32>) -> u32 {
-    value.unwrap_or(10).clamp(1, 50)
+    value
+        .unwrap_or(10)
+        .clamp(1, 50)
 }
 
 pub(super) fn version_limit(value: Option<u32>) -> u32 {
-    value.unwrap_or(100).clamp(1, 500)
+    value
+        .unwrap_or(100)
+        .clamp(1, 500)
 }
 
 pub(super) fn dependents_limit(value: Option<u32>) -> u32 {
-    value.unwrap_or(25).clamp(1, 200)
+    value
+        .unwrap_or(25)
+        .clamp(1, 200)
 }
 
 pub(super) fn sync_page(value: Option<u32>) -> u32 {
@@ -35,11 +41,19 @@ pub(super) fn sync_page(value: Option<u32>) -> u32 {
 }
 
 pub(super) fn sync_per_page(value: Option<u32>) -> u32 {
-    value.unwrap_or(25).clamp(1, 100)
+    value
+        .unwrap_or(25)
+        .clamp(1, 100)
+}
+
+pub(super) fn graph_depth(value: Option<u32>) -> u32 {
+    value.unwrap_or(1).clamp(1, 4)
 }
 
 pub(super) fn readme_limit(value: Option<u32>) -> usize {
-    value.unwrap_or(25_000).clamp(500, 200_000) as usize
+    value
+        .unwrap_or(25_000)
+        .clamp(500, 200_000) as usize
 }
 
 pub(super) fn dedupe_strings(mut values: Vec<String>) -> Vec<String> {
@@ -73,7 +87,10 @@ pub(super) fn truncate_optional_text(
     };
 
     let mut chars = text.chars();
-    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    let truncated = chars
+        .by_ref()
+        .take(max_chars)
+        .collect::<String>();
     let was_truncated = chars.next().is_some();
     (Some(truncated), was_truncated)
 }
@@ -88,7 +105,11 @@ pub(super) fn match_reasons(
 
     if let Some(q) = query {
         let q_lower = q.to_ascii_lowercase();
-        if row.name.to_ascii_lowercase().contains(&q_lower) {
+        if row
+            .name
+            .to_ascii_lowercase()
+            .contains(&q_lower)
+        {
             reasons.push("name_match".to_string());
         }
         if row
@@ -100,30 +121,40 @@ pub(super) fn match_reasons(
         {
             reasons.push("description_match".to_string());
         }
-        if row
-            .keywords
-            .iter()
-            .any(|k| k.eq_ignore_ascii_case(q) || k.to_ascii_lowercase().contains(&q_lower))
-        {
+        if row.keywords.iter().any(|k| {
+            k.eq_ignore_ascii_case(q)
+                || k.to_ascii_lowercase()
+                    .contains(&q_lower)
+        }) {
             reasons.push("keyword_match".to_string());
         }
         if row
             .categories
             .iter()
-            .any(|c| c.eq_ignore_ascii_case(q) || c.to_ascii_lowercase().contains(&q_lower))
+            .any(|c| {
+                c.eq_ignore_ascii_case(q)
+                    || c.to_ascii_lowercase()
+                        .contains(&q_lower)
+            })
         {
             reasons.push("category_match".to_string());
         }
     }
 
     if let Some(c) = category
-        && row.categories.iter().any(|v| v.eq_ignore_ascii_case(c))
+        && row
+            .categories
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(c))
     {
         reasons.push("category_filter_match".to_string());
     }
 
     if let Some(k) = keyword
-        && row.keywords.iter().any(|v| v.eq_ignore_ascii_case(k))
+        && row
+            .keywords
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(k))
     {
         reasons.push("keyword_filter_match".to_string());
     }

@@ -1,14 +1,13 @@
 use std::time::Duration;
 
-use rmcp::transport::{
-    StreamableHttpServerConfig, StreamableHttpService,
-    streamable_http_server::session::local::LocalSessionManager,
-};
-
-use crate::{config::Config, state::AppState};
+use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 
 use super::server::McpServer;
+use crate::config::Config;
+use crate::state::AppState;
 
+/// Creates the RMCP streamable HTTP service using the configured SSE settings.
 pub fn streamable_http_service(
     state: AppState,
     config: &Config,

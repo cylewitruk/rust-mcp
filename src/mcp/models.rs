@@ -123,6 +123,8 @@ pub struct CrateSearchResponse {
     pub count: usize,
     pub freshness_checks_performed: usize,
     pub refresh_jobs_enqueued: usize,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
     pub provenance: String,
     pub hits: Vec<CrateSearchHit>,
 }
@@ -293,6 +295,94 @@ pub struct CrateIntelRequest {
     pub readme_max_chars: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateVersionsRequest {
+    pub crate_name: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateVersionsResponse {
+    pub crate_name: String,
+    pub count: usize,
+    pub versions: Vec<CrateVersionTimelineItem>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrateGraphDirection {
+    Dependencies,
+    Dependents,
+    Both,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateGraphRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub direction: Option<CrateGraphDirection>,
+    pub depth: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateGraphResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub direction: CrateGraphDirection,
+    pub depth: u32,
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub nodes: Vec<CrateGraphNode>,
+    pub edges: Vec<CrateGraphEdge>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateGraphNode {
+    pub crate_name: String,
+    pub latest_version: Option<String>,
+    pub min_distance: u32,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateGraphEdge {
+    pub from_crate: String,
+    pub from_version: Option<String>,
+    pub to_crate: String,
+    pub to_version: Option<String>,
+    pub requirement: String,
+    pub dependency_kind: String,
+    pub optional: bool,
+    pub depth: u32,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateVersionTimelineItem {
+    pub version: String,
+    pub published_at: Option<String>,
+    pub yanked: bool,
+    pub downloads: i64,
+    pub advisory_count: i64,
+    pub release_age_days: Option<i64>,
+    pub is_latest: bool,
+    pub adoption_signal: String,
+    pub markers: Vec<String>,
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateIntelResponse {
     pub crate_name: String,
@@ -318,6 +408,8 @@ pub struct CrateIntelResponse {
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
     pub refresh_job_id: Option<String>,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
     pub provenance: String,
 }
 
@@ -412,4 +504,43 @@ pub(super) struct CrateAdvisoryRow {
     pub(super) affected_range: String,
     pub(super) fixed_versions: Value,
     pub(super) source: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateVersionTimelineRow {
+    pub(super) version: String,
+    pub(super) published_at: Option<String>,
+    pub(super) yanked: bool,
+    pub(super) total_downloads: i64,
+    pub(super) advisory_count: i64,
+    pub(super) release_age_days: Option<i64>,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct GraphLatestVersionRow {
+    pub(super) crate_id: i64,
+    pub(super) id: i64,
+    pub(super) version: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct GraphDependencyTraversalRow {
+    pub(super) from_crate_name: String,
+    pub(super) from_version: String,
+    pub(super) to_crate_id: i64,
+    pub(super) to_crate_name: String,
+    pub(super) requirement: String,
+    pub(super) dependency_kind: String,
+    pub(super) optional: bool,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct GraphDependentTraversalRow {
+    pub(super) from_crate_id: i64,
+    pub(super) from_crate_name: String,
+    pub(super) from_version: String,
+    pub(super) to_crate_name: String,
+    pub(super) requirement: String,
+    pub(super) dependency_kind: String,
+    pub(super) optional: bool,
 }

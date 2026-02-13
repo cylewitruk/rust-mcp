@@ -1,16 +1,14 @@
 use rmcp::Json;
 
-use super::{
-    models::{
-        CrateAdvisoryRow, CrateCoreRow, CrateDependencyRow, CrateDependentRow, CrateIntelAdvisory,
-        CrateIntelDependency, CrateIntelDependent, CrateIntelRequest, CrateIntelResponse,
-        CrateIntelVersion, CrateVersionHistoryRow, CrateVersionSelectionRow,
-    },
-    server::McpServer,
-    utils::{
-        dependents_limit, normalize_optional, normalize_required, readme_limit,
-        truncate_optional_text, value_to_string_vec, version_limit,
-    },
+use super::models::{
+    CrateAdvisoryRow, CrateCoreRow, CrateDependencyRow, CrateDependentRow, CrateIntelAdvisory,
+    CrateIntelDependency, CrateIntelDependent, CrateIntelRequest, CrateIntelResponse,
+    CrateIntelVersion, CrateVersionHistoryRow, CrateVersionSelectionRow,
+};
+use super::server::McpServer;
+use super::utils::{
+    dependents_limit, normalize_optional, normalize_required, readme_limit, truncate_optional_text,
+    value_to_string_vec, version_limit,
 };
 
 impl McpServer {
@@ -103,7 +101,9 @@ impl McpServer {
         };
 
         let mut refresh_enqueued = freshness_outcome.refresh_enqueued;
-        let mut refresh_job_id = freshness_outcome.refresh_job_id.clone();
+        let mut refresh_job_id = freshness_outcome
+            .refresh_job_id
+            .clone();
 
         let selected_version = if let Some(version) = requested_version.clone() {
             let selected = sqlx::query_as::<_, CrateVersionSelectionRow>(
@@ -121,10 +121,7 @@ impl McpServer {
             .fetch_optional(&self.state.db)
             .await
             .map_err(|e| {
-                format!(
-                    "selected version lookup failed for {}@{}: {e}",
-                    crate_row.name, version
-                )
+                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
             })?;
 
             if let Some(selected) = selected {
@@ -243,12 +240,7 @@ impl McpServer {
         .bind(crate_row.id)
         .fetch_one(&self.state.db)
         .await
-        .map_err(|e| {
-            format!(
-                "dependent crate count query failed for {}: {e}",
-                crate_row.name
-            )
-        })?;
+        .map_err(|e| format!("dependent crate count query failed for {}: {e}", crate_row.name))?;
 
         let dependent_rows = sqlx::query_as::<_, CrateDependentRow>(
             "WITH dependent_crates AS (
@@ -349,7 +341,9 @@ impl McpServer {
 
         Ok(Json(CrateIntelResponse {
             crate_name: crate_row.name,
-            selected_version: selected_version.version.clone(),
+            selected_version: selected_version
+                .version
+                .clone(),
             selected_version_published_at: selected_version.published_at,
             latest_version: latest_version.version,
             total_downloads,
@@ -371,6 +365,12 @@ impl McpServer {
             freshness_check_result: freshness_outcome.freshness_check_result,
             refresh_enqueued,
             refresh_job_id,
+            confidence: "high".to_string(),
+            next_best_calls: vec![
+                "crate.versions".to_string(),
+                "crate.graph".to_string(),
+                "index.refresh".to_string(),
+            ],
             provenance: "local_postgres_index".to_string(),
         }))
     }

@@ -1,13 +1,11 @@
 use rmcp::Json;
 use sqlx::{Postgres, QueryBuilder};
 
-use super::{
-    models::{
-        CrateSearchHit, CrateSearchRequest, CrateSearchResponse, CrateSearchRow, CrateSearchSort,
-    },
-    server::McpServer,
-    utils::{match_reasons, normalize_optional, search_limit},
+use super::models::{
+    CrateSearchHit, CrateSearchRequest, CrateSearchResponse, CrateSearchRow, CrateSearchSort,
 };
+use super::server::McpServer;
+use super::utils::{match_reasons, normalize_optional, search_limit};
 
 impl McpServer {
     async fn run_crate_search(
@@ -19,19 +17,12 @@ impl McpServer {
         limit: u32,
     ) -> Result<Vec<CrateSearchRow>, sqlx::Error> {
         let mut qb = QueryBuilder::<Postgres>::new(
-            "SELECT \
-                c.id AS crate_id, \
-                c.name, \
-                c.description, \
-                c.repository_url, \
-                c.docs_url, \
-                c.homepage_url, \
-                c.categories, \
-                c.keywords, \
-                COALESCE(MAX(cv.total_downloads), 0)::BIGINT AS total_downloads, \
-                (ARRAY_REMOVE(ARRAY_AGG(cv.version ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC), NULL))[1] AS latest_version, \
-                MAX(cv.published_at)::TEXT AS latest_published_at, \
-                COALESCE(COUNT(DISTINCT dep.from_version_id), 0)::BIGINT AS dependent_count, ",
+            "SELECT c.id AS crate_id, c.name, c.description, c.repository_url, c.docs_url, \
+             c.homepage_url, c.categories, c.keywords, COALESCE(MAX(cv.total_downloads), \
+             0)::BIGINT AS total_downloads, (ARRAY_REMOVE(ARRAY_AGG(cv.version ORDER BY \
+             cv.published_at DESC NULLS LAST, cv.id DESC), NULL))[1] AS latest_version, \
+             MAX(cv.published_at)::TEXT AS latest_published_at, COALESCE(COUNT(DISTINCT \
+             dep.from_version_id), 0)::BIGINT AS dependent_count, ",
         );
 
         if let Some(q) = query {
@@ -42,7 +33,10 @@ impl McpServer {
             qb.push_bind(q);
             qb.push(") + CASE WHEN c.name ILIKE ");
             qb.push_bind(name_like);
-            qb.push(" THEN 1.5 ELSE 0 END + CASE WHEN to_tsvector('english', COALESCE(c.description, '')) @@ websearch_to_tsquery('english', ");
+            qb.push(
+                " THEN 1.5 ELSE 0 END + CASE WHEN to_tsvector('english', COALESCE(c.description, \
+                 '')) @@ websearch_to_tsquery('english', ",
+            );
             qb.push_bind(q);
             qb.push(") THEN 1.0 ELSE 0 END)::DOUBLE PRECISION AS relevance_score ");
         } else {
@@ -50,9 +44,8 @@ impl McpServer {
         }
 
         qb.push(
-            "FROM crates c \
-             LEFT JOIN crate_versions cv ON cv.crate_id = c.id \
-             LEFT JOIN dependency_edges dep ON dep.to_crate_id = c.id ",
+            "FROM crates c LEFT JOIN crate_versions cv ON cv.crate_id = c.id LEFT JOIN \
+             dependency_edges dep ON dep.to_crate_id = c.id ",
         );
 
         let mut has_where = false;
@@ -74,7 +67,8 @@ impl McpServer {
             qb.push_bind(q);
             qb.push("]::TEXT[]");
             qb.push(
-                " OR to_tsvector('english', COALESCE(c.description, '')) @@ websearch_to_tsquery('english', ",
+                " OR to_tsvector('english', COALESCE(c.description, '')) @@ \
+                 websearch_to_tsquery('english', ",
             );
             qb.push_bind(q);
             qb.push(")");
@@ -105,15 +99,8 @@ impl McpServer {
         }
 
         qb.push(
-            "GROUP BY \
-                c.id, \
-                c.name, \
-                c.description, \
-                c.repository_url, \
-                c.docs_url, \
-                c.homepage_url, \
-                c.categories, \
-                c.keywords ",
+            "GROUP BY c.id, c.name, c.description, c.repository_url, c.docs_url, c.homepage_url, \
+             c.categories, c.keywords ",
         );
 
         match sort {
@@ -129,7 +116,8 @@ impl McpServer {
             }
             CrateSearchSort::Recent => {
                 qb.push(
-                    "ORDER BY MAX(cv.published_at) DESC NULLS LAST, total_downloads DESC, c.name ASC ",
+                    "ORDER BY MAX(cv.published_at) DESC NULLS LAST, total_downloads DESC, c.name \
+                     ASC ",
                 );
             }
         }
@@ -151,13 +139,15 @@ impl McpServer {
         let keyword = normalize_optional(request.keyword);
         let limit = search_limit(request.limit);
 
-        let sort = request.sort.unwrap_or_else(|| {
-            if query.is_some() {
-                CrateSearchSort::Relevance
-            } else {
-                CrateSearchSort::Downloads
-            }
-        });
+        let sort = request
+            .sort
+            .unwrap_or_else(|| {
+                if query.is_some() {
+                    CrateSearchSort::Relevance
+                } else {
+                    CrateSearchSort::Downloads
+                }
+            });
 
         let rows = self
             .run_crate_search(
@@ -222,6 +212,16 @@ impl McpServer {
             count: hits.len(),
             freshness_checks_performed,
             refresh_jobs_enqueued,
+            confidence: if hits.is_empty() { "low".to_string() } else { "high".to_string() },
+            next_best_calls: if hits.is_empty() {
+                vec!["index.sync_crates".to_string()]
+            } else {
+                vec![
+                    "crate.intel".to_string(),
+                    "crate.versions".to_string(),
+                    "crate.graph".to_string(),
+                ]
+            },
             provenance: "local_postgres_index".to_string(),
             hits,
         }))

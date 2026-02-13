@@ -1,13 +1,13 @@
-use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use thiserror::Error;
 
+/// API-level error type mapped to HTTP responses.
 #[derive(Debug, Error)]
 pub enum ApiError {
+    /// Database access failure.
     #[error("database unavailable: {0}")]
     Database(#[from] sqlx::Error),
 }
@@ -23,12 +23,11 @@ impl IntoResponse for ApiError {
             ApiError::Database(_) => StatusCode::SERVICE_UNAVAILABLE,
         };
 
-        let payload = ErrorPayload {
-            error: self.to_string(),
-        };
+        let payload = ErrorPayload { error: self.to_string() };
 
         (status, Json(payload)).into_response()
     }
 }
 
+/// Convenience result alias for API handlers.
 pub type ApiResult<T> = Result<T, ApiError>;

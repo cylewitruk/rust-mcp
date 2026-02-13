@@ -18,9 +18,9 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 
 ## 2) Complete M1 Crate Intelligence
 
-- [ ] `crate.versions` tool
-- [ ] `crate.graph` tool (depth-bounded, dependencies/dependents/both)
-- [ ] RustSec/OSV ingest pipeline into `advisory_matches`
+- [x] `crate.versions` tool
+- [x] `crate.graph` tool (depth-bounded, dependencies/dependents/both)
+- [x] RustSec/OSV ingest pipeline into `advisory_matches` (initial OSV scope via `index.refresh` security)
 - [ ] Freshness metadata per source in all index and crate responses
 
 **Estimate:** 2–4 days
@@ -46,7 +46,7 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 
 - [ ] docs.rs ingest/index pipeline
 - [ ] `docs.search` tool
-- [ ] Standardize response envelope fields: `provenance`, `freshness`, `confidence`, `next_best_calls`
+- [x] Standardize response envelope fields: `provenance`, `freshness`, `confidence`, `next_best_calls` (implemented across crate-search/intel/versions/graph)
 - [ ] Basic memoization via `query_cache`
 
 **Estimate:** 3–6 days
@@ -61,8 +61,8 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 
 ## Suggested Immediate Sprint (next 3–5 coding sessions)
 
-1. `crate.versions`
-2. `crate.graph`
-3. RustSec/OSV ingest
-4. Normalize response quality fields across tools (`provenance`/`freshness`/`confidence`/`next_best_calls`)
-5. `source.search` + `source.read`
+1. `source.search`
+2. `source.read`
+3. Cargo cache scanner + incremental source ingestion
+4. RustSec parity improvements (RustSec DB ingest + richer severity normalization)
+5. docs.rs ingest + `docs.search`

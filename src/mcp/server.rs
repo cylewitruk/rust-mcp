@@ -1,17 +1,15 @@
-use rmcp::{
-    Json, ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
-};
-
-use crate::state::AppState;
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::{Json, ServerHandler, tool, tool_handler, tool_router};
 
 use super::models::{
-    CrateIntelRequest, CrateIntelResponse, CrateSearchRequest, CrateSearchResponse,
+    CrateGraphRequest, CrateGraphResponse, CrateIntelRequest, CrateIntelResponse,
+    CrateSearchRequest, CrateSearchResponse, CrateVersionsRequest, CrateVersionsResponse,
     IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
     IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest,
 };
+use crate::state::AppState;
 
 #[derive(Debug, Clone)]
 pub struct McpServer {
@@ -30,13 +28,16 @@ impl McpServer {
 
 #[tool_router(router = tool_router)]
 impl McpServer {
-    #[tool(
-        name = "ping",
-        description = "Check MCP connectivity and basic DB readiness."
-    )]
+    #[tool(name = "ping", description = "Check MCP connectivity and basic DB readiness.")]
     async fn ping(&self, Parameters(request): Parameters<PingRequest>) -> String {
-        let suffix = request.message.unwrap_or_else(|| "ok".to_string());
-        let db_state = match self.state.readiness_check().await {
+        let suffix = request
+            .message
+            .unwrap_or_else(|| "ok".to_string());
+        let db_state = match self
+            .state
+            .readiness_check()
+            .await
+        {
             Ok(()) => "db_ready",
             Err(_) => "db_unavailable",
         };
@@ -46,13 +47,15 @@ impl McpServer {
 
     #[tool(
         name = "index.sync_crates",
-        description = "Fetch crate metadata from crates.io and upsert it into the local Postgres index."
+        description = "Fetch crate metadata from crates.io and upsert it into the local Postgres \
+                       index."
     )]
     async fn index_sync_crates(
         &self,
         Parameters(request): Parameters<IndexSyncCratesRequest>,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
-        self.handle_index_sync_crates(request).await
+        self.handle_index_sync_crates(request)
+            .await
     }
 
     #[tool(
@@ -63,7 +66,8 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
-        self.handle_index_status(request).await
+        self.handle_index_status(request)
+            .await
     }
 
     #[tool(
@@ -74,7 +78,8 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<IndexRefreshRequest>,
     ) -> Result<Json<IndexRefreshResponse>, String> {
-        self.handle_index_refresh(request).await
+        self.handle_index_refresh(request)
+            .await
     }
 
     #[tool(
@@ -85,18 +90,47 @@ impl McpServer {
         &self,
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
-        self.handle_crate_search(request).await
+        self.handle_crate_search(request)
+            .await
     }
 
     #[tool(
         name = "crate.intel",
-        description = "Return dense crate intelligence including versions, dependencies, dependents, and advisory matches."
+        description = "Return dense crate intelligence including versions, dependencies, \
+                       dependents, and advisory matches."
     )]
     async fn crate_intel(
         &self,
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
-        self.handle_crate_intel(request).await
+        self.handle_crate_intel(request)
+            .await
+    }
+
+    #[tool(
+        name = "crate.versions",
+        description = "Return a normalized crate version timeline with yanked/security/adoption \
+                       markers."
+    )]
+    async fn crate_versions(
+        &self,
+        Parameters(request): Parameters<CrateVersionsRequest>,
+    ) -> Result<Json<CrateVersionsResponse>, String> {
+        self.handle_crate_versions(request)
+            .await
+    }
+
+    #[tool(
+        name = "crate.graph",
+        description = "Return depth-bounded dependency/dependent graph edges and nodes for a \
+                       crate."
+    )]
+    async fn crate_graph(
+        &self,
+        Parameters(request): Parameters<CrateGraphRequest>,
+    ) -> Result<Json<CrateGraphResponse>, String> {
+        self.handle_crate_graph(request)
+            .await
     }
 }
 
@@ -105,10 +139,13 @@ impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Local Rust dependency intelligence MCP server. Use index.sync_crates to ingest crates.io data, then crate.search and crate.intel for local fast lookup."
+                "Local Rust dependency intelligence MCP server. Use index.sync_crates to ingest \
+                 crates.io data, then crate.search and crate.intel for local fast lookup."
                     .to_string(),
             ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
             ..Default::default()
         }
     }

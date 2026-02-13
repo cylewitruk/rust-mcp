@@ -79,12 +79,12 @@ Adopt a **read-through + stale-while-revalidate** model with **adaptive per-crat
 
 - This ADR defines behavior; exact TTL formula and thresholds are configurable.
 - Implemented in current codebase:
-   - `crate.intel` performs interaction-time freshness checks and missing-version targeted backfill.
-   - `crate.search` performs bounded interaction freshness checks on top-ranked results.
-   - worker dequeues only due jobs (`requested_at <= NOW()`), ordered by priority then attempts.
-   - worker transitions: `pending -> running -> finished|pending(retry)|failed`.
-   - retry delay uses bounded exponential backoff with jitter.
-   - `index.status` exposes queue states (`pending`, `delayed`, `retrying`, `running`, `failed`) plus retry/failure distributions.
+  - `crate.intel` performs interaction-time freshness checks and missing-version targeted backfill.
+  - `crate.search` performs bounded interaction freshness checks on top-ranked results.
+  - worker dequeues only due jobs (`requested_at <= NOW()`), ordered by priority then attempts.
+  - worker transitions: `pending -> running -> finished|pending(retry)|failed`.
+  - retry delay uses bounded exponential backoff with jitter.
+  - `index.status` exposes queue states (`pending`, `delayed`, `retrying`, `running`, `failed`) plus retry/failure distributions.
 - Future ADRs may refine:
   - adaptive TTL weighting,
   - source-specific freshness probes,

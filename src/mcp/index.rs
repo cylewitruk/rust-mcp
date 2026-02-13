@@ -3,28 +3,24 @@ use std::collections::HashMap;
 use reqwest::header::CONTENT_TYPE;
 use rmcp::Json;
 use serde::de::DeserializeOwned;
-use serde_json::Value;
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use tokio::time::{Duration, sleep};
 use tracing::{error, warn};
 
-use crate::state::AppState;
-
-use super::{
-    models::{
-        CratesIoCrateDetailResponse, CratesIoDependenciesResponse, CratesIoDependency,
-        CratesIoSearchResponse, IndexCoverage, IndexFailureByScope, IndexFreshness, IndexQueue,
-        IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
-        IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
-        IndexSyncCratesResponse, SyncCrateOutcome,
-    },
-    server::McpServer,
-    utils::{
-        DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
-        sync_per_page,
-    },
+use super::models::{
+    CratesIoCrateDetailResponse, CratesIoDependenciesResponse, CratesIoDependency,
+    CratesIoSearchResponse, IndexCoverage, IndexFailureByScope, IndexFreshness, IndexQueue,
+    IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
+    IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
+    IndexSyncCratesResponse, SyncCrateOutcome,
 };
+use super::server::McpServer;
+use super::utils::{
+    DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
+    sync_per_page,
+};
+use crate::state::AppState;
 
 fn now_epoch_millis() -> u128 {
     std::time::SystemTime::now()
@@ -113,10 +109,9 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 .sync_single_crate(&job.crate_name, job.include_dependencies)
                 .await
                 .map(|_| ()),
-            other => Err(format!(
-                "unsupported refresh scope '{}' for crate '{}'",
-                other, job.crate_name
-            )),
+            other => {
+                Err(format!("unsupported refresh scope '{}' for crate '{}'", other, job.crate_name))
+            }
         };
 
         match result {
@@ -142,7 +137,8 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 if let Err(error) = sqlx::query(
                     "UPDATE refresh_jobs
                      SET status = CASE WHEN $1 THEN 'failed' ELSE 'pending' END,
-                         requested_at = CASE WHEN $1 THEN requested_at ELSE NOW() + ($2 * INTERVAL '1 second') END,
+                         requested_at = CASE WHEN $1 THEN requested_at ELSE NOW() + ($2 * INTERVAL \
+                     '1 second') END,
                          finished_at = CASE WHEN $1 THEN NOW() ELSE NULL END,
                          last_error = $3
                      WHERE id = $4",
@@ -206,12 +202,20 @@ fn ttl_hint_seconds(
         (14 * 24 * 60 * 60, "default")
     };
 
-    (ttl.0.clamp(60 * 60, 90 * 24 * 60 * 60), ttl.1)
+    (
+        ttl.0
+            .clamp(60 * 60, 90 * 24 * 60 * 60),
+        ttl.1,
+    )
 }
 
 impl McpServer {
     fn crates_io_url(&self, path: &str) -> String {
-        let base = self.state.config.crates_io_base_url.trim_end_matches('/');
+        let base = self
+            .state
+            .config
+            .crates_io_base_url
+            .trim_end_matches('/');
         let suffix = path.trim_start_matches('/');
         format!("{base}/{suffix}")
     }
@@ -237,10 +241,7 @@ impl McpServer {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<body unavailable>".to_string());
-            return Err(format!(
-                "request to {url} failed with status {}: {}",
-                status, body
-            ));
+            return Err(format!("request to {url} failed with status {}: {}", status, body));
         }
 
         response
@@ -300,8 +301,16 @@ impl McpServer {
                 value
                     .get("content")
                     .and_then(Value::as_str)
-                    .or_else(|| value.get("readme").and_then(Value::as_str))
-                    .or_else(|| value.get("message").and_then(Value::as_str))
+                    .or_else(|| {
+                        value
+                            .get("readme")
+                            .and_then(Value::as_str)
+                    })
+                    .or_else(|| {
+                        value
+                            .get("message")
+                            .and_then(Value::as_str)
+                    })
                     .map(ToString::to_string)
             })
         } else {
@@ -313,7 +322,12 @@ impl McpServer {
             if trimmed.is_empty() {
                 None
             } else if trimmed.len() > 1_000_000 {
-                Some(trimmed.chars().take(1_000_000).collect())
+                Some(
+                    trimmed
+                        .chars()
+                        .take(1_000_000)
+                        .collect(),
+                )
             } else {
                 Some(trimmed)
             }
@@ -326,13 +340,21 @@ impl McpServer {
         version: &str,
     ) -> Result<Vec<CratesIoDependency>, String> {
         let path = format!("api/v1/crates/{crate_name}/{version}/dependencies");
-        let response: CratesIoDependenciesResponse = self.crates_io_get_json(&path, &[]).await?;
+        let response: CratesIoDependenciesResponse = self
+            .crates_io_get_json(&path, &[])
+            .await?;
         Ok(response.dependencies)
     }
 
     fn pick_primary_version(detail: &CratesIoCrateDetailResponse) -> Option<String> {
-        if let Some(max_version) = detail.krate.max_version.clone()
-            && detail.versions.iter().any(|v| v.num == max_version)
+        if let Some(max_version) = detail
+            .krate
+            .max_version
+            .clone()
+            && detail
+                .versions
+                .iter()
+                .any(|v| v.num == max_version)
         {
             return Some(max_version);
         }
@@ -342,7 +364,12 @@ impl McpServer {
             .iter()
             .find(|v| !v.yanked)
             .map(|v| v.num.clone())
-            .or_else(|| detail.versions.first().map(|v| v.num.clone()))
+            .or_else(|| {
+                detail
+                    .versions
+                    .first()
+                    .map(|v| v.num.clone())
+            })
     }
 
     async fn ensure_crate_stub(
@@ -371,14 +398,18 @@ impl McpServer {
 
         let selected_version = Self::pick_primary_version(&detail);
         let readme = if let Some(version) = selected_version.as_deref() {
-            self.crates_io_get_readme(crate_name, version).await?
+            self.crates_io_get_readme(crate_name, version)
+                .await?
         } else {
             None
         };
 
         let dependencies = if include_dependencies {
             if let Some(version) = selected_version.as_deref() {
-                Some(self.fetch_crate_dependencies(crate_name, version).await?)
+                Some(
+                    self.fetch_crate_dependencies(crate_name, version)
+                        .await?,
+                )
             } else {
                 None
             }
@@ -403,7 +434,11 @@ impl McpServer {
             detail
                 .keywords
                 .iter()
-                .map(|k| k.keyword.clone().unwrap_or_else(|| k.id.clone()))
+                .map(|k| {
+                    k.keyword
+                        .clone()
+                        .unwrap_or_else(|| k.id.clone())
+                })
                 .collect(),
         );
 
@@ -416,8 +451,10 @@ impl McpServer {
 
         let crate_id = sqlx::query_scalar::<_, i64>(
             "INSERT INTO crates (
-                     name, description, repository_url, docs_url, homepage_url, categories, keywords,
-                     last_checked_at, next_check_at, ttl_hint_seconds, ttl_reason, last_refresh_error,
+                     name, description, repository_url, docs_url, homepage_url, categories, \
+             keywords,
+                     last_checked_at, next_check_at, ttl_hint_seconds, ttl_reason, \
+             last_refresh_error,
                      created_at, updated_at
              ) VALUES (
                      $1, $2, $3, $4, $5, $6, $7,
@@ -440,10 +477,30 @@ impl McpServer {
              RETURNING id",
         )
         .bind(&detail.krate.name)
-        .bind(detail.krate.description.as_deref())
-        .bind(detail.krate.repository.as_deref())
-        .bind(detail.krate.documentation.as_deref())
-        .bind(detail.krate.homepage.as_deref())
+        .bind(
+            detail
+                .krate
+                .description
+                .as_deref(),
+        )
+        .bind(
+            detail
+                .krate
+                .repository
+                .as_deref(),
+        )
+        .bind(
+            detail
+                .krate
+                .documentation
+                .as_deref(),
+        )
+        .bind(
+            detail
+                .krate
+                .homepage
+                .as_deref(),
+        )
         .bind(&categories)
         .bind(&keywords)
         .fetch_one(&mut *tx)
@@ -452,10 +509,14 @@ impl McpServer {
 
         let mut version_ids = HashMap::new();
         for version in &detail.versions {
-            let published_at = version.created_at.clone().or(version.updated_at.clone());
+            let published_at = version
+                .created_at
+                .clone()
+                .or(version.updated_at.clone());
             let version_id = sqlx::query_scalar::<_, i64>(
                 "INSERT INTO crate_versions (
-                    crate_id, version, published_at, yanked, total_downloads, rust_version, checksum, created_at, updated_at
+                    crate_id, version, published_at, yanked, total_downloads, rust_version, \
+                 checksum, created_at, updated_at
                  ) VALUES (
                     $1, $2, $3::timestamptz, $4, $5, $6, $7, NOW(), NOW()
                  )
@@ -472,19 +533,31 @@ impl McpServer {
             .bind(&version.num)
             .bind(published_at)
             .bind(version.yanked)
-            .bind(version.downloads.unwrap_or_default())
-            .bind(version.rust_version.as_deref())
+            .bind(
+                version
+                    .downloads
+                    .unwrap_or_default(),
+            )
+            .bind(
+                version
+                    .rust_version
+                    .as_deref(),
+            )
             .bind(version.checksum.as_deref())
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| format!("failed to upsert version {} for {crate_name}: {e}", version.num))?;
+            .map_err(|e| {
+                format!("failed to upsert version {} for {crate_name}: {e}", version.num)
+            })?;
 
             version_ids.insert(version.num.clone(), version_id);
         }
 
         let mut dependencies_synced = 0_usize;
         if let Some(selected_version_name) = selected_version.as_deref()
-            && let Some(selected_version_id) = version_ids.get(selected_version_name).copied()
+            && let Some(selected_version_id) = version_ids
+                .get(selected_version_name)
+                .copied()
         {
             if let Some(readme_text) = readme {
                 sqlx::query(
@@ -536,11 +609,14 @@ impl McpServer {
                             .map(Value::String)
                             .collect::<Vec<_>>(),
                     );
-                    let dependency_kind = dependency.kind.unwrap_or_else(|| "normal".to_string());
+                    let dependency_kind = dependency
+                        .kind
+                        .unwrap_or_else(|| "normal".to_string());
 
                     sqlx::query(
                         "INSERT INTO dependency_edges (
-                            from_version_id, to_crate_id, requirement, dependency_kind, optional, features, created_at
+                            from_version_id, to_crate_id, requirement, dependency_kind, optional, \
+                         features, created_at
                          ) VALUES (
                             $1, $2, $3, $4, $5, $6, NOW()
                          )",
@@ -697,7 +773,10 @@ impl McpServer {
             }
         };
 
-        let remote_latest = detail.krate.max_version.unwrap_or_default();
+        let remote_latest = detail
+            .krate
+            .max_version
+            .unwrap_or_default();
         let changed = !remote_latest.is_empty() && remote_latest != local_latest_version;
 
         if !changed {
@@ -768,7 +847,8 @@ impl McpServer {
         &self,
         crate_name: &str,
     ) -> Result<Option<String>, String> {
-        self.sync_single_crate(crate_name, false).await?;
+        self.sync_single_crate(crate_name, false)
+            .await?;
         let job_id = self
             .enqueue_refresh_job(
                 crate_name,
@@ -789,15 +869,18 @@ impl McpServer {
             normalize_optional(request.query).unwrap_or_else(|| DEFAULT_SYNC_QUERY.to_string());
         let page = sync_page(request.page);
         let per_page = sync_per_page(request.per_page);
-        let include_dependencies = request.include_dependencies.unwrap_or(true);
+        let include_dependencies = request
+            .include_dependencies
+            .unwrap_or(true);
 
         let params = vec![
             ("q", query.clone()),
             ("page", page.to_string()),
             ("per_page", per_page.to_string()),
         ];
-        let search_response: CratesIoSearchResponse =
-            self.crates_io_get_json("api/v1/crates", &params).await?;
+        let search_response: CratesIoSearchResponse = self
+            .crates_io_get_json("api/v1/crates", &params)
+            .await?;
 
         let mut synced_crates = 0_usize;
         let mut synced_versions = 0_usize;
@@ -886,13 +969,15 @@ impl McpServer {
             .map_err(|e| format!("index.status failed to count docs_pages: {e}"))?;
 
         let pending_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at <= NOW()",
+            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at \
+             <= NOW()",
         )
         .fetch_one(&self.state.db)
         .await
         .map_err(|e| format!("index.status failed to count pending jobs: {e}"))?;
         let delayed_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at > NOW()",
+            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at \
+             > NOW()",
         )
         .fetch_one(&self.state.db)
         .await
@@ -918,12 +1003,18 @@ impl McpServer {
 
         let retry_distribution = sqlx::query_as::<_, RetryDistributionRow>(
             "SELECT
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 1)::BIGINT AS inflight_attempt_1,
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 2)::BIGINT AS inflight_attempt_2,
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts >= 3)::BIGINT AS inflight_attempt_3_plus,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 1)::BIGINT AS failed_attempt_1,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 2)::BIGINT AS failed_attempt_2,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= 3)::BIGINT AS failed_attempt_3_plus
+                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 1)::BIGINT \
+             AS inflight_attempt_1,
+                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 2)::BIGINT \
+             AS inflight_attempt_2,
+                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts >= 3)::BIGINT \
+             AS inflight_attempt_3_plus,
+                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 1)::BIGINT AS \
+             failed_attempt_1,
+                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 2)::BIGINT AS \
+             failed_attempt_2,
+                COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= 3)::BIGINT AS \
+             failed_attempt_3_plus
              FROM refresh_jobs",
         )
         .fetch_one(&self.state.db)
@@ -1024,7 +1115,9 @@ impl McpServer {
         &self,
         request: IndexRefreshRequest,
     ) -> Result<Json<IndexRefreshResponse>, String> {
-        let scope = request.scope.unwrap_or(IndexRefreshScope::Crate);
+        let scope = request
+            .scope
+            .unwrap_or(IndexRefreshScope::Crate);
         let started_at_epoch_ms = now_epoch_millis();
         let job_id = format!("job-{started_at_epoch_ms}");
 
@@ -1036,7 +1129,12 @@ impl McpServer {
                 )?;
 
                 match self
-                    .sync_single_crate(&crate_name, request.include_dependencies.unwrap_or(true))
+                    .sync_single_crate(
+                        &crate_name,
+                        request
+                            .include_dependencies
+                            .unwrap_or(true),
+                    )
                     .await
                 {
                     Ok(outcome) => Ok(Json(IndexRefreshResponse {
@@ -1110,20 +1208,54 @@ impl McpServer {
                     provenance: sync_response.provenance,
                 }))
             }
-            IndexRefreshScope::Security
-            | IndexRefreshScope::Docs
-            | IndexRefreshScope::LocalCache => Ok(Json(IndexRefreshResponse {
-                job_id,
-                scope,
-                accepted: false,
-                status: "not_implemented".to_string(),
-                message: "scope is planned but not yet implemented".to_string(),
-                estimated_seconds: None,
-                started_at_epoch_ms,
-                finished_at_epoch_ms: Some(now_epoch_millis()),
-                result: None,
-                provenance: "local_postgres_index".to_string(),
-            })),
+            IndexRefreshScope::Security => {
+                let page = sync_page(request.page);
+                let per_page = sync_per_page(request.per_page);
+                let offset = page.saturating_sub(1) * per_page;
+                let outcome = self
+                    .sync_osv_security(per_page, offset)
+                    .await?;
+
+                Ok(Json(IndexRefreshResponse {
+                    job_id,
+                    scope,
+                    accepted: true,
+                    status: if outcome.errors.is_empty() {
+                        "completed".to_string()
+                    } else {
+                        "completed_with_errors".to_string()
+                    },
+                    message: format!(
+                        "security sync processed {} crates and wrote {} advisory matches",
+                        outcome.crates_processed, outcome.advisories_written
+                    ),
+                    estimated_seconds: Some(10),
+                    started_at_epoch_ms,
+                    finished_at_epoch_ms: Some(now_epoch_millis()),
+                    result: Some(IndexRefreshResult {
+                        synced_crates: outcome.crates_processed,
+                        synced_versions: outcome.advisories_written,
+                        synced_dependencies: 0,
+                        selected_versions: outcome.touched_crates,
+                        errors: outcome.errors,
+                    }),
+                    provenance: "osv.dev + local_postgres_index".to_string(),
+                }))
+            }
+            IndexRefreshScope::Docs | IndexRefreshScope::LocalCache => {
+                Ok(Json(IndexRefreshResponse {
+                    job_id,
+                    scope,
+                    accepted: false,
+                    status: "not_implemented".to_string(),
+                    message: "scope is planned but not yet implemented".to_string(),
+                    estimated_seconds: None,
+                    started_at_epoch_ms,
+                    finished_at_epoch_ms: Some(now_epoch_millis()),
+                    result: None,
+                    provenance: "local_postgres_index".to_string(),
+                }))
+            }
         }
     }
 }
