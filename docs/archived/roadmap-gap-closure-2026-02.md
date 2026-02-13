@@ -107,11 +107,13 @@ Status: Completed (2026-02-13)
 
 ### M8: Agentic development tools (P3)
 
+Status: Completed (2026-02-13)
+
 #### Work items
 
-- `crate.api`: filtered view of public symbols from lib.rs re-exports with full signatures.
-- `crate.compare`: structured side-by-side crate comparison (downloads, freshness, MSRV, deps, license, features).
-- `dependency.audit`: Cargo.toml analysis for yanked deps, advisories, outdated versions, MSRV conflicts.
+- `crate.api`: filtered view of public symbols from lib.rs re-exports with full signatures. **Done** (initial release via indexed public symbols + kind/path filters).
+- `crate.compare`: structured side-by-side crate comparison (downloads, freshness, MSRV, deps, license, features). **Done**.
+- `dependency.audit`: Cargo.toml analysis for yanked deps, advisories, outdated versions, MSRV conflicts. **Done**.
 
 #### Acceptance criteria
 

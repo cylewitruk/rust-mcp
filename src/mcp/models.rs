@@ -591,6 +591,28 @@ pub struct CrateHotspotsRequest {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateApiRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub path_glob: Option<String>,
+    pub kinds: Option<Vec<String>>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateCompareRequest {
+    pub left_crate: String,
+    pub right_crate: String,
+    pub left_version: Option<String>,
+    pub right_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DependencyAuditRequest {
+    pub cargo_toml_path: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LicensePolicyResult {
@@ -706,6 +728,131 @@ pub struct CrateHotspotHit {
     pub pattern: String,
     pub severity: HotspotSeverity,
     pub snippet: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateApiResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub path_glob: Option<String>,
+    pub kinds: Vec<String>,
+    pub limit: u32,
+    pub count: usize,
+    pub symbols: Vec<CrateApiSymbol>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateApiSymbol {
+    pub name: String,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub visibility: Option<String>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateCompareResponse {
+    pub left: CrateCompareSide,
+    pub right: CrateCompareSide,
+    pub recommendation: Option<String>,
+    pub recommendation_reasons: Vec<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateCompareSide {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub selected_rust_version: Option<String>,
+    pub selected_published_at: Option<String>,
+    pub license_expression: Option<String>,
+    pub total_downloads: i64,
+    pub dependent_crate_count: i64,
+    pub dependency_count: i64,
+    pub feature_count: i64,
+    pub advisory_count: i64,
+    pub yanked: bool,
+    pub maintenance_score: f64,
+}
+
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyAuditIssueCategory {
+    Yanked,
+    Advisory,
+    Outdated,
+    MsrvConflict,
+    Unresolved,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyAuditSeverity {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyAuditResponse {
+    pub cargo_toml_path: String,
+    pub package_name: Option<String>,
+    pub package_rust_version: Option<String>,
+    pub dependency_count: usize,
+    pub issue_count: usize,
+    pub dependencies: Vec<DependencyAuditDependency>,
+    pub issues: Vec<DependencyAuditIssue>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyAuditDependency {
+    pub dependency_name: String,
+    pub requirement: Option<String>,
+    pub selected_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub selected_rust_version: Option<String>,
+    pub yanked: bool,
+    pub advisory_count: i64,
+    pub status_markers: Vec<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyAuditIssue {
+    pub dependency_name: String,
+    pub category: DependencyAuditIssueCategory,
+    pub severity: DependencyAuditSeverity,
+    pub message: String,
+    pub selected_version: Option<String>,
+    pub latest_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1026,10 +1173,55 @@ pub(super) struct HotspotSourceFileRow {
     pub(super) content: String,
 }
 
+#[derive(Debug, FromRow)]
+pub(super) struct ApiSurfaceRow {
+    pub(super) name: String,
+    pub(super) kind: String,
+    pub(super) signature: Option<String>,
+    pub(super) visibility: Option<String>,
+    pub(super) source_path: String,
+    pub(super) start_line: i32,
+    pub(super) end_line: i32,
+    pub(super) index_source: String,
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub(super) struct CrateVersionLicenseRow {
     pub(super) version: String,
     pub(super) license_expression: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateCompareVersionRow {
+    pub(super) id: i64,
+    pub(super) version: String,
+    pub(super) rust_version: Option<String>,
+    pub(super) published_at: Option<String>,
+    pub(super) yanked: bool,
+    pub(super) total_downloads: i64,
+    pub(super) license_expression: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateCompareCountsRow {
+    pub(super) dependency_count: i64,
+    pub(super) feature_count: i64,
+    pub(super) advisory_count: i64,
+    pub(super) dependent_count: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct DependencyAuditCrateRow {
+    pub(super) id: i64,
+    pub(super) name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct DependencyAuditVersionRow {
+    pub(super) id: i64,
+    pub(super) version: String,
+    pub(super) rust_version: Option<String>,
+    pub(super) yanked: bool,
 }
 
 #[derive(Debug, FromRow)]

@@ -8,7 +8,7 @@ This scaffold gives you:
 - PostgreSQL with persistent Docker volume.
 - Initial schema/migration for crate/version/source/symbol/docs indexing.
 - Rust server skeleton with structured config, logging, health/readiness endpoints, and graceful shutdown.
-- `rmcp` streamable HTTP transport mounted at `/mcp` with `ping`, `index.sync_crates`, `index.status`, `index.refresh`, `crate.search`, `crate.intel`, `crate.versions`, `crate.graph`, `source.search`, `source.read`, `symbol.search`, and `docs.search` tools.
+- `rmcp` streamable HTTP transport mounted at `/mcp` with `ping`, `index.sync_crates`, `index.status`, `index.refresh`, `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.compare`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `dependency.audit`, `source.search`, `source.read`, `symbol.search`, and `docs.search` tools.
 
 ## Quick start
 
@@ -54,8 +54,16 @@ curl -X POST http://127.0.0.1:43173/mcp \
 - `index.refresh`: refreshes index scope (`crate`, `all`, `security`, `local_cache`, and `docs` implemented).
 - `crate.search`: searches local Postgres index and performs bounded interaction freshness checks on top-ranked hits; reports `freshness_checks_performed` and `refresh_jobs_enqueued`.
 - `crate.intel`: returns selected/latest versions, readme, dependencies, dependents, and advisory matches from local index; performs read-through freshness checks and can trigger inline minimal refresh + queued deep refresh.
+- `crate.features`: returns indexed feature flags, default features, and transitive feature enables for a crate version.
+- `crate.api_diff`: compares indexed public symbols between two versions and reports added/removed/changed API entries with breaking-change hints.
+- `crate.api`: returns indexed public API symbols for a selected crate version with optional kind/path filters.
+- `crate.compare`: compares two crates across adoption/risk/maintenance signals and returns recommendation reasons.
+- `crate.license_check`: evaluates indexed license expression against optional allow/deny policy lists.
+- `crate.alternatives`: returns ranked alternative crates using taxonomy overlap, adoption, and risk signals.
 - `crate.versions`: returns normalized version timeline with yanked/security/adoption markers and interaction freshness metadata.
 - `crate.graph`: returns depth-bounded dependency/dependent graph nodes and edges for `dependencies`, `dependents`, or `both` directions.
+- `crate.hotspots`: detects unsafe/concurrency hotspots from indexed source content for a selected version.
+- `dependency.audit`: audits a Cargo.toml dependency set for yanked versions, advisories, outdated constraints, unresolved deps, and MSRV conflicts.
 - `source.search`: searches indexed source files by `text` or `regex` mode, with optional `crate_name`, `version`, and `path_glob` filters.
 - `source.read`: returns a line-bounded slice of an indexed source file by `crate_name` + `path` (optionally pinning `version`).
 - `symbol.search`: searches indexed symbols by symbol name with optional `crate_name`, `version`, and `kind` filters; supports opaque cursor pagination (`cursor`/`next_cursor`) with `page`+`limit` fallback, `include_all_versions` (default `false`, latest-version only), and `collapse_by_canonical` (default `false`) to deduplicate by canonical symbol identity across versions.
@@ -66,125 +74,149 @@ Quality contract fields now included in `crate.search`, `crate.intel`, `crate.ve
 - `confidence` (`high|medium|low`)
 - `next_best_calls` (ordered suggested follow-up tools)
 
-## Tool examples
+## Tool quick examples (collapsible)
 
-`crate.versions` request (MCP `tools/call` payload `arguments`):
+All examples below are MCP `tools/call` `arguments` payloads.
 
-```json
-{
-  "crate_name": "serde",
-  "limit": 20
-}
-```
+<details>
+<summary><strong>Root + index tools</strong></summary>
 
-`crate.versions` response shape (abbreviated):
+- `ping`
 
 ```json
-{
-  "crate_name": "serde",
-  "count": 20,
-  "versions": [
-    {
-      "version": "1.0.228",
-      "published_at": "2026-01-12T10:20:30+00:00",
-      "yanked": false,
-      "downloads": 12345678,
-      "advisory_count": 0,
-      "release_age_days": 32,
-      "is_latest": true,
-      "adoption_signal": "high",
-      "markers": ["latest"]
-    }
-  ],
-  "freshness_check_performed": true,
-  "freshness_check_result": "unchanged",
-  "refresh_enqueued": false,
-  "refresh_job_id": null,
-  "provenance": "local_postgres_index"
-}
+{ "message": "hello" }
 ```
 
-`crate.graph` request (MCP `tools/call` payload `arguments`):
+- `index.sync_crates`
 
 ```json
-{
-  "crate_name": "serde",
-  "direction": "dependencies",
-  "depth": 2
-}
+{ "query": "serde", "page": 1, "per_page": 10, "include_dependencies": true }
 ```
 
-`index.refresh` local cache request (MCP `tools/call` payload `arguments`):
+- `index.status`
 
 ```json
-{
-  "scope": "local_cache",
-  "crate_name": "serde",
-  "query": "src/",
-  "page": 1,
-  "per_page": 25
-}
+{}
 ```
 
-`docs.search` request (MCP `tools/call` payload `arguments`):
+- `index.refresh`
 
 ```json
-{
-  "query": "serialize",
-  "crate_name": "serde",
-  "limit": 10
-}
+{ "scope": "local_cache", "crate_name": "serde", "page": 1, "per_page": 25 }
 ```
 
-`symbol.search` request (MCP `tools/call` payload `arguments`):
+</details>
+
+<details>
+<summary><strong>Crate intelligence tools (`crate.*`)</strong></summary>
+
+- `crate.search`
 
 ```json
-{
-  "query": "Serializer",
-  "crate_name": "serde",
-  "include_all_versions": false,
-  "collapse_by_canonical": true,
-  "cursor": "<next_cursor_from_previous_response>",
-  "page": 1,
-  "limit": 25
-}
+{ "query": "json", "category": "encoding", "limit": 10 }
 ```
 
-`symbol.search` response shape (abbreviated):
+- `crate.intel`
 
 ```json
-{
-  "query": "Serializer",
-  "crate_name": "serde",
-  "include_all_versions": false,
-  "collapse_by_canonical": true,
-  "cursor": null,
-  "next_cursor": "eyJ2IjoxLCJvZmZzZXQiOjI1LCJsaW1pdCI6MjUsInF1ZXJ5IjoiU2VyaWFsaXplciIsImNyYXRlX25hbWUiOiJzZXJkZSIsInZlcnNpb24iOm51bGwsImtpbmQiOm51bGwsImluY2x1ZGVfYWxsX3ZlcnNpb25zIjpmYWxzZX0",
-  "page": 1,
-  "limit": 25,
-  "total_count": 73,
-  "has_more": true,
-  "count": 25,
-  "hits": [
-    {
-      "crate_name": "serde",
-      "version": "1.0.228",
-      "source_path": "src/ser/mod.rs",
-      "name": "Serializer",
-      "kind": "trait",
-      "start_line": 116,
-      "end_line": 116
-    }
-  ]
-}
+{ "crate_name": "serde", "version": "1.0.228" }
 ```
 
-`symbol.search` cursor contract:
+- `crate.features`
 
-- `cursor` must be treated as opaque; clients should only pass through `next_cursor` values from prior responses.
-- If `cursor` is provided, filter fields (`query`, `crate_name`, `version`, `kind`, `include_all_versions`, `collapse_by_canonical`) must match the original request.
-- If `cursor` is provided and `limit` is also provided, it must match the original page size.
-- Invalid, stale, or mismatched cursor tokens return a request error.
+```json
+{ "crate_name": "tokio", "version": "1.48.0" }
+```
+
+- `crate.api_diff`
+
+```json
+{ "crate_name": "serde", "from_version": "1.0.220", "to_version": "1.0.228", "limit": 200 }
+```
+
+- `crate.api`
+
+```json
+{ "crate_name": "serde", "kinds": ["trait", "struct"], "path_glob": "src/**", "limit": 200 }
+```
+
+- `crate.compare`
+
+```json
+{ "left_crate": "anyhow", "right_crate": "thiserror" }
+```
+
+- `crate.license_check`
+
+```json
+{ "crate_name": "axum", "allow_licenses": ["MIT", "Apache-2.0"], "deny_licenses": ["GPL-3.0"] }
+```
+
+- `crate.alternatives`
+
+```json
+{ "crate_name": "reqwest", "limit": 5, "allow_licenses": ["MIT", "Apache-2.0"] }
+```
+
+- `crate.versions`
+
+```json
+{ "crate_name": "serde", "limit": 20 }
+```
+
+- `crate.graph`
+
+```json
+{ "crate_name": "serde", "direction": "dependencies", "depth": 2 }
+```
+
+- `crate.hotspots`
+
+```json
+{ "crate_name": "tokio", "include_unsafe": true, "include_concurrency": true, "limit": 100 }
+```
+
+</details>
+
+<details>
+<summary><strong>Dependency + source + symbol + docs tools</strong></summary>
+
+- `dependency.audit`
+
+```json
+{ "cargo_toml_path": "./Cargo.toml" }
+```
+
+- `source.search`
+
+```json
+{ "query": "unsafe", "crate_name": "tokio", "mode": "text", "limit": 20 }
+```
+
+- `source.read`
+
+```json
+{ "crate_name": "serde", "path": "src/ser/mod.rs", "start_line": 100, "end_line": 140 }
+```
+
+- `symbol.search`
+
+```json
+{ "query": "Serializer", "crate_name": "serde", "collapse_by_canonical": true, "limit": 25 }
+```
+
+- `docs.search`
+
+```json
+{ "query": "serialize", "crate_name": "serde", "path_prefix": "serde/", "limit": 10 }
+```
+
+`symbol.search` cursor notes:
+
+- treat `cursor` as opaque and pass through `next_cursor`
+- keep filters and page size consistent across paged calls
+
+</details>
 
 Query memoization:
 

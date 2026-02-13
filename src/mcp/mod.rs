@@ -1,5 +1,8 @@
 mod alternatives;
 mod api_diff;
+mod api_surface;
+mod compare;
+mod dependency_audit;
 mod docs_intel;
 mod features;
 mod graph;

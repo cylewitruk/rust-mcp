@@ -193,6 +193,30 @@ Phased approach:
 
 Design principle: fewer, denser calls. Prefer one "intelligence" tool over many narrow calls.
 
+### Tool: `ping`
+
+Input:
+
+- optional `message`
+
+Output:
+
+- connectivity/readiness echo suitable for MCP client handshake checks
+
+### Tool: `index.sync_crates`
+
+Input:
+
+- optional `query`
+- optional `page`
+- optional `per_page`
+- optional `include_dependencies`
+
+Output:
+
+- crates.io synchronization summary for crates, versions, and dependency edges
+- selected versions and per-source freshness metadata
+
 ### Tool: `crate.search`
 
 Input:
@@ -226,6 +250,91 @@ Output (single dense payload):
 - if TTL expired, performs lightweight freshness probe inline before serving
 - if changed, performs minimum inline update for correctness and queues deep refresh
 
+### Tool: `crate.features`
+
+Input:
+
+- `crate_name`
+- optional `version`
+
+Output:
+
+- indexed feature flags
+- default feature set
+- transitive feature enables
+
+### Tool: `crate.api_diff`
+
+Input:
+
+- `crate_name`
+- `from_version`
+- `to_version`
+- optional `limit`
+
+Output:
+
+- API diff summary (`added`/`removed`/`changed`)
+- per-symbol change records with breaking-change hints
+
+### Tool: `crate.api`
+
+Input:
+
+- `crate_name`
+- optional `version`
+- optional `path_glob`
+- optional `kinds`
+- optional `limit`
+
+Output:
+
+- indexed public API symbols with signatures and source locations
+
+### Tool: `crate.compare`
+
+Input:
+
+- `left_crate`
+- `right_crate`
+- optional `left_version`
+- optional `right_version`
+
+Output:
+
+- side-by-side comparison of adoption/risk/maintenance signals
+- recommendation with reason vector
+
+### Tool: `crate.license_check`
+
+Input:
+
+- `crate_name`
+- optional `version`
+- optional `allow_licenses`
+- optional `deny_licenses`
+
+Output:
+
+- selected version license expression
+- matched SPDX-like identifiers
+- policy decision (`allowed|denied|unknown`) and reasons
+
+### Tool: `crate.alternatives`
+
+Input:
+
+- `crate_name`
+- optional `version`
+- optional `limit`
+- optional `allow_licenses`
+- optional `deny_licenses`
+
+Output:
+
+- ranked alternatives with scores and rationale vectors
+- optional policy filtering outcomes
+
 ### Tool: `crate.versions`
 
 Input:
@@ -248,6 +357,32 @@ Input:
 Output:
 
 - graph edges + node metadata + cycle-safe traversal notes
+
+### Tool: `crate.hotspots`
+
+Input:
+
+- `crate_name`
+- optional `version`
+- optional `path_glob`
+- optional `include_unsafe`
+- optional `include_concurrency`
+- optional `limit`
+
+Output:
+
+- unsafe/concurrency hotspot hits with path, line, severity, and snippet
+
+### Tool: `dependency.audit`
+
+Input:
+
+- `cargo_toml_path`
+
+Output:
+
+- manifest dependency audit results
+- issue list covering yanked versions, advisories, outdated selections, unresolved deps, and MSRV conflicts
 
 ### Tool: `source.search`
 
