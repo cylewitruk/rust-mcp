@@ -8,7 +8,7 @@ This server provides:
 - PostgreSQL with persistent Docker volume.
 - Initial schema/migration for crate/version/source/symbol/docs indexing.
 - Rust server with structured config, logging, health/readiness endpoints, and graceful shutdown.
-- `rmcp` streamable HTTP transport mounted at `/mcp` with `ping`, `index.sync_crates`, `index.status`, `index.refresh`, `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.compare`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `dependency.audit`, `source.search`, `source.read`, `symbol.search`, and `docs.search` tools.
+- `rmcp` streamable HTTP transport mounted at `/mcp` with `ping`, `index.sync_crates`, `index.status`, `index.refresh`, `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.type_info`, `crate.trait_impls`, `crate.usage_patterns`, `crate.compare`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `dependency.audit`, `dependency.resolve`, `source.search`, `source.read`, `symbol.search`, and `docs.search` tools.
 
 ## Quick start
 
@@ -57,6 +57,9 @@ curl -X POST http://127.0.0.1:43173/mcp \
 - `crate.features`: returns indexed feature flags, default features, and transitive feature enables for a crate version.
 - `crate.api_diff`: compares indexed public symbols between two versions and reports added/removed/changed API entries with breaking-change hints.
 - `crate.api`: returns indexed public API symbols for a selected crate version with optional kind/path filters.
+- `crate.type_info`: returns indexed type definition metadata (fields/variants/generics) plus associated inherent methods and trait impls.
+- `crate.trait_impls`: returns trait↔type implementation relationships with optional trait or type filters.
+- `crate.usage_patterns`: returns real snippets from indexed dependent crates that use a requested symbol.
 - `crate.compare`: compares two crates across adoption/risk/maintenance signals and returns recommendation reasons.
 - `crate.license_check`: evaluates indexed license expression against optional allow/deny policy lists.
 - `crate.alternatives`: returns ranked alternative crates using taxonomy overlap, adoption, and risk signals.
@@ -64,6 +67,7 @@ curl -X POST http://127.0.0.1:43173/mcp \
 - `crate.graph`: returns depth-bounded dependency/dependent graph nodes and edges for `dependencies`, `dependents`, or `both` directions.
 - `crate.hotspots`: detects unsafe/concurrency hotspots from indexed source content for a selected version.
 - `dependency.audit`: audits a Cargo.toml dependency set for yanked versions, advisories, outdated constraints, unresolved deps, and MSRV conflicts.
+- `dependency.resolve`: performs a best-effort compatibility simulation for proposed dependencies and reports conflicts.
 - `source.search`: searches indexed source files by `text` or `regex` mode, with optional `crate_name`, `version`, and `path_glob` filters.
 - `source.read`: returns a line-bounded slice of an indexed source file by `crate_name` + `path` (optionally pinning `version`).
 - `symbol.search`: searches indexed symbols by symbol name with optional `crate_name`, `version`, and `kind` filters; supports opaque cursor pagination (`cursor`/`next_cursor`) with `page`+`limit` fallback, `include_all_versions` (default `false`, latest-version only), and `collapse_by_canonical` (default `false`) to deduplicate by canonical symbol identity across versions.
@@ -155,6 +159,18 @@ All examples below are MCP `tools/call` `arguments` payloads.
 { "crate_name": "serde", "kinds": ["trait", "struct"], "path_glob": "src/**", "limit": 200 }
 ```
 
+- `crate.type_info`
+
+```json
+{ "crate_name": "axum", "type_name": "Router", "include_methods": true, "include_trait_impls": true }
+```
+
+- `crate.trait_impls`
+
+```json
+{ "crate_name": "serde", "trait_name": "Serialize", "limit": 100 }
+```
+
 - `crate.compare`
 
 ```json
@@ -199,6 +215,18 @@ All examples below are MCP `tools/call` `arguments` payloads.
 { "cargo_toml_path": "./Cargo.toml" }
 ```
 
+- `dependency.resolve`
+
+```json
+{ "dependencies": [{ "name": "axum", "version_req": "^0.8" }, { "name": "tower", "version_req": "^0.5" }], "check_features": true }
+```
+
+- `crate.usage_patterns`
+
+```json
+{ "crate_name": "serde", "symbol_name": "Serialize", "limit": 10 }
+```
+
 - `source.search`
 
 ```json
@@ -239,7 +267,7 @@ Query memoization:
 - Missing requested version flow: targeted inline backfill is attempted, then deep refresh is queued.
 - Background worker: processes due jobs from `refresh_jobs`, retries failures with jittered bounded backoff, and marks terminal failures after max attempts.
 - Security refresh: `index.refresh` with `scope=security` ingests OSV advisory data into `advisory_matches` for indexed crates, and also ingests native RustSec advisory-db metadata when `RUSTSEC_DB_DIR` points to a local advisory-db checkout (`crates/<crate_name>/*.md`), including withdrawn/category context and patched/unaffected ranges.
-- Local source refresh: `index.refresh` with `scope=local_cache` scans `CARGO_REGISTRY_DIR/src`, incrementally upserts text source files into `source_files`, parses Rust files via `syn` to index symbols into `symbols`, and prunes stale rows for scanned crate versions.
+- Local source refresh: `index.refresh` with `scope=local_cache` scans `CARGO_REGISTRY_DIR/src`, incrementally upserts text source files into `source_files`, parses Rust files via `syn` to index symbols into `symbols` plus type/impl metadata into `crate_types` and `crate_impls`, and prunes stale rows for scanned crate versions.
 - Docs refresh: `index.refresh` with `scope=docs` fetches docs.rs pages for indexed crate versions and stores normalized page text in `docs_pages` for `docs.search`.
 
 ## Developer commands

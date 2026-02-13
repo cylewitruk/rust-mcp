@@ -3,6 +3,7 @@ mod api_diff;
 mod api_surface;
 mod compare;
 mod dependency_audit;
+mod dependency_resolve;
 mod docs_intel;
 mod features;
 mod graph;
@@ -19,7 +20,10 @@ mod security;
 mod server;
 mod source;
 mod symbol;
+mod trait_impls;
 mod transport;
+mod type_info;
+mod usage_patterns;
 mod utils;
 mod versions;
 

@@ -114,6 +114,24 @@ pub(super) fn crate_api_limit(value: Option<u32>) -> u32 {
         .clamp(1, 1_000)
 }
 
+pub(super) fn trait_impls_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(200)
+        .clamp(1, 1_000)
+}
+
+pub(super) fn dependency_resolve_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(100)
+        .clamp(1, 1_000)
+}
+
+pub(super) fn usage_patterns_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(20)
+        .clamp(1, 200)
+}
+
 pub(super) fn readme_limit(value: Option<u32>) -> usize {
     value
         .unwrap_or(25_000)

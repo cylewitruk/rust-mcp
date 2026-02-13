@@ -1878,6 +1878,7 @@ dependencies = [
  "clap",
  "metrics",
  "metrics-exporter-prometheus",
+ "quote",
  "reqwest",
  "rmcp",
  "semver",

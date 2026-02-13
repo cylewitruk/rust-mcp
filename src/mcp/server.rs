@@ -14,11 +14,14 @@ use super::models::{
     CrateFeaturesRequest, CrateFeaturesResponse, CrateGraphRequest, CrateGraphResponse,
     CrateHotspotsRequest, CrateHotspotsResponse, CrateIntelRequest, CrateIntelResponse,
     CrateLicenseCheckRequest, CrateLicenseCheckResponse, CrateSearchRequest, CrateSearchResponse,
-    CrateVersionsRequest, CrateVersionsResponse, DependencyAuditRequest, DependencyAuditResponse,
-    DocsSearchRequest, DocsSearchResponse, IndexRefreshRequest, IndexRefreshResponse,
-    IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest, IndexSyncCratesResponse,
-    PingRequest, SourceReadRequest, SourceReadResponse, SourceSearchRequest, SourceSearchResponse,
-    SymbolSearchRequest, SymbolSearchResponse,
+    CrateTraitImplsRequest, CrateTraitImplsResponse, CrateTypeInfoRequest, CrateTypeInfoResponse,
+    CrateUsagePatternsRequest, CrateUsagePatternsResponse, CrateVersionsRequest,
+    CrateVersionsResponse, DependencyAuditRequest, DependencyAuditResponse,
+    DependencyResolveRequest, DependencyResolveResponse, DocsSearchRequest, DocsSearchResponse,
+    IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
+    IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest, SourceReadRequest,
+    SourceReadResponse, SourceSearchRequest, SourceSearchResponse, SymbolSearchRequest,
+    SymbolSearchResponse,
 };
 use crate::state::AppState;
 
@@ -188,6 +191,32 @@ impl McpServer {
     }
 
     #[tool(
+        name = "crate.type_info",
+        description = "Return indexed type definition metadata and associated impl details for a \
+                       crate type."
+    )]
+    async fn crate_type_info(
+        &self,
+        Parameters(request): Parameters<CrateTypeInfoRequest>,
+    ) -> Result<Json<CrateTypeInfoResponse>, String> {
+        self.instrument_tool("crate.type_info", self.handle_crate_type_info(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.trait_impls",
+        description = "Return indexed trait/type implementation relationships with optional trait \
+                       or type filtering."
+    )]
+    async fn crate_trait_impls(
+        &self,
+        Parameters(request): Parameters<CrateTraitImplsRequest>,
+    ) -> Result<Json<CrateTraitImplsResponse>, String> {
+        self.instrument_tool("crate.trait_impls", self.handle_crate_trait_impls(request))
+            .await
+    }
+
+    #[tool(
         name = "crate.compare",
         description = "Compare two crates across adoption, risk, and maintenance signals and \
                        return a recommendation."
@@ -279,6 +308,19 @@ impl McpServer {
     }
 
     #[tool(
+        name = "dependency.resolve",
+        description = "Run a best-effort compatibility simulation for proposed dependencies and \
+                       report resolvable versions or conflicts."
+    )]
+    async fn dependency_resolve(
+        &self,
+        Parameters(request): Parameters<DependencyResolveRequest>,
+    ) -> Result<Json<DependencyResolveResponse>, String> {
+        self.instrument_tool("dependency.resolve", self.handle_dependency_resolve(request))
+            .await
+    }
+
+    #[tool(
         name = "source.search",
         description = "Search indexed source files by text/regex with optional crate/version/path \
                        filters."
@@ -326,6 +368,19 @@ impl McpServer {
         Parameters(request): Parameters<DocsSearchRequest>,
     ) -> Result<Json<DocsSearchResponse>, String> {
         self.instrument_tool("docs.search", self.handle_docs_search(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.usage_patterns",
+        description = "Return real source snippets from indexed dependent crates that use a \
+                       target symbol."
+    )]
+    async fn crate_usage_patterns(
+        &self,
+        Parameters(request): Parameters<CrateUsagePatternsRequest>,
+    ) -> Result<Json<CrateUsagePatternsResponse>, String> {
+        self.instrument_tool("crate.usage_patterns", self.handle_crate_usage_patterns(request))
             .await
     }
 }

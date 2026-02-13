@@ -615,6 +615,24 @@ pub struct CrateApiRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateTypeInfoRequest {
+    pub crate_name: String,
+    pub type_name: String,
+    pub version: Option<String>,
+    pub include_methods: Option<bool>,
+    pub include_trait_impls: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateTraitImplsRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub trait_name: Option<String>,
+    pub type_name: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CrateCompareRequest {
     pub left_crate: String,
     pub right_crate: String,
@@ -625,6 +643,29 @@ pub struct CrateCompareRequest {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DependencyAuditRequest {
     pub cargo_toml_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DependencyResolveRequest {
+    pub dependencies: Option<Vec<DependencyResolveInputDependency>>,
+    pub cargo_toml_path: Option<String>,
+    pub additions: Option<Vec<DependencyResolveInputDependency>>,
+    pub check_features: Option<bool>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+pub struct DependencyResolveInputDependency {
+    pub name: String,
+    pub version_req: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateUsagePatternsRequest {
+    pub crate_name: String,
+    pub symbol_name: String,
+    pub version: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
@@ -778,6 +819,116 @@ pub struct CrateApiSymbol {
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTypeInfoResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub type_name: String,
+    pub include_methods: bool,
+    pub include_trait_impls: bool,
+    pub type_definition: Option<CrateTypeDefinition>,
+    pub inherent_methods: Vec<CrateImplMethod>,
+    pub trait_impls: Vec<CrateTraitImpl>,
+    pub conversions: Vec<CrateTypeConversion>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTypeDefinition {
+    pub type_name: String,
+    pub kind: String,
+    pub visibility: Option<String>,
+    pub generic_params: Vec<String>,
+    pub fields: Vec<CrateTypeField>,
+    pub variants: Vec<CrateTypeVariant>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTypeField {
+    pub name: Option<String>,
+    pub field_type: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTypeVariant {
+    pub name: String,
+    pub fields: Vec<CrateTypeField>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateImplMethod {
+    pub name: String,
+    pub signature: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTraitImpl {
+    pub trait_name: Option<String>,
+    pub trait_name_display: Option<String>,
+    pub impl_kind: String,
+    pub methods: Vec<CrateImplMethod>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTypeConversion {
+    pub trait_name: String,
+    pub source_type: Option<String>,
+    pub target_type: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTraitImplsResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub trait_name: Option<String>,
+    pub type_name: Option<String>,
+    pub limit: u32,
+    pub count: usize,
+    pub impls: Vec<CrateTraitImplRelation>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateTraitImplRelation {
+    pub type_name: String,
+    pub type_name_display: Option<String>,
+    pub trait_name: Option<String>,
+    pub trait_name_display: Option<String>,
+    pub impl_kind: String,
+    pub methods: Vec<CrateImplMethod>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+    pub blanket_impl: bool,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateCompareResponse {
     pub left: CrateCompareSide,
     pub right: CrateCompareSide,
@@ -867,6 +1018,79 @@ pub struct DependencyAuditIssue {
     pub message: String,
     pub selected_version: Option<String>,
     pub latest_version: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyResolveResponse {
+    pub input_dependencies: Vec<DependencyResolveResolvedDependency>,
+    pub resolvable: bool,
+    pub resolved_versions: Vec<DependencyResolveResolvedVersion>,
+    pub conflicts: Vec<DependencyResolveConflict>,
+    pub check_features: bool,
+    pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyResolveResolvedDependency {
+    pub name: String,
+    pub version_req: Option<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyResolveResolvedVersion {
+    pub name: String,
+    pub version: String,
+    pub yanked: bool,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyResolveConflict {
+    pub dependency_name: String,
+    pub requirement: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct DependencyResolveFeatureSummary {
+    pub dependency_edges_evaluated: usize,
+    pub unique_optional_dependencies: usize,
+    pub unique_feature_flags_referenced: usize,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateUsagePatternsResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub symbol_name: String,
+    pub limit: u32,
+    pub count: usize,
+    pub patterns: Vec<CrateUsagePattern>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateUsagePattern {
+    pub dependent_crate: String,
+    pub dependent_version: String,
+    pub dependent_downloads: i64,
+    pub path: String,
+    pub line_start: u32,
+    pub line_end: u32,
+    pub snippet: String,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1204,6 +1428,34 @@ pub(super) struct ApiSurfaceRow {
 }
 
 #[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateTypeInfoRow {
+    pub(super) type_name: String,
+    pub(super) kind: String,
+    pub(super) visibility: Option<String>,
+    pub(super) generic_params: Value,
+    pub(super) fields: Value,
+    pub(super) variants: Value,
+    pub(super) source_path: String,
+    pub(super) start_line: i32,
+    pub(super) end_line: i32,
+    pub(super) index_source: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateImplLookupRow {
+    pub(super) type_name: String,
+    pub(super) type_name_display: Option<String>,
+    pub(super) trait_name: Option<String>,
+    pub(super) trait_name_display: Option<String>,
+    pub(super) impl_kind: String,
+    pub(super) methods: Value,
+    pub(super) source_path: String,
+    pub(super) start_line: i32,
+    pub(super) end_line: i32,
+    pub(super) index_source: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
 pub(super) struct CrateVersionLicenseRow {
     pub(super) version: String,
     pub(super) license_expression: Option<String>,
@@ -1240,6 +1492,36 @@ pub(super) struct DependencyAuditVersionRow {
     pub(super) version: String,
     pub(super) rust_version: Option<String>,
     pub(super) yanked: bool,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct DependencyResolveCrateRow {
+    pub(super) id: i64,
+    pub(super) name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct DependencyResolveVersionRow {
+    pub(super) id: i64,
+    pub(super) version: String,
+    pub(super) yanked: bool,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct DependencyResolveEdgeRow {
+    pub(super) to_crate_name: String,
+    pub(super) requirement: String,
+    pub(super) optional: bool,
+    pub(super) features: Value,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateUsageSourceRow {
+    pub(super) dependent_crate: String,
+    pub(super) dependent_version: String,
+    pub(super) dependent_downloads: i64,
+    pub(super) path: String,
+    pub(super) content: String,
 }
 
 #[derive(Debug, FromRow)]

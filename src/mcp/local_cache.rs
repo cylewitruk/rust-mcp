@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use sqlx::FromRow;
-use syn::{Item, Visibility};
+use syn::punctuated::Punctuated;
+use syn::{Attribute, Item, Type, Visibility};
 
 use super::server::McpServer;
 use super::utils::{normalize_optional, normalize_required, sync_page, sync_per_page};
@@ -34,6 +36,37 @@ struct ExtractedSymbol {
     visibility: Option<String>,
     start_line: i32,
     end_line: i32,
+}
+
+#[derive(Debug)]
+struct ExtractedType {
+    type_name: String,
+    kind: String,
+    visibility: Option<String>,
+    generic_params: Value,
+    fields: Value,
+    variants: Value,
+    start_line: i32,
+    end_line: i32,
+}
+
+#[derive(Debug)]
+struct ExtractedImpl {
+    type_name: String,
+    type_name_display: Option<String>,
+    trait_name: Option<String>,
+    trait_name_display: Option<String>,
+    impl_kind: String,
+    methods: Value,
+    start_line: i32,
+    end_line: i32,
+}
+
+#[derive(Debug)]
+struct RustExtraction {
+    symbols: Vec<ExtractedSymbol>,
+    types: Vec<ExtractedType>,
+    impls: Vec<ExtractedImpl>,
 }
 
 #[derive(Debug)]
@@ -180,6 +213,63 @@ fn normalize_symbol_signature(line: &str) -> Option<String> {
     }
 }
 
+fn tokens_to_string<T: quote::ToTokens>(value: &T) -> String {
+    value
+        .to_token_stream()
+        .to_string()
+}
+
+fn extract_generic_params(generics: &syn::Generics) -> Value {
+    let params = generics
+        .params
+        .iter()
+        .map(tokens_to_string)
+        .collect::<Vec<_>>();
+    json!(params)
+}
+
+fn extract_type_terminal_name(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Path(type_path) => type_path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string()),
+        Type::Reference(reference) => extract_type_terminal_name(&reference.elem),
+        Type::Paren(paren) => extract_type_terminal_name(&paren.elem),
+        Type::Group(group) => extract_type_terminal_name(&group.elem),
+        _ => None,
+    }
+}
+
+fn derive_traits(attrs: &[Attribute]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for attr in attrs {
+        if !attr.path().is_ident("derive") {
+            continue;
+        }
+
+        let parsed =
+            attr.parse_args_with(Punctuated::<syn::Path, syn::Token![,]>::parse_terminated);
+        let Ok(paths) = parsed else {
+            continue;
+        };
+
+        for path in paths {
+            let display = tokens_to_string(&path);
+            let Some(terminal) = path
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string())
+            else {
+                continue;
+            };
+            out.push((terminal, display));
+        }
+    }
+    out
+}
+
 fn line_for_symbol_name(content: &str, name: &str) -> i32 {
     for (idx, line) in content.lines().enumerate() {
         if line.contains(name) {
@@ -189,105 +279,393 @@ fn line_for_symbol_name(content: &str, name: &str) -> i32 {
     1
 }
 
-fn extract_rust_symbols(content: &str) -> Result<Vec<ExtractedSymbol>, String> {
+fn line_for_method_name(content: &str, method_name: &str) -> i32 {
+    let needle = format!("fn {method_name}");
+    line_for_symbol_name(content, &needle)
+}
+
+fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
     let file = syn::parse_file(content).map_err(|e| format!("rust parser error: {e}"))?;
     let mut symbols = Vec::new();
+    let mut types = Vec::new();
+    let mut impls = Vec::new();
 
     for item in file.items {
-        let (name, kind, signature, visibility) = match item {
-            Item::Fn(function) => (
-                function.sig.ident.to_string(),
-                "function".to_string(),
-                None,
-                match function.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Struct(structure) => (
-                structure.ident.to_string(),
-                "struct".to_string(),
-                None,
-                match structure.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Enum(enumeration) => (
-                enumeration.ident.to_string(),
-                "enum".to_string(),
-                None,
-                match enumeration.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Trait(trait_item) => (
-                trait_item.ident.to_string(),
-                "trait".to_string(),
-                None,
-                match trait_item.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Type(type_alias) => (
-                type_alias.ident.to_string(),
-                "type_alias".to_string(),
-                None,
-                match type_alias.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Const(const_item) => (
-                const_item.ident.to_string(),
-                "const".to_string(),
-                None,
-                match const_item.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Static(static_item) => (
-                static_item.ident.to_string(),
-                "static".to_string(),
-                None,
-                match static_item.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            Item::Mod(module_item) => (
-                module_item.ident.to_string(),
-                "module".to_string(),
-                None,
-                match module_item.vis {
-                    Visibility::Public(_) => Some("public".to_string()),
-                    _ => Some("private".to_string()),
-                },
-            ),
-            _ => continue,
-        };
+        match item {
+            Item::Fn(function) => {
+                let name = function.sig.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
 
-        let start_line = line_for_symbol_name(content, &name);
-        let signature = content
-            .lines()
-            .nth((start_line.saturating_sub(1)) as usize)
-            .and_then(normalize_symbol_signature)
-            .or(signature);
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "function".to_string(),
+                    signature,
+                    visibility: match function.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Struct(structure) => {
+                let type_name = structure.ident.to_string();
+                let start_line = line_for_symbol_name(content, &type_name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
 
-        symbols.push(ExtractedSymbol {
-            name,
-            kind,
-            signature,
-            visibility,
-            start_line,
-            end_line: start_line,
-        });
+                symbols.push(ExtractedSymbol {
+                    name: type_name.clone(),
+                    kind: "struct".to_string(),
+                    signature,
+                    visibility: match structure.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+
+                let fields = structure
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        json!({
+                            "name": field.ident.as_ref().map(|value| value.to_string()),
+                            "type": tokens_to_string(&field.ty),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                types.push(ExtractedType {
+                    type_name: type_name.clone(),
+                    kind: "struct".to_string(),
+                    visibility: match structure.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    generic_params: extract_generic_params(&structure.generics),
+                    fields: json!(fields),
+                    variants: json!([]),
+                    start_line,
+                    end_line: start_line,
+                });
+
+                for (trait_name, trait_name_display) in derive_traits(&structure.attrs) {
+                    impls.push(ExtractedImpl {
+                        type_name: type_name.clone(),
+                        type_name_display: Some(type_name.clone()),
+                        trait_name: Some(trait_name),
+                        trait_name_display: Some(trait_name_display),
+                        impl_kind: "derive".to_string(),
+                        methods: json!([]),
+                        start_line,
+                        end_line: start_line,
+                    });
+                }
+            }
+            Item::Enum(enumeration) => {
+                let type_name = enumeration.ident.to_string();
+                let start_line = line_for_symbol_name(content, &type_name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name: type_name.clone(),
+                    kind: "enum".to_string(),
+                    signature,
+                    visibility: match enumeration.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+
+                let variants = enumeration
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let fields = variant
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                json!({
+                                    "name": field.ident.as_ref().map(|value| value.to_string()),
+                                    "type": tokens_to_string(&field.ty),
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        json!({
+                            "name": variant.ident.to_string(),
+                            "fields": fields,
+                            "discriminant": variant.discriminant.as_ref().map(|(_, expr)| tokens_to_string(expr)),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                types.push(ExtractedType {
+                    type_name: type_name.clone(),
+                    kind: "enum".to_string(),
+                    visibility: match enumeration.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    generic_params: extract_generic_params(&enumeration.generics),
+                    fields: json!([]),
+                    variants: json!(variants),
+                    start_line,
+                    end_line: start_line,
+                });
+
+                for (trait_name, trait_name_display) in derive_traits(&enumeration.attrs) {
+                    impls.push(ExtractedImpl {
+                        type_name: type_name.clone(),
+                        type_name_display: Some(type_name.clone()),
+                        trait_name: Some(trait_name),
+                        trait_name_display: Some(trait_name_display),
+                        impl_kind: "derive".to_string(),
+                        methods: json!([]),
+                        start_line,
+                        end_line: start_line,
+                    });
+                }
+            }
+            Item::Union(union_item) => {
+                let type_name = union_item.ident.to_string();
+                let start_line = line_for_symbol_name(content, &type_name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name: type_name.clone(),
+                    kind: "union".to_string(),
+                    signature,
+                    visibility: match union_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+
+                let fields = union_item
+                    .fields
+                    .named
+                    .iter()
+                    .map(|field| {
+                        json!({
+                            "name": field.ident.as_ref().map(|value| value.to_string()),
+                            "type": tokens_to_string(&field.ty),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
+                types.push(ExtractedType {
+                    type_name: type_name.clone(),
+                    kind: "union".to_string(),
+                    visibility: match union_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    generic_params: extract_generic_params(&union_item.generics),
+                    fields: json!(fields),
+                    variants: json!([]),
+                    start_line,
+                    end_line: start_line,
+                });
+
+                for (trait_name, trait_name_display) in derive_traits(&union_item.attrs) {
+                    impls.push(ExtractedImpl {
+                        type_name: type_name.clone(),
+                        type_name_display: Some(type_name.clone()),
+                        trait_name: Some(trait_name),
+                        trait_name_display: Some(trait_name_display),
+                        impl_kind: "derive".to_string(),
+                        methods: json!([]),
+                        start_line,
+                        end_line: start_line,
+                    });
+                }
+            }
+            Item::Trait(trait_item) => {
+                let name = trait_item.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "trait".to_string(),
+                    signature,
+                    visibility: match trait_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Type(type_alias) => {
+                let name = type_alias.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "type_alias".to_string(),
+                    signature,
+                    visibility: match type_alias.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Const(const_item) => {
+                let name = const_item.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "const".to_string(),
+                    signature,
+                    visibility: match const_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Static(static_item) => {
+                let name = static_item.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "static".to_string(),
+                    signature,
+                    visibility: match static_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Mod(module_item) => {
+                let name = module_item.ident.to_string();
+                let start_line = line_for_symbol_name(content, &name);
+                let signature = content
+                    .lines()
+                    .nth((start_line.saturating_sub(1)) as usize)
+                    .and_then(normalize_symbol_signature);
+
+                symbols.push(ExtractedSymbol {
+                    name,
+                    kind: "module".to_string(),
+                    signature,
+                    visibility: match module_item.vis {
+                        Visibility::Public(_) => Some("public".to_string()),
+                        _ => Some("private".to_string()),
+                    },
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            Item::Impl(impl_item) => {
+                let Some(type_name) = extract_type_terminal_name(&impl_item.self_ty) else {
+                    continue;
+                };
+                let type_name_display = Some(tokens_to_string(&impl_item.self_ty));
+                let (trait_name, trait_name_display, impl_kind) =
+                    if let Some((_, trait_path, _)) = impl_item.trait_ {
+                        (
+                            trait_path
+                                .segments
+                                .last()
+                                .map(|segment| segment.ident.to_string()),
+                            Some(tokens_to_string(&trait_path)),
+                            "trait".to_string(),
+                        )
+                    } else {
+                        (None, None, "inherent".to_string())
+                    };
+
+                let method_entries = impl_item
+                    .items
+                    .iter()
+                    .filter_map(|impl_member| match impl_member {
+                        syn::ImplItem::Fn(method) => {
+                            let method_name = method.sig.ident.to_string();
+                            let line = line_for_method_name(content, &method_name);
+                            let signature = content
+                                .lines()
+                                .nth((line.saturating_sub(1)) as usize)
+                                .and_then(normalize_symbol_signature)
+                                .or_else(|| Some(tokens_to_string(&method.sig)));
+
+                            Some(json!({
+                                "name": method_name,
+                                "signature": signature,
+                            }))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+
+                let start_line = method_entries
+                    .iter()
+                    .filter_map(|method| {
+                        method
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(|name| line_for_method_name(content, name))
+                    })
+                    .min()
+                    .unwrap_or_else(|| line_for_symbol_name(content, &type_name));
+
+                impls.push(ExtractedImpl {
+                    type_name,
+                    type_name_display,
+                    trait_name,
+                    trait_name_display,
+                    impl_kind,
+                    methods: json!(method_entries),
+                    start_line,
+                    end_line: start_line,
+                });
+            }
+            _ => {}
+        }
     }
 
-    Ok(symbols)
+    Ok(RustExtraction { symbols, types, impls })
 }
 
 impl McpServer {
@@ -472,9 +850,11 @@ impl McpServer {
                     };
 
                     let existing_symbol_count = sqlx::query_scalar::<_, i64>(
-                        "SELECT COUNT(*)::BIGINT
-                         FROM symbols
-                         WHERE source_file_id = $1",
+                        "SELECT (
+                            (SELECT COUNT(*)::BIGINT FROM symbols WHERE source_file_id = $1)
+                            + (SELECT COUNT(*)::BIGINT FROM crate_types WHERE source_file_id = $1)
+                            + (SELECT COUNT(*)::BIGINT FROM crate_impls WHERE source_file_id = $1)
+                         )::BIGINT",
                     )
                     .bind(source_file_id)
                     .fetch_one(&self.state.db)
@@ -498,6 +878,28 @@ impl McpServer {
                                 )
                             })?;
 
+                        sqlx::query("DELETE FROM crate_types WHERE source_file_id = $1")
+                            .bind(source_file_id)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to clear crate types for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+
+                        sqlx::query("DELETE FROM crate_impls WHERE source_file_id = $1")
+                            .bind(source_file_id)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to clear crate impls for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+
                         let extracted = extract_rust_symbols(&file.content).map_err(|e| {
                             format!(
                                 "failed to parse rust symbols in {} for {}@{}: {e}",
@@ -505,7 +907,7 @@ impl McpServer {
                             )
                         })?;
 
-                        for symbol in extracted {
+                        for symbol in extracted.symbols {
                             sqlx::query(
                                 "INSERT INTO symbols (
                                     crate_version_id,
@@ -539,6 +941,84 @@ impl McpServer {
                                 )
                             })?;
                         }
+
+                        for extracted_type in extracted.types {
+                            sqlx::query(
+                                "INSERT INTO crate_types (
+                                    crate_version_id,
+                                    source_file_id,
+                                    type_name,
+                                    kind,
+                                    visibility,
+                                    generic_params,
+                                    fields,
+                                    variants,
+                                    start_line,
+                                    end_line,
+                                    index_source,
+                                    indexed_at
+                                 ) VALUES (
+                                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'syn', NOW()
+                                 )",
+                            )
+                            .bind(entry.crate_version_id)
+                            .bind(source_file_id)
+                            .bind(extracted_type.type_name)
+                            .bind(extracted_type.kind)
+                            .bind(extracted_type.visibility)
+                            .bind(extracted_type.generic_params)
+                            .bind(extracted_type.fields)
+                            .bind(extracted_type.variants)
+                            .bind(extracted_type.start_line)
+                            .bind(extracted_type.end_line)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to insert crate type for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+                        }
+
+                        for extracted_impl in extracted.impls {
+                            sqlx::query(
+                                "INSERT INTO crate_impls (
+                                    crate_version_id,
+                                    source_file_id,
+                                    type_name,
+                                    type_name_display,
+                                    trait_name,
+                                    trait_name_display,
+                                    impl_kind,
+                                    methods,
+                                    start_line,
+                                    end_line,
+                                    index_source,
+                                    indexed_at
+                                 ) VALUES (
+                                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'syn', NOW()
+                                 )",
+                            )
+                            .bind(entry.crate_version_id)
+                            .bind(source_file_id)
+                            .bind(extracted_impl.type_name)
+                            .bind(extracted_impl.type_name_display)
+                            .bind(extracted_impl.trait_name)
+                            .bind(extracted_impl.trait_name_display)
+                            .bind(extracted_impl.impl_kind)
+                            .bind(extracted_impl.methods)
+                            .bind(extracted_impl.start_line)
+                            .bind(extracted_impl.end_line)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to insert crate impl for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+                        }
                     }
                 }
 
@@ -559,6 +1039,42 @@ impl McpServer {
                 .map_err(|e| {
                     format!(
                         "failed to prune symbols for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
+                sqlx::query(
+                    "DELETE FROM crate_types
+                                         WHERE crate_version_id = $1
+                                             AND source_file_id IN (
+                                                 SELECT id FROM source_files WHERE \
+                     crate_version_id = $1
+                                             )",
+                )
+                .bind(entry.crate_version_id)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune crate types for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
+                sqlx::query(
+                    "DELETE FROM crate_impls
+                                         WHERE crate_version_id = $1
+                                             AND source_file_id IN (
+                                                 SELECT id FROM source_files WHERE \
+                     crate_version_id = $1
+                                             )",
+                )
+                .bind(entry.crate_version_id)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune crate impls for {}@{}: {e}",
                         entry.crate_name, entry.version
                     )
                 })?;
@@ -592,6 +1108,48 @@ impl McpServer {
                 .map_err(|e| {
                     format!(
                         "failed to prune stale symbols for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
+                sqlx::query(
+                    "DELETE FROM crate_types
+                                         WHERE crate_version_id = $1
+                                             AND source_file_id IN (
+                                                 SELECT id
+                                                 FROM source_files
+                                                 WHERE crate_version_id = $1
+                                                     AND NOT (path = ANY($2::TEXT[]))
+                                             )",
+                )
+                .bind(entry.crate_version_id)
+                .bind(&seen_paths)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune stale crate types for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
+                sqlx::query(
+                    "DELETE FROM crate_impls
+                                         WHERE crate_version_id = $1
+                                             AND source_file_id IN (
+                                                 SELECT id
+                                                 FROM source_files
+                                                 WHERE crate_version_id = $1
+                                                     AND NOT (path = ANY($2::TEXT[]))
+                                             )",
+                )
+                .bind(entry.crate_version_id)
+                .bind(&seen_paths)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune stale crate impls for {}@{}: {e}",
                         entry.crate_name, entry.version
                     )
                 })?;
