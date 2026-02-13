@@ -2,8 +2,8 @@ use rmcp::Json;
 use sqlx::{Postgres, QueryBuilder};
 
 use super::models::{
-    SourceReadRequest, SourceReadResponse, SourceReadRow, SourceSearchHit, SourceSearchMode,
-    SourceSearchRequest, SourceSearchResponse, SourceSearchRow,
+    ConfidenceAssessment, ConfidenceLevel, SourceReadRequest, SourceReadResponse, SourceReadRow,
+    SourceSearchHit, SourceSearchMode, SourceSearchRequest, SourceSearchResponse, SourceSearchRow,
 };
 use super::server::McpServer;
 use super::utils::{
@@ -142,6 +142,18 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
+        let confidence_assessment = if hits.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no indexed source content matched the query".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "matches are lexical and may require source.read confirmation".to_string(),
+            }
+        };
+
         Ok(Json(SourceSearchResponse {
             query,
             crate_name,
@@ -150,7 +162,11 @@ impl McpServer {
             mode,
             limit,
             count: hits.len(),
-            confidence: if hits.is_empty() { "low".to_string() } else { "medium".to_string() },
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec!["source.read".to_string(), "crate.intel".to_string()],
             provenance: "local_postgres_index".to_string(),
             hits,
@@ -228,6 +244,11 @@ impl McpServer {
             .map(|slice| slice.join("\n"))
             .unwrap_or_default();
 
+        let confidence_assessment = ConfidenceAssessment {
+            level: ConfidenceLevel::High,
+            reason: "returned exact indexed file slice for selected crate/path".to_string(),
+        };
+
         Ok(Json(SourceReadResponse {
             crate_name: row.crate_name,
             version: row.version,
@@ -236,7 +257,11 @@ impl McpServer {
             end_line,
             total_lines,
             content: selected,
-            confidence: "high".to_string(),
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec!["source.search".to_string(), "symbol.search".to_string()],
             provenance: "local_postgres_index".to_string(),
         }))

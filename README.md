@@ -1,13 +1,13 @@
 # rust-mcp
 
-Local-first Rust dependency intelligence MCP server scaffold.
+Local-first Rust dependency intelligence MCP server.
 
-This scaffold gives you:
+This server provides:
 
 - Loopback-only HTTP exposure for local agent clients.
 - PostgreSQL with persistent Docker volume.
 - Initial schema/migration for crate/version/source/symbol/docs indexing.
-- Rust server skeleton with structured config, logging, health/readiness endpoints, and graceful shutdown.
+- Rust server with structured config, logging, health/readiness endpoints, and graceful shutdown.
 - `rmcp` streamable HTTP transport mounted at `/mcp` with `ping`, `index.sync_crates`, `index.status`, `index.refresh`, `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.compare`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `dependency.audit`, `source.search`, `source.read`, `symbol.search`, and `docs.search` tools.
 
 ## Quick start
@@ -69,17 +69,35 @@ curl -X POST http://127.0.0.1:43173/mcp \
 - `symbol.search`: searches indexed symbols by symbol name with optional `crate_name`, `version`, and `kind` filters; supports opaque cursor pagination (`cursor`/`next_cursor`) with `page`+`limit` fallback, `include_all_versions` (default `false`, latest-version only), and `collapse_by_canonical` (default `false`) to deduplicate by canonical symbol identity across versions.
 - `docs.search`: searches indexed docs.rs pages with optional `crate_name`, `version`, and `path_prefix` filters.
 
-Quality contract fields now included in `crate.search`, `crate.intel`, `crate.versions`, and `crate.graph` responses:
+Quality contract fields:
 
 - `confidence` (`high|medium|low`)
+- `confidence_assessment` (`level` + `reason`)
 - `next_best_calls` (ordered suggested follow-up tools)
 
-## Tool quick examples (collapsible)
+`confidence` is retained for backward compatibility; `confidence_assessment` is the primary structured contract.
+
+## Observability
+
+- Prometheus metrics are exposed on a dedicated listener (default `127.0.0.1:9090` via `PROMETHEUS_BIND` in local runs).
+- Tool invocation counts/latency are emitted via `instrument_tool()` and refresh worker gauges expose queue depth/state.
+
+## Rate limiting and request throttling
+
+- Outbound refresh traffic is rate-limited per source using interval controls (`CRATES_IO_MIN_INTERVAL_MS`, `DOCS_RS_MIN_INTERVAL_MS`, `OSV_MIN_INTERVAL_MS`).
+- Inbound tool concurrency is bounded by `MAX_CONCURRENT_REQUESTS`.
+
+## Adaptive TTL freshness
+
+- Freshness is interaction-driven (`crate.search`, `crate.intel`) with stale-while-revalidate behavior.
+- TTL is adaptive by crate activity (with bounded windows and jitter) to keep active crates fresh while reducing refresh pressure for stable crates.
+- Deep refresh work is deduplicated and processed asynchronously by the durable `refresh_jobs` queue.
+
+## Tool quick examples
 
 All examples below are MCP `tools/call` `arguments` payloads.
 
-<details>
-<summary><strong>Root + index tools</strong></summary>
+### Root + index tools
 
 - `ping`
 
@@ -105,10 +123,7 @@ All examples below are MCP `tools/call` `arguments` payloads.
 { "scope": "local_cache", "crate_name": "serde", "page": 1, "per_page": 25 }
 ```
 
-</details>
-
-<details>
-<summary><strong>Crate intelligence tools (`crate.*`)</strong></summary>
+### Crate intelligence tools (`crate.*`)
 
 - `crate.search`
 
@@ -176,10 +191,7 @@ All examples below are MCP `tools/call` `arguments` payloads.
 { "crate_name": "tokio", "include_unsafe": true, "include_concurrency": true, "limit": 100 }
 ```
 
-</details>
-
-<details>
-<summary><strong>Dependency + source + symbol + docs tools</strong></summary>
+### Dependency + source + symbol + docs tools
 
 - `dependency.audit`
 
@@ -215,8 +227,6 @@ All examples below are MCP `tools/call` `arguments` payloads.
 
 - treat `cursor` as opaque and pass through `next_cursor`
 - keep filters and page size consistent across paged calls
-
-</details>
 
 Query memoization:
 
@@ -272,7 +282,7 @@ Core env vars:
 - `MCP_HTTP_BIND` (default `0.0.0.0:43173` in container)
 - `MCP_HTTP_PORT` (default `43173`, loopback-published)
 - `MAX_CONCURRENT_REQUESTS` (default `128`)
-- `MCP_TRANSPORT` (`http` or `stdio`, current scaffold focuses on `http`)
+- `MCP_TRANSPORT` (`http` or `stdio`; default local shared deployment uses `http`)
 - `MCP_SSE_KEEP_ALIVE_SECS` (default `15`)
 - `MCP_SSE_RETRY_MS` (default `3000`)
 - `CRATES_IO_BASE_URL` (default `https://crates.io`)

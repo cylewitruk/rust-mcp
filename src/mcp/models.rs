@@ -145,6 +145,7 @@ pub struct SourceSearchResponse {
     pub limit: u32,
     pub count: usize,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
     pub hits: Vec<SourceSearchHit>,
@@ -179,6 +180,7 @@ pub struct SourceReadResponse {
     pub total_lines: u32,
     pub content: String,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
 }
@@ -212,6 +214,8 @@ pub struct SymbolSearchResponse {
     pub has_more: bool,
     pub count: usize,
     pub confidence: String,
+    #[serde(default = "default_confidence_assessment")]
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
     pub hits: Vec<SymbolSearchHit>,
@@ -250,6 +254,8 @@ pub struct DocsSearchResponse {
     pub limit: u32,
     pub count: usize,
     pub confidence: String,
+    #[serde(default = "default_confidence_assessment")]
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
     pub hits: Vec<DocsSearchHit>,
@@ -297,6 +303,13 @@ pub struct ConfidenceAssessment {
     pub reason: String,
 }
 
+fn default_confidence_assessment() -> ConfidenceAssessment {
+    ConfidenceAssessment {
+        level: ConfidenceLevel::Low,
+        reason: "confidence assessment unavailable in cached legacy response".to_string(),
+    }
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateSearchResponse {
     pub query: Option<String>,
@@ -309,6 +322,7 @@ pub struct CrateSearchResponse {
     pub refresh_jobs_enqueued: usize,
     pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
     pub hits: Vec<CrateSearchHit>,
@@ -912,6 +926,7 @@ pub struct CrateFeaturesResponse {
     pub refresh_job_id: Option<String>,
     pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
 }
@@ -937,6 +952,7 @@ pub struct CrateVersionsResponse {
     pub refresh_job_id: Option<String>,
     pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
 }
@@ -974,6 +990,7 @@ pub struct CrateGraphResponse {
     pub refresh_job_id: Option<String>,
     pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
 }
@@ -1041,6 +1058,7 @@ pub struct CrateIntelResponse {
     pub refresh_job_id: Option<String>,
     pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
 }

@@ -3,7 +3,10 @@ use rmcp::Json;
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 
-use super::models::{SymbolSearchHit, SymbolSearchRequest, SymbolSearchResponse, SymbolSearchRow};
+use super::models::{
+    ConfidenceAssessment, ConfidenceLevel, SymbolSearchHit, SymbolSearchRequest,
+    SymbolSearchResponse, SymbolSearchRow,
+};
 use super::server::McpServer;
 use super::utils::{normalize_optional, normalize_required, symbol_search_limit, sync_page};
 
@@ -324,6 +327,19 @@ impl McpServer {
             None
         };
 
+        let confidence_assessment = if hits.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no indexed symbols matched the query/filter set".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "symbol hits resolved by indexed name matching; verify with source.read"
+                    .to_string(),
+            }
+        };
+
         let response = SymbolSearchResponse {
             query,
             crate_name,
@@ -338,7 +354,11 @@ impl McpServer {
             total_count,
             has_more,
             count: hits.len(),
-            confidence: if hits.is_empty() { "low".to_string() } else { "medium".to_string() },
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: if hits.is_empty() {
                 vec!["index.refresh".to_string(), "source.search".to_string()]
             } else {

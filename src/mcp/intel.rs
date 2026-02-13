@@ -1,9 +1,10 @@
 use rmcp::Json;
 
 use super::models::{
-    CrateAdvisoryRow, CrateCoreRow, CrateDependencyRow, CrateDependentRow, CrateIntelAdvisory,
-    CrateIntelDependency, CrateIntelDependent, CrateIntelRequest, CrateIntelResponse,
-    CrateIntelVersion, CrateVersionHistoryRow, CrateVersionSelectionRow,
+    ConfidenceAssessment, ConfidenceLevel, CrateAdvisoryRow, CrateCoreRow, CrateDependencyRow,
+    CrateDependentRow, CrateIntelAdvisory, CrateIntelDependency, CrateIntelDependent,
+    CrateIntelRequest, CrateIntelResponse, CrateIntelVersion, CrateVersionHistoryRow,
+    CrateVersionSelectionRow,
 };
 use super::server::McpServer;
 use super::utils::{
@@ -348,6 +349,12 @@ impl McpServer {
         let freshness_check_result = freshness_outcome
             .freshness_check_result
             .clone();
+        let confidence_assessment = ConfidenceAssessment {
+            level: ConfidenceLevel::High,
+            reason: "crate intelligence assembled from indexed versions, deps, dependents, and \
+                     advisories"
+                .to_string(),
+        };
 
         Ok(Json(CrateIntelResponse {
             crate_name: crate_row.name,
@@ -389,7 +396,11 @@ impl McpServer {
                     checked_at: None,
                 },
             ],
-            confidence: "high".to_string(),
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec![
                 "crate.versions".to_string(),
                 "crate.graph".to_string(),

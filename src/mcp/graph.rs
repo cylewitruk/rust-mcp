@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use rmcp::Json;
 
 use super::models::{
-    CrateCoreRow, CrateGraphDirection, CrateGraphEdge, CrateGraphNode, CrateGraphRequest,
-    CrateGraphResponse, CrateVersionSelectionRow, GraphDependencyTraversalRow,
-    GraphDependentTraversalRow, GraphLatestVersionRow,
+    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateGraphDirection, CrateGraphEdge,
+    CrateGraphNode, CrateGraphRequest, CrateGraphResponse, CrateVersionSelectionRow,
+    GraphDependencyTraversalRow, GraphDependentTraversalRow, GraphLatestVersionRow,
 };
 use super::server::McpServer;
 use super::utils::{graph_depth, normalize_optional, normalize_required};
@@ -444,6 +444,19 @@ impl McpServer {
             .freshness_check_result
             .clone();
         let cycle_notes = cycle_safe_traversal_notes(&edges, depth);
+        let confidence_assessment = if edges.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no dependency/dependent edges found for selected traversal slice"
+                    .to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "graph is depth-bounded and may omit relationships beyond traversal limit"
+                    .to_string(),
+            }
+        };
 
         Ok(Json(CrateGraphResponse {
             crate_name: crate_row.name,
@@ -471,7 +484,11 @@ impl McpServer {
                     checked_at: None,
                 },
             ],
-            confidence: "medium".to_string(),
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec![
                 "crate.intel".to_string(),
                 "crate.versions".to_string(),

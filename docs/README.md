@@ -5,6 +5,7 @@
 - `docs/agent-dependency-mcp-spec.md` — Product specification and target capability model.
 - `docs/adr-0001-refresh-strategy.md` — Accepted refresh strategy and queue behavior.
 - `docs/roadmap-2026-02.md` — Active roadmap: type intelligence, resolution tools, and spec consistency.
+- `docs/implementation-prep-2026-02-14.md` — Implementation-ready execution slices for M9+ based on fresh gap/tooling analysis.
 
 ## Retired documents
 

@@ -4,7 +4,8 @@ use rmcp::Json;
 use sqlx::{Postgres, QueryBuilder};
 
 use super::models::{
-    DocsSearchHit, DocsSearchRequest, DocsSearchResponse, DocsSearchRow, DocsSyncCandidateRow,
+    ConfidenceAssessment, ConfidenceLevel, DocsSearchHit, DocsSearchRequest, DocsSearchResponse,
+    DocsSearchRow, DocsSyncCandidateRow,
 };
 use super::server::McpServer;
 use super::utils::{
@@ -514,6 +515,18 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
+        let confidence_assessment = if hits.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no indexed docs pages matched the query/filter set".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "docs hits are text-ranked snippets from indexed docs.rs pages".to_string(),
+            }
+        };
+
         let response = DocsSearchResponse {
             query,
             crate_name,
@@ -521,7 +534,11 @@ impl McpServer {
             path_prefix,
             limit,
             count: hits.len(),
-            confidence: if hits.is_empty() { "low".to_string() } else { "medium".to_string() },
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: if hits.is_empty() {
                 vec!["index.refresh".to_string(), "crate.intel".to_string()]
             } else {

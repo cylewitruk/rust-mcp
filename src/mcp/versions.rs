@@ -1,8 +1,8 @@
 use rmcp::Json;
 
 use super::models::{
-    CrateCoreRow, CrateVersionSelectionRow, CrateVersionTimelineItem, CrateVersionTimelineRow,
-    CrateVersionsRequest, CrateVersionsResponse,
+    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
+    CrateVersionTimelineItem, CrateVersionTimelineRow, CrateVersionsRequest, CrateVersionsResponse,
 };
 use super::server::McpServer;
 use super::utils::{normalize_required, version_limit};
@@ -173,6 +173,19 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let confidence_assessment = if versions.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no versions were returned from local index for selected crate".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::High,
+                reason: "version timeline resolved from indexed crate versions and advisories"
+                    .to_string(),
+            }
+        };
+
         Ok(Json(CrateVersionsResponse {
             crate_name: crate_row.name,
             latest_rust_version: latest_version.rust_version,
@@ -194,7 +207,11 @@ impl McpServer {
                     checked_at: None,
                 },
             ],
-            confidence: "high".to_string(),
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec![
                 "crate.intel".to_string(),
                 "crate.graph".to_string(),

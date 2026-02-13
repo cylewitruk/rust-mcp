@@ -2,7 +2,8 @@ use rmcp::Json;
 use sqlx::{Postgres, QueryBuilder};
 
 use super::models::{
-    CrateSearchHit, CrateSearchRequest, CrateSearchResponse, CrateSearchRow, CrateSearchSort,
+    ConfidenceAssessment, ConfidenceLevel, CrateSearchHit, CrateSearchRequest, CrateSearchResponse,
+    CrateSearchRow, CrateSearchSort,
 };
 use super::server::McpServer;
 use super::utils::{match_reasons, normalize_optional, search_limit};
@@ -203,6 +204,18 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
+        let confidence_assessment = if hits.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no crates matched the provided filters".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::High,
+                reason: "ranked crate hits resolved from local index".to_string(),
+            }
+        };
+
         Ok(Json(CrateSearchResponse {
             query,
             category,
@@ -228,7 +241,11 @@ impl McpServer {
                     checked_at: None,
                 },
             ],
-            confidence: if hits.is_empty() { "low".to_string() } else { "high".to_string() },
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: if hits.is_empty() {
                 vec!["index.sync_crates".to_string()]
             } else {

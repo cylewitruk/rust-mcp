@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use rmcp::Json;
 
 use super::models::{
-    CrateCoreRow, CrateFeatureFlag, CrateFeatureRow, CrateFeaturesRequest, CrateFeaturesResponse,
-    CrateVersionSelectionRow, ResponseFreshnessSource,
+    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateFeatureFlag, CrateFeatureRow,
+    CrateFeaturesRequest, CrateFeaturesResponse, CrateVersionSelectionRow, ResponseFreshnessSource,
 };
 use super::server::McpServer;
 use super::utils::{normalize_optional, normalize_required, value_to_string_vec};
@@ -305,6 +305,18 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let confidence_assessment = if default_feature_set.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "indexed features are present but default feature set is empty".to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::High,
+                reason: "feature graph and default set resolved from indexed metadata".to_string(),
+            }
+        };
+
         Ok(Json(CrateFeaturesResponse {
             crate_name: crate_row.name,
             selected_version: selected_version.version,
@@ -328,11 +340,11 @@ impl McpServer {
                     checked_at: None,
                 },
             ],
-            confidence: if default_feature_set.is_empty() {
-                "medium".to_string()
-            } else {
-                "high".to_string()
-            },
+            confidence: confidence_assessment
+                .level
+                .as_str()
+                .to_string(),
+            confidence_assessment,
             next_best_calls: vec![
                 "crate.intel".to_string(),
                 "crate.versions".to_string(),
