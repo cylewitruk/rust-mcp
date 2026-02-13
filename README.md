@@ -132,7 +132,7 @@ Quality contract fields now included in `crate.search`, `crate.intel`, `crate.ve
 - Missing requested version flow: targeted inline backfill is attempted, then deep refresh is queued.
 - Background worker: processes due jobs from `refresh_jobs`, retries failures with jittered bounded backoff, and marks terminal failures after max attempts.
 - Security refresh: `index.refresh` with `scope=security` ingests OSV advisory data into `advisory_matches` for indexed crates.
-- Local source refresh: `index.refresh` with `scope=local_cache` scans `CARGO_REGISTRY_DIR/src`, incrementally upserts text source files into `source_files`, and prunes stale rows for scanned crate versions.
+- Local source refresh: `index.refresh` with `scope=local_cache` scans `CARGO_REGISTRY_DIR/src`, incrementally upserts text source files into `source_files`, parses Rust files via `syn` to index symbols into `symbols`, and prunes stale rows for scanned crate versions.
 
 ## Developer commands
 

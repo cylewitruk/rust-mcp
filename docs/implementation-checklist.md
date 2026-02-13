@@ -36,7 +36,7 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 
 ## 4) Symbol Intelligence (M3)
 
-- [ ] Parser-based symbol extraction (`syn`/tree-sitter fallback)
+- [x] Parser-based symbol extraction (`syn`/tree-sitter fallback)
 - [x] `symbol.search` tool with confidence and index source
 - [ ] Version-aware symbol queries and pagination limits
 

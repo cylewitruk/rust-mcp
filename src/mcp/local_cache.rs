@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
 use sqlx::FromRow;
+use syn::{Item, Visibility};
 
 use super::server::McpServer;
 use super::utils::{normalize_optional, normalize_required, sync_page, sync_per_page};
@@ -23,6 +24,16 @@ struct IndexedSourceFile {
     file_size: i64,
     language: Option<String>,
     content: String,
+}
+
+#[derive(Debug)]
+struct ExtractedSymbol {
+    name: String,
+    kind: String,
+    signature: Option<String>,
+    visibility: Option<String>,
+    start_line: i32,
+    end_line: i32,
 }
 
 #[derive(Debug)]
@@ -153,6 +164,130 @@ fn scan_cache_version_dir(
     }
 
     Ok(files)
+}
+
+fn normalize_symbol_signature(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(
+            trimmed
+                .chars()
+                .take(240)
+                .collect(),
+        )
+    }
+}
+
+fn line_for_symbol_name(content: &str, name: &str) -> i32 {
+    for (idx, line) in content.lines().enumerate() {
+        if line.contains(name) {
+            return (idx + 1) as i32;
+        }
+    }
+    1
+}
+
+fn extract_rust_symbols(content: &str) -> Result<Vec<ExtractedSymbol>, String> {
+    let file = syn::parse_file(content).map_err(|e| format!("rust parser error: {e}"))?;
+    let mut symbols = Vec::new();
+
+    for item in file.items {
+        let (name, kind, signature, visibility) = match item {
+            Item::Fn(function) => (
+                function.sig.ident.to_string(),
+                "function".to_string(),
+                None,
+                match function.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Struct(structure) => (
+                structure.ident.to_string(),
+                "struct".to_string(),
+                None,
+                match structure.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Enum(enumeration) => (
+                enumeration.ident.to_string(),
+                "enum".to_string(),
+                None,
+                match enumeration.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Trait(trait_item) => (
+                trait_item.ident.to_string(),
+                "trait".to_string(),
+                None,
+                match trait_item.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Type(type_alias) => (
+                type_alias.ident.to_string(),
+                "type_alias".to_string(),
+                None,
+                match type_alias.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Const(const_item) => (
+                const_item.ident.to_string(),
+                "const".to_string(),
+                None,
+                match const_item.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Static(static_item) => (
+                static_item.ident.to_string(),
+                "static".to_string(),
+                None,
+                match static_item.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            Item::Mod(module_item) => (
+                module_item.ident.to_string(),
+                "module".to_string(),
+                None,
+                match module_item.vis {
+                    Visibility::Public(_) => Some("public".to_string()),
+                    _ => Some("private".to_string()),
+                },
+            ),
+            _ => continue,
+        };
+
+        let start_line = line_for_symbol_name(content, &name);
+        let signature = content
+            .lines()
+            .nth((start_line.saturating_sub(1)) as usize)
+            .and_then(normalize_symbol_signature)
+            .or(signature);
+
+        symbols.push(ExtractedSymbol {
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line: start_line,
+        });
+    }
+
+    Ok(symbols)
 }
 
 impl McpServer {
@@ -314,10 +449,120 @@ impl McpServer {
                 })?
                 .rows_affected();
 
+                let source_file_id = sqlx::query_scalar::<_, i64>(
+                    "SELECT id
+                     FROM source_files
+                     WHERE crate_version_id = $1 AND path = $2
+                     LIMIT 1",
+                )
+                .bind(entry.crate_version_id)
+                .bind(&file.relative_path)
+                .fetch_optional(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to lookup source file id {} for {}@{}: {e}",
+                        file.relative_path, entry.crate_name, entry.version
+                    )
+                })?;
+
+                if file.language.as_deref() == Some("rust") {
+                    let Some(source_file_id) = source_file_id else {
+                        continue;
+                    };
+
+                    let existing_symbol_count = sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*)::BIGINT
+                         FROM symbols
+                         WHERE source_file_id = $1",
+                    )
+                    .bind(source_file_id)
+                    .fetch_one(&self.state.db)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "failed to count symbols for {} in {}@{}: {e}",
+                            file.relative_path, entry.crate_name, entry.version
+                        )
+                    })?;
+
+                    if affected > 0 || existing_symbol_count == 0 {
+                        sqlx::query("DELETE FROM symbols WHERE source_file_id = $1")
+                            .bind(source_file_id)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to clear symbols for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+
+                        let extracted = extract_rust_symbols(&file.content).map_err(|e| {
+                            format!(
+                                "failed to parse rust symbols in {} for {}@{}: {e}",
+                                file.relative_path, entry.crate_name, entry.version
+                            )
+                        })?;
+
+                        for symbol in extracted {
+                            sqlx::query(
+                                "INSERT INTO symbols (
+                                    crate_version_id,
+                                    source_file_id,
+                                    name,
+                                    kind,
+                                    signature,
+                                    visibility,
+                                    start_line,
+                                    end_line,
+                                    index_source,
+                                    indexed_at
+                                 ) VALUES (
+                                    $1, $2, $3, $4, $5, $6, $7, $8, 'syn', NOW()
+                                 )",
+                            )
+                            .bind(entry.crate_version_id)
+                            .bind(source_file_id)
+                            .bind(symbol.name)
+                            .bind(symbol.kind)
+                            .bind(symbol.signature)
+                            .bind(symbol.visibility)
+                            .bind(symbol.start_line)
+                            .bind(symbol.end_line)
+                            .execute(&self.state.db)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to insert symbol for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
+                        }
+                    }
+                }
+
                 outcome.upserted_files += affected as usize;
             }
 
             let deleted = if seen_paths.is_empty() {
+                sqlx::query(
+                    "DELETE FROM symbols
+                     WHERE crate_version_id = $1
+                       AND source_file_id IN (
+                         SELECT id FROM source_files WHERE crate_version_id = $1
+                       )",
+                )
+                .bind(entry.crate_version_id)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune symbols for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
                 sqlx::query("DELETE FROM source_files WHERE crate_version_id = $1")
                     .bind(entry.crate_version_id)
                     .execute(&self.state.db)
@@ -330,6 +575,27 @@ impl McpServer {
                     })?
                     .rows_affected()
             } else {
+                sqlx::query(
+                    "DELETE FROM symbols
+                     WHERE crate_version_id = $1
+                       AND source_file_id IN (
+                         SELECT id
+                         FROM source_files
+                         WHERE crate_version_id = $1
+                           AND NOT (path = ANY($2::TEXT[]))
+                       )",
+                )
+                .bind(entry.crate_version_id)
+                .bind(&seen_paths)
+                .execute(&self.state.db)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to prune stale symbols for {}@{}: {e}",
+                        entry.crate_name, entry.version
+                    )
+                })?;
+
                 sqlx::query(
                     "DELETE FROM source_files
                      WHERE crate_version_id = $1
