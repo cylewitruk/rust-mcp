@@ -113,6 +113,116 @@ pub struct CrateSearchRequest {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceSearchMode {
+    Text,
+    Regex,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SourceSearchRequest {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub path_glob: Option<String>,
+    pub mode: Option<SourceSearchMode>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct SourceSearchResponse {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub path_glob: Option<String>,
+    pub mode: SourceSearchMode,
+    pub limit: u32,
+    pub count: usize,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+    pub hits: Vec<SourceSearchHit>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct SourceSearchHit {
+    pub crate_name: String,
+    pub version: String,
+    pub path: String,
+    pub indexed_at: String,
+    pub match_line: Option<u32>,
+    pub snippet: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SourceReadRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub path: String,
+    pub start_line: Option<u32>,
+    pub end_line: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct SourceReadResponse {
+    pub crate_name: String,
+    pub version: String,
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub total_lines: u32,
+    pub content: String,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SymbolSearchRequest {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub kind: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct SymbolSearchResponse {
+    pub query: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub kind: Option<String>,
+    pub limit: u32,
+    pub count: usize,
+    pub confidence: String,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+    pub hits: Vec<SymbolSearchHit>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct SymbolSearchHit {
+    pub crate_name: String,
+    pub version: String,
+    pub source_path: String,
+    pub name: String,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub visibility: Option<String>,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+    pub indexed_at: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct ResponseFreshnessSource {
+    pub source: String,
+    pub status: String,
+    pub checked_at: Option<String>,
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateSearchResponse {
     pub query: Option<String>,
@@ -123,6 +233,7 @@ pub struct CrateSearchResponse {
     pub count: usize,
     pub freshness_checks_performed: usize,
     pub refresh_jobs_enqueued: usize,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
@@ -162,6 +273,38 @@ pub(super) struct CrateSearchRow {
     pub(super) relevance_score: f64,
 }
 
+#[derive(Debug, FromRow)]
+pub(super) struct SourceSearchRow {
+    pub(super) crate_name: String,
+    pub(super) version: String,
+    pub(super) path: String,
+    pub(super) content: String,
+    pub(super) indexed_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct SourceReadRow {
+    pub(super) crate_name: String,
+    pub(super) version: String,
+    pub(super) path: String,
+    pub(super) content: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct SymbolSearchRow {
+    pub(super) crate_name: String,
+    pub(super) version: String,
+    pub(super) source_path: String,
+    pub(super) name: String,
+    pub(super) kind: String,
+    pub(super) signature: Option<String>,
+    pub(super) visibility: Option<String>,
+    pub(super) start_line: i32,
+    pub(super) end_line: i32,
+    pub(super) index_source: String,
+    pub(super) indexed_at: String,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct IndexSyncCratesRequest {
     pub query: Option<String>,
@@ -181,6 +324,7 @@ pub struct IndexSyncCratesResponse {
     pub synced_dependencies: usize,
     pub selected_versions: Vec<String>,
     pub errors: Vec<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub provenance: String,
 }
 
@@ -215,6 +359,7 @@ pub struct IndexRefreshResponse {
     pub started_at_epoch_ms: u128,
     pub finished_at_epoch_ms: Option<u128>,
     pub result: Option<IndexRefreshResult>,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub provenance: String,
 }
 
@@ -310,6 +455,7 @@ pub struct CrateVersionsResponse {
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
     pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
@@ -345,6 +491,7 @@ pub struct CrateGraphResponse {
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
     pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
     pub next_best_calls: Vec<String>,
     pub provenance: String,
@@ -408,6 +555,7 @@ pub struct CrateIntelResponse {
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
     pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
     pub confidence: String,
     pub next_best_calls: Vec<String>,
     pub provenance: String,

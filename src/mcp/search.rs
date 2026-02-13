@@ -212,6 +212,22 @@ impl McpServer {
             count: hits.len(),
             freshness_checks_performed,
             refresh_jobs_enqueued,
+            freshness: vec![
+                super::models::ResponseFreshnessSource {
+                    source: "local_postgres_index".to_string(),
+                    status: "fresh".to_string(),
+                    checked_at: None,
+                },
+                super::models::ResponseFreshnessSource {
+                    source: "crates.io".to_string(),
+                    status: if freshness_checks_performed > 0 {
+                        "probed".to_string()
+                    } else {
+                        "not_checked".to_string()
+                    },
+                    checked_at: None,
+                },
+            ],
             confidence: if hits.is_empty() { "low".to_string() } else { "high".to_string() },
             next_best_calls: if hits.is_empty() {
                 vec!["index.sync_crates".to_string()]

@@ -153,14 +153,30 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
+        let freshness_check_result = freshness_outcome
+            .freshness_check_result
+            .clone();
+
         Ok(Json(CrateVersionsResponse {
             crate_name: crate_row.name,
             count: versions.len(),
             versions,
             freshness_check_performed: freshness_outcome.freshness_check_performed,
-            freshness_check_result: freshness_outcome.freshness_check_result,
+            freshness_check_result: freshness_check_result.clone(),
             refresh_enqueued: freshness_outcome.refresh_enqueued,
             refresh_job_id: freshness_outcome.refresh_job_id,
+            freshness: vec![
+                super::models::ResponseFreshnessSource {
+                    source: "local_postgres_index".to_string(),
+                    status: "fresh".to_string(),
+                    checked_at: crate_row.updated_at,
+                },
+                super::models::ResponseFreshnessSource {
+                    source: "crates.io".to_string(),
+                    status: freshness_check_result,
+                    checked_at: None,
+                },
+            ],
             confidence: "high".to_string(),
             next_best_calls: vec![
                 "crate.intel".to_string(),

@@ -1,10 +1,13 @@
 mod graph;
 mod index;
 mod intel;
+mod local_cache;
 mod models;
 mod search;
 mod security;
 mod server;
+mod source;
+mod symbol;
 mod transport;
 mod utils;
 mod versions;

@@ -24,6 +24,40 @@ pub(super) fn search_limit(value: Option<u32>) -> u32 {
         .clamp(1, 50)
 }
 
+pub(super) fn source_search_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(20)
+        .clamp(1, 100)
+}
+
+pub(super) fn symbol_search_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(25)
+        .clamp(1, 200)
+}
+
+pub(super) fn source_read_end_line(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(200)
+        .clamp(1, 2_000)
+}
+
+pub(super) fn path_glob_to_like(glob: &str) -> String {
+    let mut escaped = String::with_capacity(glob.len() + 8);
+    for ch in glob.chars() {
+        match ch {
+            '*' => escaped.push('%'),
+            '?' => escaped.push('_'),
+            '%' | '_' | '\\' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 pub(super) fn version_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)

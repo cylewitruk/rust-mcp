@@ -13,7 +13,7 @@ use super::models::{
     CratesIoSearchResponse, IndexCoverage, IndexFailureByScope, IndexFreshness, IndexQueue,
     IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
     IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
-    IndexSyncCratesResponse, SyncCrateOutcome,
+    IndexSyncCratesResponse, ResponseFreshnessSource, SyncCrateOutcome,
 };
 use super::server::McpServer;
 use super::utils::{
@@ -927,6 +927,18 @@ impl McpServer {
             synced_dependencies,
             selected_versions,
             errors,
+            freshness: vec![
+                ResponseFreshnessSource {
+                    source: "crates.io".to_string(),
+                    status: "refreshed".to_string(),
+                    checked_at: None,
+                },
+                ResponseFreshnessSource {
+                    source: "local_postgres_index".to_string(),
+                    status: "updated".to_string(),
+                    checked_at: None,
+                },
+            ],
             provenance: "crates.io + local_postgres_index".to_string(),
         }))
     }
@@ -1157,6 +1169,18 @@ impl McpServer {
                                 .collect(),
                             errors: Vec::new(),
                         }),
+                        freshness: vec![
+                            ResponseFreshnessSource {
+                                source: "crates.io".to_string(),
+                                status: "refreshed".to_string(),
+                                checked_at: None,
+                            },
+                            ResponseFreshnessSource {
+                                source: "local_postgres_index".to_string(),
+                                status: "updated".to_string(),
+                                checked_at: None,
+                            },
+                        ],
                         provenance: "crates.io + local_postgres_index".to_string(),
                     })),
                     Err(error) => Ok(Json(IndexRefreshResponse {
@@ -1175,6 +1199,18 @@ impl McpServer {
                             selected_versions: Vec::new(),
                             errors: vec![error],
                         }),
+                        freshness: vec![
+                            ResponseFreshnessSource {
+                                source: "crates.io".to_string(),
+                                status: "failed".to_string(),
+                                checked_at: None,
+                            },
+                            ResponseFreshnessSource {
+                                source: "local_postgres_index".to_string(),
+                                status: "unchanged".to_string(),
+                                checked_at: None,
+                            },
+                        ],
                         provenance: "crates.io + local_postgres_index".to_string(),
                     })),
                 }
@@ -1205,6 +1241,7 @@ impl McpServer {
                         selected_versions: sync_response.selected_versions,
                         errors: sync_response.errors,
                     }),
+                    freshness: sync_response.freshness,
                     provenance: sync_response.provenance,
                 }))
             }
@@ -1239,23 +1276,96 @@ impl McpServer {
                         selected_versions: outcome.touched_crates,
                         errors: outcome.errors,
                     }),
+                    freshness: vec![
+                        ResponseFreshnessSource {
+                            source: "osv.dev".to_string(),
+                            status: "refreshed".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "local_postgres_index".to_string(),
+                            status: "updated".to_string(),
+                            checked_at: None,
+                        },
+                    ],
                     provenance: "osv.dev + local_postgres_index".to_string(),
                 }))
             }
-            IndexRefreshScope::Docs | IndexRefreshScope::LocalCache => {
+            IndexRefreshScope::LocalCache => {
+                let outcome = self
+                    .sync_local_source_cache(
+                        request.crate_name,
+                        request.query,
+                        request.page,
+                        request.per_page,
+                    )
+                    .await?;
+
                 Ok(Json(IndexRefreshResponse {
                     job_id,
                     scope,
-                    accepted: false,
-                    status: "not_implemented".to_string(),
-                    message: "scope is planned but not yet implemented".to_string(),
-                    estimated_seconds: None,
+                    accepted: true,
+                    status: if outcome.errors.is_empty() {
+                        "completed".to_string()
+                    } else {
+                        "completed_with_errors".to_string()
+                    },
+                    message: format!(
+                        "scanned {} crate versions ({} files), upserted {}, pruned {}",
+                        outcome.scanned_versions,
+                        outcome.scanned_files,
+                        outcome.upserted_files,
+                        outcome.deleted_files
+                    ),
+                    estimated_seconds: Some(10),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
-                    result: None,
-                    provenance: "local_postgres_index".to_string(),
+                    result: Some(IndexRefreshResult {
+                        synced_crates: outcome.scanned_versions,
+                        synced_versions: outcome.upserted_files,
+                        synced_dependencies: outcome.deleted_files,
+                        selected_versions: outcome.touched_versions,
+                        errors: outcome.errors,
+                    }),
+                    freshness: vec![
+                        ResponseFreshnessSource {
+                            source: "cargo_registry".to_string(),
+                            status: "scanned".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "local_postgres_index".to_string(),
+                            status: "updated".to_string(),
+                            checked_at: None,
+                        },
+                    ],
+                    provenance: "cargo_registry + local_postgres_index".to_string(),
                 }))
             }
+            IndexRefreshScope::Docs => Ok(Json(IndexRefreshResponse {
+                job_id,
+                scope,
+                accepted: false,
+                status: "not_implemented".to_string(),
+                message: "scope is planned but not yet implemented".to_string(),
+                estimated_seconds: None,
+                started_at_epoch_ms,
+                finished_at_epoch_ms: Some(now_epoch_millis()),
+                result: None,
+                freshness: vec![
+                    ResponseFreshnessSource {
+                        source: "docs.rs".to_string(),
+                        status: "not_implemented".to_string(),
+                        checked_at: None,
+                    },
+                    ResponseFreshnessSource {
+                        source: "local_postgres_index".to_string(),
+                        status: "unchanged".to_string(),
+                        checked_at: None,
+                    },
+                ],
+                provenance: "local_postgres_index".to_string(),
+            })),
         }
     }
 }

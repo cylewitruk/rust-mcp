@@ -7,7 +7,9 @@ use super::models::{
     CrateGraphRequest, CrateGraphResponse, CrateIntelRequest, CrateIntelResponse,
     CrateSearchRequest, CrateSearchResponse, CrateVersionsRequest, CrateVersionsResponse,
     IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
-    IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest,
+    IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest, SourceReadRequest,
+    SourceReadResponse, SourceSearchRequest, SourceSearchResponse, SymbolSearchRequest,
+    SymbolSearchResponse,
 };
 use crate::state::AppState;
 
@@ -130,6 +132,44 @@ impl McpServer {
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
         self.handle_crate_graph(request)
+            .await
+    }
+
+    #[tool(
+        name = "source.search",
+        description = "Search indexed source files by text/regex with optional crate/version/path \
+                       filters."
+    )]
+    async fn source_search(
+        &self,
+        Parameters(request): Parameters<SourceSearchRequest>,
+    ) -> Result<Json<SourceSearchResponse>, String> {
+        self.handle_source_search(request)
+            .await
+    }
+
+    #[tool(
+        name = "source.read",
+        description = "Read a line range from an indexed source file for a crate (optionally \
+                       pinned to a version)."
+    )]
+    async fn source_read(
+        &self,
+        Parameters(request): Parameters<SourceReadRequest>,
+    ) -> Result<Json<SourceReadResponse>, String> {
+        self.handle_source_read(request)
+            .await
+    }
+
+    #[tool(
+        name = "symbol.search",
+        description = "Search indexed symbols by name with optional crate/version/kind filters."
+    )]
+    async fn symbol_search(
+        &self,
+        Parameters(request): Parameters<SymbolSearchRequest>,
+    ) -> Result<Json<SymbolSearchResponse>, String> {
+        self.handle_symbol_search(request)
             .await
     }
 }

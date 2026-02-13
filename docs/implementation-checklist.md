@@ -21,23 +21,23 @@ This checklist converts the draft spec into a delivery sequence with dependency 
 - [x] `crate.versions` tool
 - [x] `crate.graph` tool (depth-bounded, dependencies/dependents/both)
 - [x] RustSec/OSV ingest pipeline into `advisory_matches` (initial OSV scope via `index.refresh` security)
-- [ ] Freshness metadata per source in all index and crate responses
+- [x] Freshness metadata per source in all index and crate responses
 
 **Estimate:** 2–4 days
 
 ## 3) Local Source Indexing (M2)
 
-- [ ] Cargo registry scanner (`~/.cargo/registry/src`) with change detection
-- [ ] `source_files` ingestion + content hashing + incremental updates
-- [ ] `source.search` tool (text + regex with bounds)
-- [ ] `source.read` tool (path + line range)
+- [x] Cargo registry scanner (`~/.cargo/registry/src`) with change detection
+- [x] `source_files` ingestion + content hashing + incremental updates
+- [x] `source.search` tool (text + regex with bounds)
+- [x] `source.read` tool (path + line range)
 
 **Estimate:** 3–5 days
 
 ## 4) Symbol Intelligence (M3)
 
 - [ ] Parser-based symbol extraction (`syn`/tree-sitter fallback)
-- [ ] `symbol.search` tool with confidence and index source
+- [x] `symbol.search` tool with confidence and index source
 - [ ] Version-aware symbol queries and pagination limits
 
 **Estimate:** 3–6 days
