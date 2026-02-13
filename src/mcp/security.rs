@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::server::McpServer;
+use crate::state::OutboundSource;
 
 #[derive(Debug, Deserialize)]
 struct OsvQueryResponse {
@@ -331,6 +332,9 @@ fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
 
 impl McpServer {
     async fn query_osv_for_crate(&self, crate_name: &str) -> Result<OsvQueryResponse, String> {
+        self.state
+            .acquire_outbound_slot(OutboundSource::Osv)
+            .await;
         let response = self
             .state
             .http

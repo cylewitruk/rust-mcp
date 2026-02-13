@@ -1,0 +1,6 @@
+# Markdownlint configuration reference:
+# https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+MD024:
+  siblings_only: true
+MD013: false

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use reqwest::header::CONTENT_TYPE;
 use rmcp::Json;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
@@ -21,7 +22,7 @@ use super::utils::{
     DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
     sync_per_page,
 };
-use crate::state::AppState;
+use crate::state::{AppState, OutboundSource};
 
 fn now_epoch_millis() -> u128 {
     std::time::SystemTime::now()
@@ -36,7 +37,41 @@ struct RefreshJobRow {
     crate_name: String,
     scope: String,
     include_dependencies: bool,
+    payload: Value,
     attempts: i32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RefreshJobPayload {
+    crate_name: Option<String>,
+    query: Option<String>,
+    page: Option<u32>,
+    per_page: Option<u32>,
+    include_dependencies: Option<bool>,
+}
+
+fn optional_job_crate_name(
+    job_crate_name: &str,
+    payload_crate_name: Option<String>,
+) -> Option<String> {
+    let normalized_payload = payload_crate_name.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed == "*" || trimmed.eq_ignore_ascii_case("all") {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    if normalized_payload.is_some() {
+        return normalized_payload;
+    }
+
+    let trimmed = job_crate_name.trim();
+    if trimmed.is_empty() || trimmed == "*" || trimmed.eq_ignore_ascii_case("all") {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -87,7 +122,7 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                  last_error = NULL
              FROM next_job
              WHERE r.id = next_job.id
-             RETURNING r.id, r.crate_name, r.scope, r.include_dependencies, r.attempts",
+             RETURNING r.id, r.crate_name, r.scope, r.include_dependencies, r.payload, r.attempts",
         )
         .fetch_optional(&state.db)
         .await;
@@ -105,9 +140,54 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
         };
 
         let server = McpServer::new(state.clone());
+        let payload =
+            serde_json::from_value::<RefreshJobPayload>(job.payload.clone()).unwrap_or_default();
         let result = match job.scope.as_str() {
             "crate" | "crate_deep_refresh" => server
                 .sync_single_crate(&job.crate_name, job.include_dependencies)
+                .await
+                .map(|_| ()),
+            "all" => server
+                .handle_index_sync_crates(IndexSyncCratesRequest {
+                    query: payload.query,
+                    page: payload.page,
+                    per_page: payload.per_page,
+                    include_dependencies: payload
+                        .include_dependencies
+                        .or(Some(job.include_dependencies)),
+                })
+                .await
+                .map(|_| ()),
+            "security" => {
+                let page = sync_page(payload.page);
+                let per_page = sync_per_page(payload.per_page);
+                let offset = page.saturating_sub(1) * per_page;
+                match server
+                    .sync_osv_security(per_page, offset)
+                    .await
+                {
+                    Ok(_) => server
+                        .sync_rustsec_db_security(per_page, offset)
+                        .await
+                        .map(|_| ()),
+                    Err(error) => Err(error),
+                }
+            }
+            "docs" => server
+                .sync_docs_pages(
+                    optional_job_crate_name(&job.crate_name, payload.crate_name),
+                    payload.page,
+                    payload.per_page,
+                )
+                .await
+                .map(|_| ()),
+            "local_cache" => server
+                .sync_local_source_cache(
+                    optional_job_crate_name(&job.crate_name, payload.crate_name),
+                    payload.query,
+                    payload.page,
+                    payload.per_page,
+                )
                 .await
                 .map(|_| ()),
             other => {
@@ -226,6 +306,9 @@ impl McpServer {
         path: &str,
         params: &[(&str, String)],
     ) -> Result<T, String> {
+        self.state
+            .acquire_outbound_slot(OutboundSource::CratesIo)
+            .await;
         let url = self.crates_io_url(path);
         let response = self
             .state
@@ -256,6 +339,9 @@ impl McpServer {
         crate_name: &str,
         version: &str,
     ) -> Result<Option<String>, String> {
+        self.state
+            .acquire_outbound_slot(OutboundSource::CratesIo)
+            .await;
         let url = self.crates_io_url(&format!("api/v1/crates/{crate_name}/{version}/readme"));
         let response = self
             .state
@@ -1476,5 +1562,22 @@ impl McpServer {
                 }))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::optional_job_crate_name;
+
+    #[test]
+    fn optional_job_crate_name_prefers_payload() {
+        let result = optional_job_crate_name("serde", Some("tokio".to_string()));
+        assert_eq!(result.as_deref(), Some("tokio"));
+    }
+
+    #[test]
+    fn optional_job_crate_name_treats_all_as_none() {
+        assert!(optional_job_crate_name("all", None).is_none());
+        assert!(optional_job_crate_name("*", Some("all".to_string())).is_none());
     }
 }

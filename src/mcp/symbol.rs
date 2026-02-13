@@ -366,6 +366,7 @@ mod tests {
     use std::env;
     use std::net::SocketAddr;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use sqlx::postgres::PgPoolOptions;
@@ -386,7 +387,10 @@ mod tests {
             crates_io_base_url: "https://crates.io".to_string(),
             crates_io_user_agent: "rust-mcp/test".to_string(),
             crates_io_timeout_secs: 5,
+            crates_io_min_interval_ms: 1,
             docs_rs_base_url: "https://docs.rs".to_string(),
+            docs_rs_min_interval_ms: 1,
+            osv_min_interval_ms: 1,
             database_min_connections: 1,
             database_max_connections: 2,
             auto_migrate: false,
@@ -501,8 +505,10 @@ mod tests {
             .expect("insert symbol row");
         }
 
+        let config = test_config(database_url);
         let state = AppState {
-            config: test_config(database_url),
+            outbound_rate_limiters: Arc::new(crate::state::OutboundRateLimiters::new(&config)),
+            config,
             db: pool.clone(),
             http: reqwest::Client::new(),
         };

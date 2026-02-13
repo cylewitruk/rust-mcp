@@ -19,7 +19,7 @@ fix:
     cargo +nightly --locked fmt --all
 
 test:
-  cargo --locked nextest run
+  cargo --locked nextest run --no-fail-fast --all-targets
 
 run:
   cargo --locked run -p rust-mcp

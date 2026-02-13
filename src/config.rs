@@ -51,9 +51,24 @@ pub struct Config {
     #[arg(long, env = "CRATES_IO_TIMEOUT_SECS", default_value_t = 20)]
     pub crates_io_timeout_secs: u64,
 
+    /// Minimum delay between outbound crates.io requests (per process) in
+    /// milliseconds.
+    #[arg(long, env = "CRATES_IO_MIN_INTERVAL_MS", default_value_t = 100)]
+    pub crates_io_min_interval_ms: u64,
+
     /// Base URL for docs.rs page fetches.
     #[arg(long, env = "DOCS_RS_BASE_URL", default_value = "https://docs.rs")]
     pub docs_rs_base_url: String,
+
+    /// Minimum delay between outbound docs.rs requests (per process) in
+    /// milliseconds.
+    #[arg(long, env = "DOCS_RS_MIN_INTERVAL_MS", default_value_t = 120)]
+    pub docs_rs_min_interval_ms: u64,
+
+    /// Minimum delay between outbound OSV requests (per process) in
+    /// milliseconds.
+    #[arg(long, env = "OSV_MIN_INTERVAL_MS", default_value_t = 150)]
+    pub osv_min_interval_ms: u64,
 
     /// Minimum database connection pool size.
     #[arg(long, env = "DATABASE_MIN_CONNECTIONS", default_value_t = 1)]
