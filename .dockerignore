@@ -1,0 +1,6 @@
+.git
+.gitignore
+target
+.env
+pg_data
+mcp_data

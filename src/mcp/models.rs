@@ -1,0 +1,415 @@
+use rmcp::schemars;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::FromRow;
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoSearchResponse {
+    pub(super) crates: Vec<CratesIoSearchCrate>,
+    pub(super) meta: CratesIoSearchMeta,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoSearchMeta {
+    pub(super) total: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoSearchCrate {
+    pub(super) id: String,
+    #[allow(dead_code)]
+    pub(super) name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoCrateDetailResponse {
+    #[serde(rename = "crate")]
+    pub(super) krate: CratesIoCrateRecord,
+    pub(super) versions: Vec<CratesIoVersionRecord>,
+    #[serde(default)]
+    pub(super) keywords: Vec<CratesIoKeyword>,
+    #[serde(default)]
+    pub(super) categories: Vec<CratesIoCategory>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoCrateRecord {
+    pub(super) name: String,
+    pub(super) description: Option<String>,
+    pub(super) repository: Option<String>,
+    pub(super) documentation: Option<String>,
+    pub(super) homepage: Option<String>,
+    pub(super) max_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoVersionRecord {
+    pub(super) num: String,
+    pub(super) created_at: Option<String>,
+    pub(super) updated_at: Option<String>,
+    #[serde(default)]
+    pub(super) yanked: bool,
+    pub(super) downloads: Option<i64>,
+    pub(super) checksum: Option<String>,
+    pub(super) rust_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoKeyword {
+    pub(super) id: String,
+    pub(super) keyword: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoCategory {
+    pub(super) id: String,
+    pub(super) slug: Option<String>,
+    pub(super) category: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoDependenciesResponse {
+    #[serde(default)]
+    pub(super) dependencies: Vec<CratesIoDependency>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CratesIoDependency {
+    pub(super) crate_id: String,
+    pub(super) req: String,
+    pub(super) kind: Option<String>,
+    #[serde(default)]
+    pub(super) optional: bool,
+    #[serde(default)]
+    pub(super) features: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct SyncCrateOutcome {
+    pub(super) versions_synced: usize,
+    pub(super) dependencies_synced: usize,
+    pub(super) selected_version: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PingRequest {
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum CrateSearchSort {
+    Relevance,
+    Downloads,
+    Recent,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateSearchRequest {
+    pub query: Option<String>,
+    pub category: Option<String>,
+    pub keyword: Option<String>,
+    pub sort: Option<CrateSearchSort>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateSearchResponse {
+    pub query: Option<String>,
+    pub category: Option<String>,
+    pub keyword: Option<String>,
+    pub sort: CrateSearchSort,
+    pub limit: u32,
+    pub count: usize,
+    pub freshness_checks_performed: usize,
+    pub refresh_jobs_enqueued: usize,
+    pub provenance: String,
+    pub hits: Vec<CrateSearchHit>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateSearchHit {
+    pub name: String,
+    pub description: Option<String>,
+    pub repository_url: Option<String>,
+    pub docs_url: Option<String>,
+    pub homepage_url: Option<String>,
+    pub categories: Vec<String>,
+    pub keywords: Vec<String>,
+    pub total_downloads: i64,
+    pub latest_published_at: Option<String>,
+    pub dependent_crates: i64,
+    pub rank_score: f64,
+    pub match_reasons: Vec<String>,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateSearchRow {
+    pub(super) crate_id: i64,
+    pub(super) name: String,
+    pub(super) description: Option<String>,
+    pub(super) repository_url: Option<String>,
+    pub(super) docs_url: Option<String>,
+    pub(super) homepage_url: Option<String>,
+    pub(super) categories: Vec<String>,
+    pub(super) keywords: Vec<String>,
+    pub(super) total_downloads: i64,
+    pub(super) latest_version: Option<String>,
+    pub(super) latest_published_at: Option<String>,
+    pub(super) dependent_count: i64,
+    pub(super) relevance_score: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct IndexSyncCratesRequest {
+    pub query: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+    pub include_dependencies: Option<bool>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexSyncCratesResponse {
+    pub query: String,
+    pub page: u32,
+    pub per_page: u32,
+    pub total_candidates: u64,
+    pub synced_crates: usize,
+    pub synced_versions: usize,
+    pub synced_dependencies: usize,
+    pub selected_versions: Vec<String>,
+    pub errors: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexRefreshScope {
+    Crate,
+    All,
+    Security,
+    Docs,
+    LocalCache,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct IndexRefreshRequest {
+    pub scope: Option<IndexRefreshScope>,
+    pub crate_name: Option<String>,
+    pub query: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+    pub include_dependencies: Option<bool>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexRefreshResponse {
+    pub job_id: String,
+    pub scope: IndexRefreshScope,
+    pub accepted: bool,
+    pub status: String,
+    pub message: String,
+    pub estimated_seconds: Option<u32>,
+    pub started_at_epoch_ms: u128,
+    pub finished_at_epoch_ms: Option<u128>,
+    pub result: Option<IndexRefreshResult>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexRefreshResult {
+    pub synced_crates: usize,
+    pub synced_versions: usize,
+    pub synced_dependencies: usize,
+    pub selected_versions: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct IndexStatusRequest {}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexStatusResponse {
+    pub freshness: IndexFreshness,
+    pub coverage: IndexCoverage,
+    pub queue: IndexQueue,
+    pub retry_distribution: IndexRetryDistribution,
+    pub failures_by_scope: Vec<IndexFailureByScope>,
+    pub last_errors: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexFreshness {
+    pub crates_updated_at: Option<String>,
+    pub source_indexed_at: Option<String>,
+    pub symbols_indexed_at: Option<String>,
+    pub docs_indexed_at: Option<String>,
+    pub advisories_updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexCoverage {
+    pub crates: i64,
+    pub crate_versions: i64,
+    pub dependency_edges: i64,
+    pub advisory_matches: i64,
+    pub source_files: i64,
+    pub symbols: i64,
+    pub docs_pages: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexQueue {
+    pub pending_jobs: i64,
+    pub delayed_jobs: i64,
+    pub retrying_jobs: i64,
+    pub running_jobs: i64,
+    pub failed_jobs: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct IndexRetryDistribution {
+    pub inflight_attempt_1: i64,
+    pub inflight_attempt_2: i64,
+    pub inflight_attempt_3_plus: i64,
+    pub failed_attempt_1: i64,
+    pub failed_attempt_2: i64,
+    pub failed_attempt_3_plus: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema, FromRow)]
+pub struct IndexFailureByScope {
+    pub scope: String,
+    pub failed_jobs: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateIntelRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub versions_limit: Option<u32>,
+    pub dependents_limit: Option<u32>,
+    pub readme_max_chars: Option<u32>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateIntelResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub selected_version_published_at: Option<String>,
+    pub latest_version: String,
+    pub total_downloads: i64,
+    pub last_updated_at: Option<String>,
+    pub description: Option<String>,
+    pub repository_url: Option<String>,
+    pub docs_url: Option<String>,
+    pub homepage_url: Option<String>,
+    pub categories: Vec<String>,
+    pub keywords: Vec<String>,
+    pub readme: Option<String>,
+    pub readme_truncated: bool,
+    pub version_history: Vec<CrateIntelVersion>,
+    pub dependencies: Vec<CrateIntelDependency>,
+    pub dependents: Vec<CrateIntelDependent>,
+    pub dependent_crate_count: i64,
+    pub advisories: Vec<CrateIntelAdvisory>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateIntelVersion {
+    pub version: String,
+    pub published_at: Option<String>,
+    pub yanked: bool,
+    pub downloads: i64,
+    pub has_advisory: bool,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateIntelDependency {
+    pub crate_name: String,
+    pub requirement: String,
+    pub dependency_kind: String,
+    pub optional: bool,
+    pub features: Vec<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateIntelDependent {
+    pub crate_name: String,
+    pub latest_version: Option<String>,
+    pub total_downloads: i64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateIntelAdvisory {
+    pub advisory_id: String,
+    pub title: String,
+    pub severity: Option<String>,
+    pub url: Option<String>,
+    pub affected_range: String,
+    pub fixed_versions: Vec<String>,
+    pub source: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateCoreRow {
+    pub(super) id: i64,
+    pub(super) name: String,
+    pub(super) description: Option<String>,
+    pub(super) repository_url: Option<String>,
+    pub(super) docs_url: Option<String>,
+    pub(super) homepage_url: Option<String>,
+    pub(super) categories: Vec<String>,
+    pub(super) keywords: Vec<String>,
+    pub(super) updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateVersionSelectionRow {
+    pub(super) id: i64,
+    pub(super) version: String,
+    pub(super) published_at: Option<String>,
+    pub(super) readme: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateVersionHistoryRow {
+    pub(super) version: String,
+    pub(super) published_at: Option<String>,
+    pub(super) yanked: bool,
+    pub(super) total_downloads: i64,
+    pub(super) has_advisory: bool,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateDependencyRow {
+    pub(super) dependency_name: String,
+    pub(super) requirement: String,
+    pub(super) dependency_kind: String,
+    pub(super) optional: bool,
+    pub(super) features: Value,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateDependentRow {
+    pub(super) crate_name: String,
+    pub(super) latest_version: Option<String>,
+    pub(super) total_downloads: i64,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct CrateAdvisoryRow {
+    pub(super) advisory_id: String,
+    pub(super) title: String,
+    pub(super) severity: Option<String>,
+    pub(super) url: Option<String>,
+    pub(super) affected_range: String,
+    pub(super) fixed_versions: Value,
+    pub(super) source: String,
+}

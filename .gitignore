@@ -1,0 +1,4 @@
+/target
+.env
+pg_data/
+mcp_data/
