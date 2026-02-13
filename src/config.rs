@@ -27,11 +27,11 @@ pub struct Config {
     #[arg(long, env = "MCP_SSE_RETRY_MS", default_value_t = 3000)]
     pub mcp_sse_retry_ms: u64,
 
-    /// PostgreSQL connection string.
+    /// PostgreSQL connection string (unix socket by default in Docker).
     #[arg(
         long,
         env = "DATABASE_URL",
-        default_value = "postgres://postgres:postgres@postgres:5432/rust_mcp"
+        default_value = "postgres://postgres@%2Frun%2Fpostgresql/rust_mcp"
     )]
     pub database_url: String,
 

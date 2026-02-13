@@ -1,33 +1,13 @@
 services:
-  postgres:
-    image: postgres:17-alpine
-    container_name: rust-mcp-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-rust_mcp}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-rust_mcp}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - rust-mcp-net
-
   rust-mcp:
+    image: rust-mcp
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rust-mcp-server
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rust_mcp}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres@%2Frun%2Fpostgresql/rust_mcp}
       MCP_HTTP_BIND: ${MCP_HTTP_BIND:-0.0.0.0:43173}
       MCP_SSE_KEEP_ALIVE_SECS: ${MCP_SSE_KEEP_ALIVE_SECS:-15}
       MCP_SSE_RETRY_MS: ${MCP_SSE_RETRY_MS:-3000}
@@ -45,13 +25,8 @@ services:
     volumes:
       - ${HOME}/.cargo/registry:/cargo/registry:ro
       - mcp_data:/var/lib/rust-mcp
-    networks:
-      - rust-mcp-net
+      - pg_data:/var/lib/postgresql/data
 
 volumes:
-  pg_data:
   mcp_data:
-
-networks:
-  rust-mcp-net:
-    driver: bridge
+  pg_data:

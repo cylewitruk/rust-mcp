@@ -24,14 +24,17 @@ test:
 run:
   cargo --locked run -p rust-mcp
 
-compose-up:
-  docker compose up --build -d
+cbuild:
+  docker compose build rust-mcp
 
-compose-down:
+up:
+  docker compose up rust-mcp --build -d
+
+down:
   docker compose down
 
-compose-logs:
+logs:
   docker compose logs -f rust-mcp
 
-compose-ps:
+ps:
   docker compose ps

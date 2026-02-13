@@ -32,15 +32,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Final runtime image
 FROM alpine:3.23 AS runtime
 
-RUN apk add --no-cache ca-certificates tzdata ripgrep
+RUN apk add --no-cache ca-certificates tzdata ripgrep postgresql18 postgresql18-contrib su-exec
 
-RUN addgroup -S rust-mcp && adduser -S -G rust-mcp -H -s /sbin/nologin rust-mcp
+# Separate users: postgres owns the DB, rust-mcp runs the application
+RUN addgroup -S rust-mcp && adduser -S -G rust-mcp -H -s /sbin/nologin rust-mcp && \
+    mkdir -p /var/lib/postgresql/data /run/postgresql && \
+    chown -R postgres:postgres /var/lib/postgresql /run/postgresql
 
 WORKDIR /app
 
 COPY --from=build /out/rust-mcp /usr/local/bin/rust-mcp
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER rust-mcp
+# Entrypoint runs as root, drops to postgres for DB and rust-mcp for the app
 EXPOSE 43173
+VOLUME /var/lib/postgresql/data
 
-ENTRYPOINT ["/usr/local/bin/rust-mcp"]
+ENTRYPOINT ["docker-entrypoint.sh"]
