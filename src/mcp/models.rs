@@ -54,6 +54,7 @@ pub(super) struct CratesIoVersionRecord {
     pub(super) downloads: Option<i64>,
     pub(super) checksum: Option<String>,
     pub(super) rust_version: Option<String>,
+    pub(super) license: Option<String>,
     #[serde(default)]
     pub(super) features: BTreeMap<String, Vec<String>>,
 }
@@ -270,6 +271,30 @@ pub struct ResponseFreshnessSource {
     pub source: String,
     pub status: String,
     pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfidenceLevel {
+    High,
+    Medium,
+    Low,
+}
+
+impl ConfidenceLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct ConfidenceAssessment {
+    pub level: ConfidenceLevel,
+    pub reason: String,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -531,6 +556,201 @@ pub struct CrateFeaturesRequest {
     pub version: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateApiDiffRequest {
+    pub crate_name: String,
+    pub from_version: String,
+    pub to_version: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateLicenseCheckRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub allow_licenses: Option<Vec<String>>,
+    pub deny_licenses: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateAlternativesRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub limit: Option<u32>,
+    pub allow_licenses: Option<Vec<String>>,
+    pub deny_licenses: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CrateHotspotsRequest {
+    pub crate_name: String,
+    pub version: Option<String>,
+    pub path_glob: Option<String>,
+    pub include_unsafe: Option<bool>,
+    pub include_concurrency: Option<bool>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LicensePolicyResult {
+    Allowed,
+    Denied,
+    Unknown,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateLicenseCheckResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub license_expression: Option<String>,
+    pub matched_licenses: Vec<String>,
+    pub allow_licenses: Vec<String>,
+    pub deny_licenses: Vec<String>,
+    pub policy_result: LicensePolicyResult,
+    pub policy_reasons: Vec<String>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateAlternativesResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub limit: u32,
+    pub count: usize,
+    pub allow_licenses: Vec<String>,
+    pub deny_licenses: Vec<String>,
+    pub alternatives: Vec<CrateAlternativeHit>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateAlternativeHit {
+    pub crate_name: String,
+    pub latest_version: Option<String>,
+    pub description: Option<String>,
+    pub categories: Vec<String>,
+    pub keywords: Vec<String>,
+    pub total_downloads: i64,
+    pub dependent_crates: i64,
+    pub advisory_count: i64,
+    pub yanked: bool,
+    pub license_expression: Option<String>,
+    pub policy_result: LicensePolicyResult,
+    pub policy_reasons: Vec<String>,
+    pub score: f64,
+    pub rank_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HotspotKind {
+    Unsafe,
+    Concurrency,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HotspotSeverity {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateHotspotsResponse {
+    pub crate_name: String,
+    pub selected_version: String,
+    pub latest_version: String,
+    pub path_glob: Option<String>,
+    pub include_unsafe: bool,
+    pub include_concurrency: bool,
+    pub limit: u32,
+    pub scanned_files: usize,
+    pub count: usize,
+    pub hotspots: Vec<CrateHotspotHit>,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateHotspotHit {
+    pub path: String,
+    pub line: u32,
+    pub kind: HotspotKind,
+    pub pattern: String,
+    pub severity: HotspotSeverity,
+    pub snippet: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct CrateApiDiffResponse {
+    pub crate_name: String,
+    pub from_version: String,
+    pub to_version: String,
+    pub added_count: usize,
+    pub removed_count: usize,
+    pub changed_count: usize,
+    pub breaking_changes_detected: bool,
+    pub changes: Vec<CrateApiDiffChange>,
+    pub truncated: bool,
+    pub freshness_check_performed: bool,
+    pub freshness_check_result: String,
+    pub refresh_enqueued: bool,
+    pub refresh_job_id: Option<String>,
+    pub freshness: Vec<ResponseFreshnessSource>,
+    pub confidence: String,
+    pub confidence_assessment: ConfidenceAssessment,
+    pub next_best_calls: Vec<String>,
+    pub provenance: String,
+}
+
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct CrateApiDiffChange {
+    pub name: String,
+    pub kind: String,
+    pub change_type: CrateApiDiffChangeType,
+    pub from_signature: Option<String>,
+    pub to_signature: Option<String>,
+    pub from_visibility: Option<String>,
+    pub to_visibility: Option<String>,
+    pub breaking_change: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CrateApiDiffChangeType {
+    Added,
+    Removed,
+    SignatureChanged,
+    VisibilityChanged,
+}
+
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct CrateFeaturesResponse {
     pub crate_name: String,
@@ -786,9 +1006,44 @@ pub(super) struct CrateVersionTimelineRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(super) struct AlternativesCandidateRow {
+    pub(super) crate_name: String,
+    pub(super) description: Option<String>,
+    pub(super) categories: Vec<String>,
+    pub(super) keywords: Vec<String>,
+    pub(super) latest_version: Option<String>,
+    pub(super) total_downloads: i64,
+    pub(super) yanked: bool,
+    pub(super) advisory_count: i64,
+    pub(super) license_expression: Option<String>,
+    pub(super) dependent_count: i64,
+    pub(super) name_similarity: f64,
+}
+
+#[derive(Debug, FromRow)]
+pub(super) struct HotspotSourceFileRow {
+    pub(super) path: String,
+    pub(super) content: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct CrateVersionLicenseRow {
+    pub(super) version: String,
+    pub(super) license_expression: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
 pub(super) struct CrateFeatureRow {
     pub(super) feature_name: String,
     pub(super) enables: Value,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub(super) struct ApiDiffSymbolRow {
+    pub(super) name: String,
+    pub(super) kind: String,
+    pub(super) signature: Option<String>,
+    pub(super) visibility: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -818,4 +1073,30 @@ pub(super) struct GraphDependentTraversalRow {
     pub(super) requirement: String,
     pub(super) dependency_kind: String,
     pub(super) optional: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ConfidenceAssessment, ConfidenceLevel};
+
+    #[test]
+    fn confidence_level_serializes_lowercase() {
+        let value = serde_json::to_string(&ConfidenceLevel::High).expect("serialize confidence");
+        assert_eq!(value, "\"high\"");
+    }
+
+    #[test]
+    fn confidence_assessment_round_trips_reason() {
+        let original = ConfidenceAssessment {
+            level: ConfidenceLevel::Medium,
+            reason: "symbols missing signatures for 2 entries".to_string(),
+        };
+
+        let encoded = serde_json::to_string(&original).expect("serialize confidence assessment");
+        let decoded: ConfidenceAssessment =
+            serde_json::from_str(&encoded).expect("deserialize confidence assessment");
+
+        assert_eq!(decoded.level.as_str(), "medium");
+        assert_eq!(decoded.reason, "symbols missing signatures for 2 entries");
+    }
 }

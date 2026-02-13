@@ -90,6 +90,24 @@ pub(super) fn graph_depth(value: Option<u32>) -> u32 {
     value.unwrap_or(1).clamp(1, 4)
 }
 
+pub(super) fn api_diff_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(500)
+        .clamp(1, 2_000)
+}
+
+pub(super) fn alternatives_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(10)
+        .clamp(1, 50)
+}
+
+pub(super) fn hotspots_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(100)
+        .clamp(1, 500)
+}
+
 pub(super) fn readme_limit(value: Option<u32>) -> usize {
     value
         .unwrap_or(25_000)

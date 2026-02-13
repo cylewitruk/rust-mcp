@@ -9,8 +9,10 @@ use rmcp::{Json, ServerHandler, tool, tool_handler, tool_router};
 use tracing::warn;
 
 use super::models::{
+    CrateAlternativesRequest, CrateAlternativesResponse, CrateApiDiffRequest, CrateApiDiffResponse,
     CrateFeaturesRequest, CrateFeaturesResponse, CrateGraphRequest, CrateGraphResponse,
-    CrateIntelRequest, CrateIntelResponse, CrateSearchRequest, CrateSearchResponse,
+    CrateHotspotsRequest, CrateHotspotsResponse, CrateIntelRequest, CrateIntelResponse,
+    CrateLicenseCheckRequest, CrateLicenseCheckResponse, CrateSearchRequest, CrateSearchResponse,
     CrateVersionsRequest, CrateVersionsResponse, DocsSearchRequest, DocsSearchResponse,
     IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
     IndexSyncCratesRequest, IndexSyncCratesResponse, PingRequest, SourceReadRequest,
@@ -159,6 +161,45 @@ impl McpServer {
     }
 
     #[tool(
+        name = "crate.api_diff",
+        description = "Compare indexed public symbols between two crate versions and report \
+                       added, removed, and changed API entries."
+    )]
+    async fn crate_api_diff(
+        &self,
+        Parameters(request): Parameters<CrateApiDiffRequest>,
+    ) -> Result<Json<CrateApiDiffResponse>, String> {
+        self.instrument_tool("crate.api_diff", self.handle_crate_api_diff(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.license_check",
+        description = "Return indexed license metadata for a crate version and evaluate optional \
+                       allow/deny policy lists."
+    )]
+    async fn crate_license_check(
+        &self,
+        Parameters(request): Parameters<CrateLicenseCheckRequest>,
+    ) -> Result<Json<CrateLicenseCheckResponse>, String> {
+        self.instrument_tool("crate.license_check", self.handle_crate_license_check(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.alternatives",
+        description = "Suggest ranked alternative crates using taxonomy overlap, adoption/risk \
+                       signals, and optional license policy filters."
+    )]
+    async fn crate_alternatives(
+        &self,
+        Parameters(request): Parameters<CrateAlternativesRequest>,
+    ) -> Result<Json<CrateAlternativesResponse>, String> {
+        self.instrument_tool("crate.alternatives", self.handle_crate_alternatives(request))
+            .await
+    }
+
+    #[tool(
         name = "crate.versions",
         description = "Return a normalized crate version timeline with yanked/security/adoption \
                        markers."
@@ -181,6 +222,19 @@ impl McpServer {
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
         self.instrument_tool("crate.graph", self.handle_crate_graph(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.hotspots",
+        description = "Detect unsafe and concurrency hotspots in indexed crate source for a \
+                       selected version."
+    )]
+    async fn crate_hotspots(
+        &self,
+        Parameters(request): Parameters<CrateHotspotsRequest>,
+    ) -> Result<Json<CrateHotspotsResponse>, String> {
+        self.instrument_tool("crate.hotspots", self.handle_crate_hotspots(request))
             .await
     }
 

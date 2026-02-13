@@ -10,11 +10,11 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 
 ## Current baseline (honest status)
 
-- Core infrastructure and all MCP tools through M6 are implemented and usable.
+- Core infrastructure and all MCP tools through M7 are implemented and usable.
 - Prometheus metrics export is operational via standalone `metrics-exporter-prometheus` HTTP listener on a dedicated port (default 9090). Tool call counters, latency histograms, and refresh job gauges are all exposed.
 - SQL-backed tool invocation history is retained for `index.status` operational metrics.
-- Remaining gaps are in high-value capabilities (P2) and agentic tools (P3).
-- Minor spec-compliance gap: `confidence` field uses string values but the spec suggests `high/medium/low` with reason — current implementation is functional but could be more structured.
+- Remaining planned gaps are concentrated in agentic tools (P3).
+- Confidence signaling is now structured for new M7 tools (`confidence_assessment` with level + reason), while legacy tools may still return string-only confidence.
 
 ## Prioritization
 
@@ -34,10 +34,10 @@ Close the spec-vs-implementation gaps identified in the 2026-02 analysis, with p
 
 ### P2 (high-value capabilities from spec section 4)
 
-1. API diff between crate versions (public symbol changes)
-2. License/policy checks
-3. Alternatives suggestions
-4. Unsafe/concurrency hotspots index
+1. ~~API diff between crate versions (public symbol changes)~~ — **Done** via `crate.api_diff`
+2. ~~License/policy checks~~ — **Done** via `crate.license_check`
+3. ~~Alternatives suggestions~~ — **Done** via `crate.alternatives`
+4. ~~Unsafe/concurrency hotspots index~~ — **Done** via `crate.hotspots`
 
 ### P3 (new agentic development tools — beyond original spec)
 
@@ -91,12 +91,14 @@ Status: Completed (2026-02-13)
 
 ### M7: High-value capabilities (P2)
 
+Status: Completed (2026-02-13)
+
 #### Work items
 
-- API diff engine over indexed symbols across versions.
-- License policy checks over crate metadata.
-- Alternatives ranking using categories/keywords/dependents/downloads.
-- Unsafe/concurrency hotspot extraction from indexed source.
+- API diff engine over indexed symbols across versions (`crate.api_diff`).
+- License policy checks over crate metadata (`crate.license_check`).
+- Alternatives ranking using categories/keywords/dependents/downloads (`crate.alternatives`).
+- Unsafe/concurrency hotspot extraction from indexed source (`crate.hotspots`).
 
 #### Acceptance criteria
 
@@ -137,6 +139,7 @@ Status: Completed (2026-02-13)
 ## Tracking and governance
 
 - Source of truth for active work: this file.
+- M7 completion note (2026-02-13): delivered `crate.api_diff`, `crate.license_check`, `crate.alternatives`, and `crate.hotspots` with provenance/freshness/confidence contract fields.
 - Retired docs:
   - `docs/implementation-checklist.md`
   - `docs/unspecced-ideas.md`

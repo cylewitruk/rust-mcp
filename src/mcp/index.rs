@@ -620,9 +620,9 @@ impl McpServer {
             let version_id = sqlx::query_scalar::<_, i64>(
                 "INSERT INTO crate_versions (
                     crate_id, version, published_at, yanked, total_downloads, rust_version, \
-                 checksum, created_at, updated_at
+                 checksum, license_expression, created_at, updated_at
                  ) VALUES (
-                    $1, $2, $3::timestamptz, $4, $5, $6, $7, NOW(), NOW()
+                          $1, $2, $3::timestamptz, $4, $5, $6, $7, $8, NOW(), NOW()
                  )
                  ON CONFLICT (crate_id, version) DO UPDATE SET
                     published_at = COALESCE(EXCLUDED.published_at, crate_versions.published_at),
@@ -630,6 +630,10 @@ impl McpServer {
                     total_downloads = EXCLUDED.total_downloads,
                     rust_version = COALESCE(EXCLUDED.rust_version, crate_versions.rust_version),
                     checksum = COALESCE(EXCLUDED.checksum, crate_versions.checksum),
+                          license_expression = COALESCE(
+                                EXCLUDED.license_expression,
+                                crate_versions.license_expression
+                          ),
                     updated_at = NOW()
                  RETURNING id",
             )
@@ -648,6 +652,7 @@ impl McpServer {
                     .as_deref(),
             )
             .bind(version.checksum.as_deref())
+            .bind(version.license.as_deref())
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| {

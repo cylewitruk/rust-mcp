@@ -1,8 +1,12 @@
+mod alternatives;
+mod api_diff;
 mod docs_intel;
 mod features;
 mod graph;
+mod hotspots;
 mod index;
 mod intel;
+mod license;
 mod local_cache;
 mod metrics;
 mod models;
