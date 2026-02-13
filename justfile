@@ -3,29 +3,35 @@ set dotenv-load := false
 default:
   @just --list
 
+build:
+    cargo --locked build --all-targets --release
+
 fmt:
-  cargo fmt
+    cargo +nightly --locked fmt --all
 
-check:
-  cargo check
+lint:
+    RUST_LOG=warn cargo --locked clippy --all-targets -- -D warnings
+    cargo check --locked --all-targets
+    cargo +nightly --locked fmt --all -- --check
 
-clippy:
-  cargo clippy --all-targets -- -D warnings
+fix:
+    RUST_LOG=warn cargo --locked clippy --fix --all-targets --allow-dirty
+    cargo +nightly --locked fmt --all
 
 test:
-  cargo test
+  cargo --locked nextest run
 
 run:
-  cargo run
+  cargo --locked run -p rust-mcp
 
-up:
+compose-up:
   docker compose up --build -d
 
-down:
+compose-down:
   docker compose down
 
-logs:
+compose-logs:
   docker compose logs -f rust-mcp
 
-ps:
+compose-ps:
   docker compose ps

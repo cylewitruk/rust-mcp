@@ -75,6 +75,10 @@ pub struct Config {
     #[arg(long, env = "MCP_DATA_DIR", default_value = "/var/lib/rust-mcp")]
     pub data_dir: PathBuf,
 
+    /// Optional local path to a checked-out RustSec advisory-db repository.
+    #[arg(long, env = "RUSTSEC_DB_DIR")]
+    pub rustsec_db_dir: Option<PathBuf>,
+
     /// Tracing filter string (RUST_LOG style).
     #[arg(long, env = "RUST_LOG", default_value = "info,rust_mcp=debug,sqlx=warn")]
     pub rust_log: String,

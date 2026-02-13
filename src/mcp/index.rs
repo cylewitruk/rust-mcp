@@ -1317,9 +1317,18 @@ impl McpServer {
                 let page = sync_page(request.page);
                 let per_page = sync_per_page(request.per_page);
                 let offset = page.saturating_sub(1) * per_page;
-                let outcome = self
+                let mut outcome = self
                     .sync_osv_security(per_page, offset)
                     .await?;
+                let rustsec_outcome = self
+                    .sync_rustsec_db_security(per_page, offset)
+                    .await?;
+                let rustsec_enabled = self
+                    .state
+                    .config
+                    .rustsec_db_dir
+                    .is_some();
+                outcome.merge(rustsec_outcome);
 
                 Ok(Json(IndexRefreshResponse {
                     job_id,
@@ -1351,12 +1360,25 @@ impl McpServer {
                             checked_at: None,
                         },
                         ResponseFreshnessSource {
+                            source: "rustsec-db".to_string(),
+                            status: if rustsec_enabled {
+                                "refreshed".to_string()
+                            } else {
+                                "skipped".to_string()
+                            },
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
                             source: "local_postgres_index".to_string(),
                             status: "updated".to_string(),
                             checked_at: None,
                         },
                     ],
-                    provenance: "osv.dev + local_postgres_index".to_string(),
+                    provenance: if rustsec_enabled {
+                        "osv.dev + rustsec-db + local_postgres_index".to_string()
+                    } else {
+                        "osv.dev + local_postgres_index".to_string()
+                    },
                 }))
             }
             IndexRefreshScope::LocalCache => {

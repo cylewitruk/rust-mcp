@@ -1,23 +1,44 @@
-FROM rust:1.93-bookworm AS builder
+ARG RUST_VERSION=1.93
+FROM rust:${RUST_VERSION}-alpine AS build
+
+ENV CARGO_TARGET_DIR=/app/target
+ENV CARGO_INCREMENTAL=0
+ENV RUSTFLAGS="-C strip=symbols"
+ENV CARGO_HOME=/usr/local/cargo
+
+RUN apk add --no-cache build-base git openssl-dev pkgconfig
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-COPY migrations ./migrations
+COPY Cargo.toml Cargo.lock README.md ./
 
-RUN cargo build --release --locked
+# Dummy source for dependency caching
+RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
 
-FROM debian:bookworm-slim AS runtime
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo fetch --locked
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata ripgrep \
-    && rm -rf /var/lib/apt/lists/*
+# Copy real source
+COPY ./src ./src
+COPY ./migrations ./migrations
 
-RUN useradd --create-home --home-dir /home/rust-mcp --shell /usr/sbin/nologin rust-mcp
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked && \
+    install -D /app/target/release/rust-mcp /out/rust-mcp
+
+# Final runtime image
+FROM alpine:3.23 AS runtime
+
+RUN apk add --no-cache ca-certificates tzdata ripgrep
+
+RUN addgroup -S rust-mcp && adduser -S -G rust-mcp -H -s /sbin/nologin rust-mcp
 
 WORKDIR /app
-COPY --from=builder /app/target/release/rust-mcp /usr/local/bin/rust-mcp
+
+COPY --from=build /out/rust-mcp /usr/local/bin/rust-mcp
 
 USER rust-mcp
 EXPOSE 43173

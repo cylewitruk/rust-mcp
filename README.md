@@ -58,7 +58,7 @@ curl -X POST http://127.0.0.1:43173/mcp \
 - `crate.graph`: returns depth-bounded dependency/dependent graph nodes and edges for `dependencies`, `dependents`, or `both` directions.
 - `source.search`: searches indexed source files by `text` or `regex` mode, with optional `crate_name`, `version`, and `path_glob` filters.
 - `source.read`: returns a line-bounded slice of an indexed source file by `crate_name` + `path` (optionally pinning `version`).
-- `symbol.search`: searches indexed symbols by symbol name with optional `crate_name`, `version`, and `kind` filters; supports opaque cursor pagination (`cursor`/`next_cursor`) with `page`+`limit` fallback, and `include_all_versions` (default `false`, latest-version only).
+- `symbol.search`: searches indexed symbols by symbol name with optional `crate_name`, `version`, and `kind` filters; supports opaque cursor pagination (`cursor`/`next_cursor`) with `page`+`limit` fallback, `include_all_versions` (default `false`, latest-version only), and `collapse_by_canonical` (default `false`) to deduplicate by canonical symbol identity across versions.
 - `docs.search`: searches indexed docs.rs pages with optional `crate_name`, `version`, and `path_prefix` filters.
 
 Quality contract fields now included in `crate.search`, `crate.intel`, `crate.versions`, and `crate.graph` responses:
@@ -143,6 +143,7 @@ Quality contract fields now included in `crate.search`, `crate.intel`, `crate.ve
   "query": "Serializer",
   "crate_name": "serde",
   "include_all_versions": false,
+  "collapse_by_canonical": true,
   "cursor": "<next_cursor_from_previous_response>",
   "page": 1,
   "limit": 25
@@ -156,6 +157,7 @@ Quality contract fields now included in `crate.search`, `crate.intel`, `crate.ve
   "query": "Serializer",
   "crate_name": "serde",
   "include_all_versions": false,
+  "collapse_by_canonical": true,
   "cursor": null,
   "next_cursor": "eyJ2IjoxLCJvZmZzZXQiOjI1LCJsaW1pdCI6MjUsInF1ZXJ5IjoiU2VyaWFsaXplciIsImNyYXRlX25hbWUiOiJzZXJkZSIsInZlcnNpb24iOm51bGwsImtpbmQiOm51bGwsImluY2x1ZGVfYWxsX3ZlcnNpb25zIjpmYWxzZX0",
   "page": 1,
@@ -180,7 +182,7 @@ Quality contract fields now included in `crate.search`, `crate.intel`, `crate.ve
 `symbol.search` cursor contract:
 
 - `cursor` must be treated as opaque; clients should only pass through `next_cursor` values from prior responses.
-- If `cursor` is provided, filter fields (`query`, `crate_name`, `version`, `kind`, `include_all_versions`) must match the original request.
+- If `cursor` is provided, filter fields (`query`, `crate_name`, `version`, `kind`, `include_all_versions`, `collapse_by_canonical`) must match the original request.
 - If `cursor` is provided and `limit` is also provided, it must match the original page size.
 - Invalid, stale, or mismatched cursor tokens return a request error.
 
@@ -194,7 +196,7 @@ Query memoization:
 - Stale-while-revalidate flow: stale crates may be minimally refreshed inline, with deep refresh enqueued in `refresh_jobs`.
 - Missing requested version flow: targeted inline backfill is attempted, then deep refresh is queued.
 - Background worker: processes due jobs from `refresh_jobs`, retries failures with jittered bounded backoff, and marks terminal failures after max attempts.
-- Security refresh: `index.refresh` with `scope=security` ingests OSV advisory data into `advisory_matches` for indexed crates, preferring RustSec advisory IDs when present and normalizing severity into `critical|high|medium|low|unknown`.
+- Security refresh: `index.refresh` with `scope=security` ingests OSV advisory data into `advisory_matches` for indexed crates, and also ingests native RustSec advisory-db metadata when `RUSTSEC_DB_DIR` points to a local advisory-db checkout (`crates/<crate_name>/*.md`), including withdrawn/category context and patched/unaffected ranges.
 - Local source refresh: `index.refresh` with `scope=local_cache` scans `CARGO_REGISTRY_DIR/src`, incrementally upserts text source files into `source_files`, parses Rust files via `syn` to index symbols into `symbols`, and prunes stale rows for scanned crate versions.
 - Docs refresh: `index.refresh` with `scope=docs` fetches docs.rs pages for indexed crate versions and stores normalized page text in `docs_pages` for `docs.search`.
 
