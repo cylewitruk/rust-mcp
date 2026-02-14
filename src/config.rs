@@ -102,6 +102,10 @@ pub struct Config {
     #[arg(long, env = "RUSTSEC_DB_DIR")]
     pub rustsec_db_dir: Option<PathBuf>,
 
+    /// Optional local directory containing pre-generated rustdoc JSON files.
+    #[arg(long, env = "RUSTDOC_JSON_DIR")]
+    pub rustdoc_json_dir: Option<PathBuf>,
+
     /// Tracing filter string (RUST_LOG style).
     #[arg(long, env = "RUST_LOG", default_value = "info,rust_mcp=debug,sqlx=warn")]
     pub rust_log: String,

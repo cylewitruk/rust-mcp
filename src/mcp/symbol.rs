@@ -418,6 +418,7 @@ mod tests {
             cargo_registry_dir: PathBuf::from("/tmp"),
             data_dir: PathBuf::from("/tmp"),
             rustsec_db_dir: None,
+            rustdoc_json_dir: None,
             prometheus_bind: "127.0.0.1:9090"
                 .parse::<SocketAddr>()
                 .expect("valid socket address"),

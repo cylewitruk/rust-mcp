@@ -207,6 +207,14 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 )
                 .await
                 .map(|_| ()),
+            "rustdoc_json" => server
+                .sync_rustdoc_json_cache(
+                    optional_job_crate_name(&job.crate_name, payload.crate_name),
+                    payload.page,
+                    payload.per_page,
+                )
+                .await
+                .map(|_| ()),
             other => {
                 Err(format!("unsupported refresh scope '{}' for crate '{}'", other, job.crate_name))
             }
@@ -1352,6 +1360,49 @@ impl McpServer {
         }))
     }
 
+    async fn estimated_refresh_duration_seconds(
+        &self,
+        scope: IndexRefreshScope,
+    ) -> Result<Option<u32>, String> {
+        let scope_key = match scope {
+            IndexRefreshScope::Crate => "crate",
+            IndexRefreshScope::All => "all",
+            IndexRefreshScope::Security => "security",
+            IndexRefreshScope::Docs => "docs",
+            IndexRefreshScope::LocalCache => "local_cache",
+            IndexRefreshScope::RustdocJson => "rustdoc_json",
+        };
+
+        let (sample_count, average_seconds) = sqlx::query_as::<_, (i64, Option<f64>)>(
+            "SELECT
+                COUNT(*)::BIGINT,
+                AVG(EXTRACT(EPOCH FROM (finished_at - started_at)))::DOUBLE PRECISION
+             FROM refresh_jobs
+             WHERE scope = $1
+               AND status = 'finished'
+               AND started_at IS NOT NULL
+               AND finished_at IS NOT NULL
+               AND finished_at >= NOW() - INTERVAL '30 days'",
+        )
+        .bind(scope_key)
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| format!("index.refresh ETA estimate failed for scope {scope_key}: {e}"))?;
+
+        if sample_count < 3 {
+            return Ok(None);
+        }
+
+        let Some(average_seconds) = average_seconds else {
+            return Ok(None);
+        };
+
+        let clamped = average_seconds
+            .round()
+            .clamp(1.0, 86_400.0);
+        Ok(Some(clamped as u32))
+    }
+
     pub(super) async fn handle_index_refresh(
         &self,
         request: IndexRefreshRequest,
@@ -1361,6 +1412,9 @@ impl McpServer {
             .unwrap_or(IndexRefreshScope::Crate);
         let started_at_epoch_ms = now_epoch_millis();
         let job_id = format!("job-{started_at_epoch_ms}");
+        let estimated_seconds = self
+            .estimated_refresh_duration_seconds(scope)
+            .await?;
 
         match scope {
             IndexRefreshScope::Crate => {
@@ -1384,7 +1438,8 @@ impl McpServer {
                         accepted: true,
                         status: "completed".to_string(),
                         message: format!("refreshed {crate_name}"),
-                        estimated_seconds: Some(1),
+                        estimated_seconds,
+                        estimated_seconds_remaining: Some(0),
                         started_at_epoch_ms,
                         finished_at_epoch_ms: Some(now_epoch_millis()),
                         result: Some(IndexRefreshResult {
@@ -1418,7 +1473,8 @@ impl McpServer {
                         accepted: true,
                         status: "failed".to_string(),
                         message: format!("refresh failed for {crate_name}"),
-                        estimated_seconds: Some(1),
+                        estimated_seconds,
+                        estimated_seconds_remaining: Some(0),
                         started_at_epoch_ms,
                         finished_at_epoch_ms: Some(now_epoch_millis()),
                         result: Some(IndexRefreshResult {
@@ -1460,7 +1516,8 @@ impl McpServer {
                     accepted: true,
                     status: "completed".to_string(),
                     message: "completed sync over search page".to_string(),
-                    estimated_seconds: Some(5),
+                    estimated_seconds,
+                    estimated_seconds_remaining: Some(0),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
                     result: Some(IndexRefreshResult {
@@ -1504,7 +1561,8 @@ impl McpServer {
                         "security sync processed {} crates and wrote {} advisory matches",
                         outcome.crates_processed, outcome.advisories_written
                     ),
-                    estimated_seconds: Some(10),
+                    estimated_seconds,
+                    estimated_seconds_remaining: Some(0),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
                     result: Some(IndexRefreshResult {
@@ -1568,7 +1626,8 @@ impl McpServer {
                         outcome.upserted_files,
                         outcome.deleted_files
                     ),
-                    estimated_seconds: Some(10),
+                    estimated_seconds,
+                    estimated_seconds_remaining: Some(0),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
                     result: Some(IndexRefreshResult {
@@ -1611,7 +1670,8 @@ impl McpServer {
                         "docs sync processed {} crate versions and wrote {} docs pages",
                         outcome.versions_processed, outcome.pages_written
                     ),
-                    estimated_seconds: Some(10),
+                    estimated_seconds,
+                    estimated_seconds_remaining: Some(0),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
                     result: Some(IndexRefreshResult {
@@ -1634,6 +1694,51 @@ impl McpServer {
                         },
                     ],
                     provenance: "docs.rs + local_postgres_index".to_string(),
+                }))
+            }
+            IndexRefreshScope::RustdocJson => {
+                let outcome = self
+                    .sync_rustdoc_json_cache(request.crate_name, request.page, request.per_page)
+                    .await?;
+
+                Ok(Json(IndexRefreshResponse {
+                    job_id,
+                    scope,
+                    accepted: true,
+                    status: if outcome.errors.is_empty() {
+                        "completed".to_string()
+                    } else {
+                        "completed_with_errors".to_string()
+                    },
+                    message: format!(
+                        "rustdoc JSON sync scanned {} files, synced {} crate versions, wrote {} \
+                         symbols",
+                        outcome.scanned_files, outcome.synced_versions, outcome.symbols_written
+                    ),
+                    estimated_seconds,
+                    estimated_seconds_remaining: Some(0),
+                    started_at_epoch_ms,
+                    finished_at_epoch_ms: Some(now_epoch_millis()),
+                    result: Some(IndexRefreshResult {
+                        synced_crates: outcome.scanned_files,
+                        synced_versions: outcome.synced_versions,
+                        synced_dependencies: outcome.symbols_written,
+                        selected_versions: outcome.touched_versions,
+                        errors: outcome.errors,
+                    }),
+                    freshness: vec![
+                        ResponseFreshnessSource {
+                            source: "rustdoc_json".to_string(),
+                            status: "scanned".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "local_postgres_index".to_string(),
+                            status: "updated".to_string(),
+                            checked_at: None,
+                        },
+                    ],
+                    provenance: "rustdoc_json + local_postgres_index".to_string(),
                 }))
             }
         }

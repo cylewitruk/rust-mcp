@@ -1,53 +1,102 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use rmcp::Json;
 
 use super::models::{
-    ApiSurfaceRow, ConfidenceAssessment, ConfidenceLevel, CrateApiRequest, CrateApiResponse,
-    CrateApiSymbol, CrateCoreRow, CrateVersionSelectionRow, ResponseFreshnessSource,
+    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
+    DependencyFeatureImpactEntry, DependencyFeatureImpactRequest, DependencyFeatureImpactResponse,
+    FeatureImpactDependencyRow, FeatureImpactFeatureRow, ResponseFreshnessSource,
 };
 use super::server::McpServer;
-use super::utils::{crate_api_limit, normalize_optional, normalize_required, path_glob_to_like};
+use super::utils::{
+    feature_impact_heavy_threshold, normalize_optional, normalize_required, value_to_string_vec,
+};
 
-fn normalize_kind_filters(input: Option<Vec<String>>) -> Vec<String> {
-    let mut out = input
-        .unwrap_or_default()
-        .into_iter()
-        .map(|value| {
-            value
-                .trim()
-                .to_ascii_lowercase()
-        })
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    out.sort();
-    out.dedup();
-    out
+fn split_feature_targets(values: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let mut enabled_features = Vec::new();
+    let mut enabled_dependencies = Vec::new();
+
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(dep) = trimmed.strip_prefix("dep:") {
+            let dep = dep.trim();
+            if !dep.is_empty() {
+                enabled_dependencies.push(dep.to_string());
+            }
+        } else {
+            enabled_features.push(trimmed.to_string());
+        }
+    }
+
+    enabled_features.sort();
+    enabled_features.dedup();
+    enabled_dependencies.sort();
+    enabled_dependencies.dedup();
+
+    (enabled_features, enabled_dependencies)
 }
 
-fn allowed_kind_filters(values: Vec<String>) -> Vec<String> {
-    let allowed =
-        ["function", "struct", "enum", "trait", "type_alias", "const", "static", "module"]
-            .into_iter()
-            .map(ToString::to_string)
-            .collect::<BTreeSet<_>>();
+fn expand_feature_dependencies(
+    roots: &[String],
+    feature_to_features: &HashMap<String, Vec<String>>,
+    feature_to_dependencies: &HashMap<String, Vec<String>>,
+) -> BTreeSet<String> {
+    let mut queue = VecDeque::new();
+    let mut visited = HashSet::<String>::new();
+    let mut dependencies = BTreeSet::<String>::new();
 
-    values
-        .into_iter()
-        .filter(|value| allowed.contains(value))
-        .collect()
+    for root in roots {
+        queue.push_back(root.clone());
+    }
+
+    while let Some(feature) = queue.pop_front() {
+        if !visited.insert(feature.clone()) {
+            continue;
+        }
+
+        if let Some(deps) = feature_to_dependencies.get(&feature) {
+            for dep in deps {
+                dependencies.insert(dep.clone());
+            }
+        }
+
+        if let Some(children) = feature_to_features.get(&feature) {
+            for child in children {
+                if !visited.contains(child) {
+                    queue.push_back(child.clone());
+                }
+            }
+        }
+    }
+
+    dependencies
 }
 
 impl McpServer {
-    pub(super) async fn handle_crate_api(
+    pub(super) async fn handle_dependency_feature_impact(
         &self,
-        request: CrateApiRequest,
-    ) -> Result<Json<CrateApiResponse>, String> {
+        request: DependencyFeatureImpactRequest,
+    ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
-        let path_glob = normalize_optional(request.path_glob);
-        let kinds = allowed_kind_filters(normalize_kind_filters(request.kinds));
-        let limit = crate_api_limit(request.limit);
+        let heavy_threshold = feature_impact_heavy_threshold(request.heavy_threshold);
+
+        let mut features = request
+            .features
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        features.sort();
+        features.dedup();
+
+        if features.is_empty() {
+            return Err("features must include at least one non-empty feature name".to_string());
+        }
 
         let crate_row = sqlx::query_as::<_, CrateCoreRow>(
             "SELECT
@@ -197,124 +246,97 @@ impl McpServer {
             latest_version.clone()
         };
 
-        let has_rustdoc_symbols = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT
-             FROM symbols
+        let feature_rows = sqlx::query_as::<_, FeatureImpactFeatureRow>(
+            "SELECT feature_name, enables
+             FROM crate_version_features
              WHERE crate_version_id = $1
-               AND visibility = 'public'
-               AND index_source = 'rustdoc_json'",
+             ORDER BY feature_name ASC",
         )
         .bind(selected_version.id)
-        .fetch_one(&self.state.db)
+        .fetch_all(&self.state.db)
         .await
-        .map_err(|e| format!("crate.api rustdoc source check failed: {e}"))?
-            > 0;
-        let preferred_source = if has_rustdoc_symbols { Some("rustdoc_json") } else { None };
+        .map_err(|e| format!("dependency.feature_impact feature query failed: {e}"))?;
 
-        let rows = if let Some(path_filter) = path_glob.as_deref() {
-            sqlx::query_as::<_, ApiSurfaceRow>(
-                "SELECT
-                    s.name,
-                    s.kind,
-                    s.signature,
-                    s.visibility,
-                    sf.path AS source_path,
-                    s.start_line,
-                    s.end_line,
-                    s.index_source
-                 FROM symbols s
-                 JOIN source_files sf ON sf.id = s.source_file_id
-                 WHERE s.crate_version_id = $1
-                   AND s.visibility = 'public'
-                   AND ($2::TEXT[] IS NULL OR s.kind = ANY($2))
-                                     AND ($3::TEXT IS NULL OR s.index_source = $3)
-                                     AND sf.path ILIKE $4 ESCAPE '\\'
-                 ORDER BY
-                    s.kind ASC,
-                    s.name ASC,
-                    sf.path ASC,
-                    s.start_line ASC,
-                    s.end_line ASC
-                                 LIMIT $5",
-            )
-            .bind(selected_version.id)
-            .bind(if kinds.is_empty() { None } else { Some(kinds.as_slice()) })
-            .bind(preferred_source)
-            .bind(path_glob_to_like(path_filter))
-            .bind(i64::from(limit))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.api query failed: {e}"))?
-        } else {
-            sqlx::query_as::<_, ApiSurfaceRow>(
-                "SELECT
-                    s.name,
-                    s.kind,
-                    s.signature,
-                    s.visibility,
-                    sf.path AS source_path,
-                    s.start_line,
-                    s.end_line,
-                    s.index_source
-                 FROM symbols s
-                 JOIN source_files sf ON sf.id = s.source_file_id
-                 WHERE s.crate_version_id = $1
-                   AND s.visibility = 'public'
-                   AND ($2::TEXT[] IS NULL OR s.kind = ANY($2))
-                                     AND ($3::TEXT IS NULL OR s.index_source = $3)
-                 ORDER BY
-                    s.kind ASC,
-                    s.name ASC,
-                    sf.path ASC,
-                    s.start_line ASC,
-                    s.end_line ASC
-                                 LIMIT $4",
-            )
-            .bind(selected_version.id)
-            .bind(if kinds.is_empty() { None } else { Some(kinds.as_slice()) })
-            .bind(preferred_source)
-            .bind(i64::from(limit))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.api query failed: {e}"))?
-        };
+        let mut feature_to_features = HashMap::<String, Vec<String>>::new();
+        let mut feature_to_dependencies = HashMap::<String, Vec<String>>::new();
+        for row in feature_rows {
+            let enables = value_to_string_vec(&row.enables);
+            let (enabled_features, enabled_dependencies) = split_feature_targets(enables);
+            feature_to_features.insert(row.feature_name.clone(), enabled_features);
+            feature_to_dependencies.insert(row.feature_name, enabled_dependencies);
+        }
 
-        let symbols = rows
-            .into_iter()
-            .map(|row| CrateApiSymbol {
-                name: row.name,
-                kind: row.kind,
-                signature: row.signature,
-                visibility: row.visibility,
-                source_path: row.source_path,
-                start_line: row.start_line,
-                end_line: row.end_line,
-                index_source: row.index_source,
-            })
-            .collect::<Vec<_>>();
+        let dependency_rows = sqlx::query_as::<_, FeatureImpactDependencyRow>(
+            "SELECT
+                c.name AS dependency_name,
+                de.optional
+             FROM dependency_edges de
+             JOIN crates c ON c.id = de.to_crate_id
+             WHERE de.from_version_id = $1",
+        )
+        .bind(selected_version.id)
+        .fetch_all(&self.state.db)
+        .await
+        .map_err(|e| format!("dependency.feature_impact dependency query failed: {e}"))?;
 
-        let confidence_assessment = if symbols.is_empty() {
-            ConfidenceAssessment {
-                level: ConfidenceLevel::Low,
-                reason: "no public symbols matched the selected version/filter constraints"
-                    .to_string(),
+        let mut all_dependencies = BTreeSet::<String>::new();
+        let mut baseline_dependencies = BTreeSet::<String>::new();
+        for row in dependency_rows {
+            all_dependencies.insert(row.dependency_name.clone());
+            if !row.optional {
+                baseline_dependencies.insert(row.dependency_name);
             }
-        } else if symbols
+        }
+
+        let mut per_feature = Vec::<DependencyFeatureImpactEntry>::new();
+        let mut heavy_features = Vec::<String>::new();
+        let mut combined_extras = BTreeSet::<String>::new();
+
+        for feature in &features {
+            let enabled_dependencies = expand_feature_dependencies(
+                std::slice::from_ref(feature),
+                &feature_to_features,
+                &feature_to_dependencies,
+            );
+
+            let additional_dependencies = enabled_dependencies
+                .into_iter()
+                .filter(|dep| {
+                    all_dependencies.contains(dep) && !baseline_dependencies.contains(dep)
+                })
+                .collect::<Vec<_>>();
+
+            if additional_dependencies.len() as u32 >= heavy_threshold {
+                heavy_features.push(feature.clone());
+            }
+
+            for dep in &additional_dependencies {
+                combined_extras.insert(dep.clone());
+            }
+
+            per_feature.push(DependencyFeatureImpactEntry {
+                feature: feature.clone(),
+                additional_dependency_count: additional_dependencies.len(),
+                additional_dependencies,
+            });
+        }
+
+        let confidence_assessment = if per_feature
             .iter()
-            .any(|symbol| symbol.signature.is_none())
+            .all(|entry| entry.additional_dependency_count == 0)
         {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Medium,
-                reason: "some public symbols are missing extracted signatures".to_string(),
+                reason: "feature enables were resolved but no additional indexed dependencies \
+                         were detected"
+                    .to_string(),
             }
         } else {
             ConfidenceAssessment {
                 level: ConfidenceLevel::High,
-                reason: if has_rustdoc_symbols {
-                    "public symbol surface resolved from rustdoc_json indexed symbols".to_string()
-                } else {
-                    "public symbol surface resolved from indexed symbols".to_string()
-                },
+                reason: "feature impact computed from indexed feature metadata and dependency \
+                         edges"
+                    .to_string(),
             }
         };
 
@@ -322,15 +344,16 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        Ok(Json(CrateApiResponse {
+        Ok(Json(DependencyFeatureImpactResponse {
             crate_name: crate_row.name,
             selected_version: selected_version.version,
             latest_version: latest_version.version,
-            path_glob,
-            kinds,
-            limit,
-            count: symbols.len(),
-            symbols,
+            features,
+            heavy_threshold,
+            baseline_dependency_count: baseline_dependencies.len(),
+            combined_dependency_count: baseline_dependencies.len() + combined_extras.len(),
+            per_feature,
+            heavy_features,
             freshness_check_performed: freshness_outcome.freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
             refresh_enqueued,
@@ -353,36 +376,12 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.api_diff".to_string(),
-                "symbol.search".to_string(),
-                "source.read".to_string(),
+                "crate.features".to_string(),
+                "crate.graph".to_string(),
+                "dependency.resolve".to_string(),
             ],
-            provenance: "local_postgres_index".to_string(),
+            provenance: "local_postgres_index(crate_version_features, dependency_edges)"
+                .to_string(),
         }))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{allowed_kind_filters, normalize_kind_filters};
-
-    #[test]
-    fn normalize_kind_filters_dedupes_and_lowers() {
-        let values = normalize_kind_filters(Some(vec![
-            " Function ".to_string(),
-            "trait".to_string(),
-            "function".to_string(),
-        ]));
-        assert_eq!(values, vec!["function".to_string(), "trait".to_string()]);
-    }
-
-    #[test]
-    fn allowed_kind_filters_removes_unknown_values() {
-        let values = allowed_kind_filters(vec![
-            "function".to_string(),
-            "macro".to_string(),
-            "module".to_string(),
-        ]);
-        assert_eq!(values, vec!["function".to_string(), "module".to_string()]);
     }
 }

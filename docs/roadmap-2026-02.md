@@ -8,7 +8,7 @@ Supersedes: `docs/roadmap-gap-closure-2026-02.md`, `docs/m7-implementation-check
 
 ## Current baseline
 
-All milestones M5–M8 from the prior roadmap are complete. The server ships 20 MCP tools across crate intelligence, source/symbol search, dependency audit, and docs search. Infrastructure includes Prometheus metrics, per-source rate limiting, adaptive TTL refresh, and a durable job queue.
+All milestones M5–M13 are complete. The server now includes expanded type intelligence, ecosystem resolution support, operational progress signaling, and semantic source context tooling on top of the prior baseline. Infrastructure includes Prometheus metrics, per-source rate limiting, adaptive TTL refresh, and a durable job queue.
 
 ### Completed milestone summary
 
@@ -18,6 +18,24 @@ All milestones M5–M8 from the prior roadmap are complete. The server ships 20 
 | M6 | `crate.features`, MSRV surfacing, `crate.graph` cycle detection, Prometheus, request throttle | Done |
 | M7 | `crate.api_diff`, `crate.license_check`, `crate.alternatives`, `crate.hotspots` | Done |
 | M8 | `crate.api`, `crate.compare`, `dependency.audit` | Done |
+| M9 | confidence contract unification + README parity | Done |
+| M10 | `crate.type_info`, `crate.trait_impls`, type intelligence schema/indexing | Done |
+| M11 | `dependency.resolve`, `crate.usage_patterns` | Done |
+| M12 | `crate.re_exports`, `crate.error_types`, `dependency.feature_impact` | Done |
+| M13 | progress streaming + `index.refresh` ETA fields | Done |
+
+### Post-milestone backlog progress (2026-02-14)
+
+The following backlog items were also completed after M13 as non-breaking additions:
+
+- **B5** `crate.derive_macros` implemented (best-effort proc-macro export discovery).
+- **C4** `source.context` implemented (module path/import/impl/type context at a source location).
+- **`crate.compatibility`** implemented as pairwise resolver wrapper over `dependency.resolve`.
+- **`crate.compatibility_matrix`** implemented for bounded multi-version pair evaluation across two crates.
+- **`crate.migration_path`** implemented as migration guidance over `crate.api_diff` breaking changes.
+- **`crate.migration_path` heuristic upgrade** implemented with basic rename-candidate hints from added/removed symbol pairs.
+- **Rustdoc JSON bootstrap** implemented via `index.refresh scope=rustdoc_json` for local file ingestion into indexed symbols.
+- **Rustdoc JSON hardening** implemented with metadata-based crate matching and `crate.api` preference for rustdoc-indexed symbols when present.
 
 ## Backlog overview
 
@@ -188,6 +206,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 ### B5. `crate.derive_macros` — procedural macro discovery
 
+**Status**: Completed (2026-02-14)
+
 **Priority**: Low
 **Rationale**: Procedural macros are invisible to static analysis and are a major source of agent confusion. Knowing that `serde` provides `#[derive(Serialize)]` with attributes like `#[serde(rename_all = "...")]` is critical context.
 
@@ -289,6 +309,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 ### C4. `source.context` — semantic context around a location
 
+**Status**: Completed (2026-02-14)
+
 **Priority**: Low
 **Rationale**: When `symbol.search` returns a function at file:line, agents often need the surrounding context (imports, module path, containing `impl` block) to use it correctly.
 
@@ -318,6 +340,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 ### M9: Confidence unification + README (Track A)
 
+**Status**: Completed
+
 **Scope**: A1, A2
 **Effort**: Small
 **Risk**: Low — purely cosmetic/contract changes, no new tools.
@@ -328,6 +352,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 - README accurately describes the server's capabilities and operational behavior.
 
 ### M10: Type intelligence foundation (Track B core)
+
+**Status**: Completed
 
 **Scope**: B1, B2
 **Effort**: Medium-large — requires extending the `syn` parser and DB schema.
@@ -347,6 +373,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 ### M11: Resolution & ecosystem tools (Track C core)
 
+**Status**: Completed
+
 **Scope**: C1, C2
 **Effort**: Medium
 **Dependencies**: None (can run in parallel with M10 if desired).
@@ -363,6 +391,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 ### M12: Extended intelligence (Track B + C remaining)
 
+**Status**: Completed
+
 **Scope**: B3, B4, C3 (B5 and C4 deferred to backlog)
 **Effort**: Medium
 **Dependencies**: M10 (B3 and B4 build on `impl` block extraction from M10).
@@ -374,6 +404,8 @@ These address the three most common Rust agent failure modes: hallucinated metho
 - `dependency.feature_impact` reports per-feature transitive dependency cost.
 
 ### M13: Progress streaming + operational polish (Track A remaining)
+
+**Status**: Completed
 
 **Scope**: A3, A4
 **Effort**: Small-medium
@@ -388,12 +420,9 @@ These address the three most common Rust agent failure modes: hallucinated metho
 
 Items deferred from the milestone plan, to be prioritized based on agent feedback:
 
-- **B5** `crate.derive_macros` — proc macro discovery. Useful but inherently limited without macro expansion.
-- **C4** `source.context` — semantic context around a source location. Valuable but overlaps with IDE tooling.
-- **`crate.migration_path`** — breaking change analysis with fix suggestions between versions. High value but requires heuristics beyond simple API diff (correlating renames, deprecation notices, changelog parsing).
-- **`crate.compatibility`** — pairwise crate compatibility matrix. Partially covered by `dependency.resolve`; dedicated tool may be warranted if resolution simulation proves insufficient.
-- **Rustdoc JSON integration** — phase 3 of the symbol indexing strategy from the spec. Would provide authoritative public API data but requires building crate docs locally.
+- **Rustdoc JSON integration hardening** — broaden the bootstrap to richer signature/typing extraction and stronger crate/version mapping guarantees.
 - **Rust-analyzer protocol integration** — phase 2 of symbol indexing. Semantic definitions/usages. High complexity, unclear ROI for a local MCP server vs in-editor tooling.
+- **Migration heuristics deepening for `crate.migration_path`** — advanced rename/deprecation/changelog correlation beyond current API-diff and basic rename hints.
 
 ## Tracking and governance
 
