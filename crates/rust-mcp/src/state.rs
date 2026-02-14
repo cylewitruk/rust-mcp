@@ -127,7 +127,7 @@ impl AppState {
 
     /// Applies all embedded SQL migrations.
     pub async fn run_migrations(&self) -> anyhow::Result<()> {
-        sqlx::migrate!("./migrations")
+        sqlx::migrate!("../../migrations")
             .run(&self.db)
             .await?;
         Ok(())

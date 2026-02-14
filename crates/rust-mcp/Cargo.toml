@@ -1,10 +1,11 @@
-[workspace]
-resolver = "3"
-members = [
-    "crates/*",
-]
+[package]
+name = "rust-mcp"
+version = "0.1.0"
+edition = "2024"
+description = "Local-first Rust dependency intelligence MCP server"
+license = "MIT OR Apache-2.0"
 
-[workspace.dependencies]
+[dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["json"] }
 base64 = "0.22"
@@ -28,11 +29,11 @@ tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 
-[workspace.lints.rust]
+[lints.rust]
 missing_docs = "warn"
 unused_imports = "warn"
 
-[workspace.lints.clippy]
+[lints.clippy]
 unused_trait_names = "deny"
 unwrap_in_result = "warn"
 empty_loop = "deny"

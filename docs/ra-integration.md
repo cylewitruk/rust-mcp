@@ -22,7 +22,7 @@ Last updated: 2026-02-14
 | `crate.error_types` | Enrichment | Add `?`-propagation chain analysis via RA diagnostics | P3 | Planned |
 | `crate.migration_path` | Enrichment | Ground breakage detection in RA diagnostics, not just API diff | P3 | Planned |
 | RA lifecycle service | Infrastructure | Managed RA subprocess pool with startup, caching, timeouts | P0 | Planned |
-| Sysroot provisioning | Infrastructure | Ship minimal sysroot (std metadata) in container image | P0 | Planned |
+| Sysroot provisioning | Infrastructure | Host-mounted `rust-src` via MCP client-provided sysroot path | P0 | Planned |
 
 ## Motivation
 
@@ -82,7 +82,7 @@ GPT says "strict timeouts + memory caps" without quantifying the problem:
 
 RA requires a Rust sysroot (at minimum, metadata for `std`, `core`, `alloc`) to resolve standard library types. The runtime container has no Rust toolchain. GPT doesn't mention this.
 
-**Correction**: Either ship a minimal sysroot in the container image (metadata only, ~50 MB), or mount the host's sysroot. This is a hard prerequisite.
+**Correction**: Mount the host's `rust-src` into the container (see "Container image changes — Sysroot provisioning"). The MCP client provides the sysroot path for the active workspace toolchain. This is a hard prerequisite for RA analysis.
 
 **4. Version multiplexing problem**
 
@@ -124,7 +124,7 @@ The mounted cargo cache (`~/.cargo/registry/src/`) contains extracted source for
 
 RA runs as a managed subprocess inside the container, communicating via LSP over stdio. The MCP server owns the RA lifecycle.
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │  Docker container                                   │
 │                                                     │
@@ -140,66 +140,186 @@ RA runs as a managed subprocess inside the container, communicating via LSP over
 └─────────────────────────────────────────────────────┘
 ```
 
-**Why subprocess, not sidecar or host bridge:**
+**No `target/` directory explosion (in safe mode)**: When proc-macro expansion and build-script execution are both disabled (the safe default — see Threat Model below), RA performs purely in-memory analysis via the Salsa incremental computation database and a virtual filesystem (VFS). No `target/` directory is created. However, if macro mode is enabled (`procMacro.enable=true`, which implies `cargo.buildScripts.enable=true`), RA will invoke the proc-macro server and may create build artifacts. The configuration matrix:
+
+| Mode | `procMacro.enable` | `buildScripts.enable` | `target/` created | Macro expansion |
+| --- | --- | --- | --- | --- |
+| Safe (default) | `false` | `false` | No | None |
+| Macro mode (opt-in) | `true` | `true` | Yes (constrained) | Full |
+
+**Why subprocess, not sidecar, host bridge, or library:**
 
 - Subprocess keeps the single-container deployment model that defines this project.
 - Host bridge (querying the user's RA instance) would create coupling to the user's IDE state, editor-specific LSP client behavior, and version skew. It also can't analyze crate versions that differ from what the user has in their lock file.
 - Sidecar adds orchestration complexity for no benefit over a managed subprocess.
+- In-process library integration (compiling RA crates directly into the rust-mcp binary) was rejected due to loss of process isolation, rayon/tokio thread pool conflicts, and catastrophic failure blast radius. A separate semantic worker sub-binary using RA crates is under evaluation as a potential alternative to LSP — see "Alternatives considered" for the full two-variant analysis and spike criteria.
 
 ### Container image changes
 
-The Dockerfile runtime stage would need:
+Modern rust-analyzer is a self-contained binary decoupled from the compiler frontend. It does **not** need `cargo`, `clippy`, or `librustc_driver` to run. It does need a sysroot containing standard library source (`rust-src`) and ideally compiled std artifacts (`.rlib` files) for trait resolution.
+
+#### Sysroot provisioning: host-mounted (recommended)
+
+The host machine already has `rust-src` installed as a rustup component. The source files (~74 MB) are platform-independent `.rs` files — the same on macOS, Linux, or Windows. They can be bind-mounted into the container read-only, just like the cargo registry already is.
+
+Different projects may use different toolchains (via `rust-toolchain.toml` or `rustup override`), so the sysroot path varies per workspace:
+
+```sh
+# In project A (pinned to 1.93.0):
+$ rustc --print sysroot
+/Users/dev/.rustup/toolchains/1.93.0-aarch64-apple-darwin
+
+# In project B (using stable):
+$ rustc --print sysroot
+/Users/dev/.rustup/toolchains/stable-aarch64-apple-darwin
+```
+
+Rather than hardcoding a single sysroot in `.env`, the MCP client should provide the sysroot path dynamically. The client already knows the workspace context and can run `rustc --print sysroot` for the active project. The server accepts this at initialization or per-request.
+
+**Docker setup** (planned addition to `docker-compose.yml`): mount the entire toolchains directory so all sysroots are accessible:
+
+```yaml
+# docker-compose.yml (planned)
+volumes:
+  - ${HOME}/.rustup/toolchains:/rustup-toolchains:ro
+```
+
+The MCP client sends the sysroot path (e.g., `/rustup-toolchains/1.93.0-aarch64-apple-darwin/lib/rustlib/src/rust/library`), remapped to the container mount point. The server validates the path exists before passing it to RA.
+
+**Compiled `.rlib` artifacts**: the host's compiled std artifacts are target-specific (e.g., `aarch64-apple-darwin`) and won't work in the Linux container. RA can analyze std from source instead — slightly slower on initial analysis but functionally equivalent. This is a non-issue in safe mode where RA performs purely static analysis.
+
+**Advantages**: no additional OS packages or toolchain dependencies in the runtime image. No `apk add rust-src`, no `rust` compiler package. Works with any toolchain version the user has installed. The MCP client handles sysroot discovery transparently — no user configuration needed.
+
+**Prerequisite**: the user must have `rust-src` installed for at least one toolchain (`rustup component add rust-src`). Most Rust developers already do. The server should validate on startup and return a clear error if the mounted sysroot lacks `rust-src`.
+
+The following two options are alternatives for environments where a host mount is not available or practical (e.g., remote/CI deployments without a host rustup installation):
+
+#### Option A: Alpine `apk` package (self-contained fallback)
+
+Alpine ships `rust-analyzer` as a [community package](https://pkgs.alpinelinux.org/package/edge/community/x86_64/rust-analyzer). Installing it pulls in `rust-src` and `rust` (the compiler) as transitive dependencies:
+
+| Package | Installed size |
+| ------- | -------------- |
+| `rust-analyzer` | ~21 MB (dynamically linked against musl + mimalloc) |
+| `rust-src` | ~74 MB (std library source for sysroot) |
+| `rust` | ~211 MB (rustc + compiled std `.rlib` artifacts — dep of `rust-src`) |
+| **Total** | **~305 MB** (plus transitive shared libs: LLVM, gcc, musl-dev) |
 
 ```dockerfile
 # RA integration layer (optional, behind build arg)
 ARG ENABLE_RA=false
 RUN if [ "$ENABLE_RA" = "true" ]; then \
-      apk add --no-cache rustup && \
-      rustup-init -y --default-toolchain stable --profile minimal --no-modify-path && \
-      ~/.cargo/bin/rustup component add rust-analyzer rust-src && \
-      ln -s ~/.cargo/bin/rust-analyzer /usr/local/bin/rust-analyzer; \
+      apk add --no-cache rust-analyzer; \
     fi
 ```
 
-**Image size impact**: ~400–500 MB additional (toolchain + rust-src + rust-analyzer binary). This should be an opt-in build variant, not the default image.
+**Advantages**: zero manual wiring. Alpine places everything in standard paths — sysroot discovery, proc-macro server, library paths all work automatically. Version is managed by the Alpine package maintainers and tracks stable releases. The `rust` package also provides `rustc`, which RA can use for `proc-macro-srv` and sysroot detection via `rustc --print sysroot`.
 
-**Sysroot**: The `rust-src` component provides the sysroot metadata RA needs. No additional provisioning required if the toolchain is present.
+**Disadvantage**: pulls in the full Rust compiler (~211 MB) which we don't need for anything else. The container image already uses a multi-stage build that discards the build toolchain, so adding it back in the runtime stage is conceptually untidy. However, since RA integration is opt-in behind a build arg, this only affects users who explicitly enable it.
+
+#### Option B: Standalone binary from GitHub releases (leaner image)
+
+Download the statically-linked musl binary directly and provision a minimal sysroot separately:
+
+| Component | Size (approx) |
+| --------- | -------------- |
+| `rust-analyzer` binary (musl static, from [GitHub releases](https://github.com/rust-lang/rust-analyzer/releases)) | ~50-60 MB |
+| `rust-src` (extracted from `apk` or rustup component) | ~74 MB |
+| `rust-std` compiled `.rlib` artifacts | ~130 MB (needed for trait solving) |
+| **Total** | **~255-265 MB** |
+
+```dockerfile
+ARG ENABLE_RA=false
+ARG RA_VERSION=2026-02-09
+RUN if [ "$ENABLE_RA" = "true" ]; then \
+      wget -qO- "https://github.com/rust-lang/rust-analyzer/releases/download/${RA_VERSION}/rust-analyzer-x86_64-unknown-linux-musl.gz" \
+        | gunzip > /usr/local/bin/rust-analyzer && \
+      chmod +x /usr/local/bin/rust-analyzer && \
+      apk add --no-cache rust-src; \
+    fi
+```
+
+**Advantages**: avoids installing `rustc` and LLVM if we can extract `rust-src` independently. Pinned RA version decoupled from Alpine's release cycle.
+
+**Disadvantages**: `rust-src` on Alpine depends on `rust`, so `apk add rust-src` pulls in the compiler anyway — negating the size savings. To truly avoid the compiler, we'd need to extract `rust-src` from a builder stage or rustup component, which adds build complexity. Additionally, without `rustc` in the image, RA cannot auto-detect the sysroot and we must wire `RUST_SYSROOT` or configure it in every `rust-project.json` we generate. The proc-macro server also won't be available without extra work.
+
+#### Recommendation
+
+**Use host-mounted sysroot** for local development (the primary use case). This requires no additional OS packages for sysroot, no user configuration beyond what the MCP client provides automatically, and works with any toolchain the user has installed.
+
+For the **LSP subprocess approach** (Phase 0-1 default): use Option A (`apk add rust-analyzer`) gated behind `ENABLE_RA=false`. The ~305 MB cost is modest for an opt-in feature, and the operational simplicity is significant. Even with a host-mounted sysroot, the stock `rust-analyzer` binary must come from somewhere — Alpine's package is the simplest source. Note: while having `rustc` in the container opens the door to running `cargo doc --output-format json` for container-side rustdoc JSON generation, this is an [unstable feature](https://doc.rust-lang.org/rustdoc/unstable-features.html#json) requiring nightly Rust and `-Z unstable-options`. Host-provided rustdoc JSON remains the stable baseline.
+
+For the **semantic worker approach** (Variant B, if spike succeeds): no additional OS packages or toolchain dependencies are needed. The worker binary is built from source in the Docker build stage and copied into the runtime image alongside rust-mcp. The only image size increase is the worker binary itself (estimated ~50-60 MB based on rust-analyzer release binary size). Combined with the host-mounted sysroot, there are no additional runtime package dependencies.
+
+All approaches should be gated behind `RA_ENABLED=false` by default.
 
 ### RA session management
 
-The core challenge is that RA is designed for long-running editor sessions, not batch queries. We need a session management layer.
+**Why multiple processes**: RA is an LSP server initialized for *one project*. A single RA process cannot analyze both `axum@0.7.5` and `serde@1.0.228` — they have different `rust-project.json` descriptors, different dependency graphs, and different analysis contexts. Switching the project model within one process means re-initialization, which is the expensive part (10-120 seconds depending on crate complexity). So the architecture uses separate RA processes, one per active crate version.
 
-**Proposed model: per-crate-version cached sessions**
+**What "cached session" means**: There are no disk artifacts beyond the generated `rust-project.json` (which is cheap). The "cache" is the RA process *itself* staying alive in memory with its Salsa-based incremental analysis database. After RA initializes for `axum@0.7.5` (expensive), subsequent requests against that same crate — hover, completions, goto-def — are fast (<100ms) because the full type graph is already computed in memory. Killing the process discards all of that; the next query pays full startup cost again.
 
+**Session lifecycle**:
+
+```text
+1. First ra.* query for axum@0.7.5
+   ├─ Generate rust-project.json → /var/lib/rust-mcp/ra-sessions/axum-0.7.5/
+   ├─ Spawn RA subprocess (LSP over stdio)
+   ├─ Send LSP initialize, wait for ready (10-120s)
+   ├─ Handle request (<100ms)
+   └─ Session enters idle state, TTL timer starts
+
+2. Subsequent query for axum@0.7.5 (within TTL)
+   ├─ Reuse living process
+   ├─ Handle request (<100ms)
+   └─ Reset idle TTL timer
+
+3. Idle TTL expires (no queries for RA_SESSION_IDLE_SECS)
+   └─ Kill RA process, reclaim memory
+
+4. Query for different crate (e.g., tower@0.5.2) while axum session alive
+   ├─ If pool has capacity: spawn new RA process for tower
+   └─ If pool full: LRU-evict oldest idle session, then spawn
 ```
-                    ┌────────────────────────────┐
-                    │      RA Session Pool        │
-                    │                             │
-   analyze(tokio)──►│  tokio@1.48 ──► RA proc 1  │
-                    │  serde@1.0  ──► RA proc 2  │
-   analyze(serde)──►│  (LRU evict)               │
-                    └────────────────────────────┘
-```
 
-- On first query for a crate version, spawn an RA subprocess pointed at a synthetic workspace rooted at the crate's source directory in `/cargo/registry/src/`.
-- Keep the session alive for a configurable TTL (e.g., 5 minutes) to amortize startup cost across multiple queries for the same crate.
-- LRU-evict sessions when pool size exceeds a cap (e.g., 3 concurrent sessions).
-- Each session has a hard memory limit (e.g., 2 GB via cgroups or OOM score adjustment) and a per-request timeout (e.g., 30 seconds).
+**Concurrency model**: Multiple concurrent sessions matter because agents typically work with a cluster of related crates. If you're building an axum handler, you'll query `axum`, `tower`, `http`, and `serde` within minutes. With a single slot, every crate switch kills the previous session and re-initializes (~30-120s penalty). With 2-3 slots, the hot working set stays alive.
+
+However, each RA process can use 1-4 GB of RAM for a moderately complex crate. The host machine is also likely running the user's IDE with its own RA instance. So the default should be conservative.
+
+**Configuration**:
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `RA_ENABLED` | `false` | Master switch; `ra.*` tools return "not available" when false |
+| `RA_MAX_SESSIONS` | `1` | Maximum concurrent RA processes. Each uses 1-4 GB RAM. Increase to 2-3 only after benchmarking peak RSS on target hardware |
+| `RA_SESSION_IDLE_SECS` | `300` | Kill idle RA process after this many seconds of no queries |
+| `RA_INIT_TIMEOUT_SECS` | `120` | Maximum time to wait for RA initialization before falling back |
+| `RA_REQUEST_TIMEOUT_SECS` | `30` | Per-request timeout for individual LSP operations |
+| `RA_MEMORY_LIMIT_MB` | `4096` | Per-process RSS limit; kill RA if exceeded |
+
+With the default `RA_MAX_SESSIONS=1`, all queries are serialized through a single RA process. If the agent switches crates, the current session is killed and a new one spawns. This is the conservative default until benchmarks establish actual memory/latency profiles on representative hardware.
+
+With `RA_MAX_SESSIONS=2-3`, the pool keeps multiple crate sessions alive simultaneously. Agent workflows that touch related crates in quick succession benefit from this, at the cost of higher peak memory. Only increase after measuring cold/warm p95 latency and peak RSS on target hardware (see Phase 0 exit criteria).
+
+Requests for a crate whose session is still initializing will queue behind the initialization. Requests for a crate that requires evicting another session will block on the eviction + new initialization. The MCP handler should apply `RA_REQUEST_TIMEOUT_SECS` as an end-to-end ceiling including any initialization wait.
 
 **Synthetic workspace construction**:
 
-For RA to analyze a crate, it needs a `Cargo.toml` at the workspace root. The cargo cache already contains one per crate version. However, RA also needs the *dependency source* to resolve types. The cargo cache structure (`registry/src/index.crates.io-*/<crate>-<version>/`) places all crate sources as siblings, so RA can find transitive deps if they're present.
+RA normally discovers project structure via `cargo metadata`, which requires `cargo` + network access. The cargo cache has individual `Cargo.toml` files per crate but no lock files or resolved dependency graph.
 
-The tricky part: RA normally uses `cargo metadata` to discover the dependency graph, which requires `cargo` and network access. For cached analysis, we'd need to either:
+Instead, we use `rust-project.json` — RA's non-Cargo project format — populated from our indexed `dependency_edges` table:
 
-1. **Generate a synthetic `cargo metadata` JSON** from our indexed `dependency_edges` table and feed it to RA via `rust-analyzer.cargo.buildScripts.overrideCommand` / `rust-project.json`.
-2. **Use `rust-project.json`** (RA's non-Cargo project format) to manually specify crate roots and dependency relationships from our DB.
+1. Query `dependency_edges` for the target crate version's full transitive dependency tree.
+2. For each crate version in the tree, resolve its source path in `/cargo/registry/src/index.crates.io-*/`.
+3. Generate a `rust-project.json` mapping each crate to its `src/lib.rs` root, edition, features, and inter-crate dependency references.
+4. Write to `/var/lib/rust-mcp/ra-sessions/<crate>-<version>/rust-project.json`.
+5. Spawn RA with `--project-root` pointing at that directory.
 
-Option 2 (`rust-project.json`) is more reliable and avoids the cargo dependency entirely.
+This avoids the `cargo` dependency entirely and leverages data we already have. The `rust-project.json` files are small (a few KB even for large dependency trees) and can be cached alongside the session.
 
 ### Query flow
 
-```
+```text
 Agent calls crate.type_info(tokio, Router)
   │
   ▼
@@ -233,11 +353,13 @@ Return response with provenance: "rust_analyzer" or "syn+rust_analyzer"
 Infers the type of an expression at a specific location in crate source. Prevents agent hallucinations about variable types, return types, and closure parameter types.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `path` (source file within the crate)
 - `line`, `column`
 
 **Output**:
+
 - `inferred_type`: fully qualified type string
 - `type_display`: human-readable short form
 - `generic_args`: resolved generic parameters (if applicable)
@@ -255,10 +377,12 @@ Infers the type of an expression at a specific location in crate source. Prevent
 Resolves go-to-definition across module boundaries within a crate. Replaces text-based grep for "where is this symbol actually defined?"
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `path`, `line`, `column`
 
 **Output**:
+
 - `definition_path`: file path within the crate
 - `definition_line`, `definition_column`
 - `definition_kind`: function/struct/trait/etc.
@@ -275,12 +399,14 @@ Resolves go-to-definition across module boundaries within a crate. Replaces text
 Returns available methods, fields, and associated items on a type at a given position. This is the single highest-impact RA tool because it answers "what can I do with this value?" with compiler authority.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `path`, `line`, `column`
 - optional `trigger_character` (`.`, `::`, etc.)
 - optional `limit`
 
 **Output**:
+
 - list of completion items, each with:
   - `label`: method/field name
   - `kind`: method/field/function/const/etc.
@@ -299,11 +425,13 @@ Returns available methods, fields, and associated items on a type at a given pos
 Finds all usages of a symbol within a single crate. Scoped to intra-crate references only — cross-crate usage is handled by `crate.usage_patterns`.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `path`, `line`, `column`
 - optional `include_declaration` (default false)
 
 **Output**:
+
 - list of `(path, line, column, context_snippet)` reference sites
 
 **LSP mapping**: `textDocument/references`.
@@ -317,11 +445,13 @@ Finds all usages of a symbol within a single crate. Scoped to intra-crate refere
 Returns semantic diagnostics for a crate version's source. Not a build — RA produces diagnostics from its own analysis engine.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - optional `path` (scope to one file)
 - optional `severity_filter` (`error`, `warning`)
 
 **Output**:
+
 - list of diagnostics: path, line, severity, message, code
 - summary counts by severity
 
@@ -336,16 +466,25 @@ Returns semantic diagnostics for a crate version's source. Not a build — RA pr
 Returns the canonical public import path for a symbol, accounting for re-exports, glob re-exports, and `#[doc(hidden)]` items.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `symbol_name`
 - optional `kind` filter
 
 **Output**:
+
 - list of valid import paths, ranked by canonicality (shortest public path first)
 - `is_public`: whether each path is accessible from outside the crate
 - `is_deprecated`: if the path traverses deprecated modules
 
-**LSP mapping**: custom RA extension `rust-analyzer/resolveImport` or workspace symbol search + path resolution.
+**LSP mapping**: composed operation — no single RA extension provides this directly. The implementation:
+
+1. Use `workspace/symbol` to find the symbol by name within the crate, returning all definition sites.
+2. For each definition site, use `textDocument/definition` to resolve through re-exports to the canonical definition.
+3. Reconstruct the shortest public module path from crate root using RA's document symbol hierarchy (`textDocument/documentSymbol`) and the definition location.
+4. Cross-reference with indexed `crate.re_exports` data and rustdoc JSON (when available) to validate and rank paths.
+
+This is more complex than a single RPC but produces higher-fidelity results by combining RA's semantic resolution with existing indexed data.
 
 **Agent value**: directly fixes the incorrect-import-path problem. When an agent needs to use `tokio::sync::mpsc::Sender`, this tool confirms that's the right path vs `tokio::sync::mpsc::bounded::Sender` (internal) or some other re-export. Supersedes much of what `crate.re_exports` does with syn-only parsing.
 
@@ -356,10 +495,12 @@ Returns the canonical public import path for a symbol, accounting for re-exports
 Expands a macro invocation and returns the generated code. Critical for understanding derive macros and proc macros.
 
 **Input**:
+
 - `crate_name`, optional `version`
 - `path`, `line`, `column` (position of the macro invocation or derive attribute)
 
 **Output**:
+
 - `expanded_code`: the generated Rust source
 - `macro_name`: which macro was expanded
 - `expansion_kind`: derive/attribute/function-like
@@ -390,9 +531,9 @@ Expands a macro invocation and returns the generated code. Critical for understa
 
 **Current state**: explicit `impl Trait for Type` blocks + derive attribute inference. Cannot detect blanket impls, conditional impls with where clauses, or auto traits.
 
-**With RA**: RA's trait solver knows all impls including blanket, auto, and conditionally-bounded ones. Use RA's `rust-analyzer/viewItemTree` or hover-based trait resolution.
+**With RA**: use `textDocument/hover` on type positions to extract the trait impl list from RA's hover output (which includes "Implementations" sections). For specific type-trait pairs, construct a synthetic expression and use `textDocument/completion` to verify trait method availability. RA's trait solver knows all impls including blanket, auto, and conditionally-bounded ones, but this information must be extracted via hover/completion — not via `rust-analyzer/viewItemTree`, which is a debugging endpoint with no stability guarantees.
 
-**Limitation**: RA still can't enumerate "all types that implement trait X" across a whole crate efficiently. The bidirectional "trait → types" direction remains best-effort.
+**Limitation**: RA still can't enumerate "all types that implement trait X" across a whole crate efficiently via standard LSP operations. The bidirectional "trait → types" direction remains best-effort, using indexed `impl` block data as primary source and RA only for contextual validation.
 
 ### `crate.re_exports` (P2)
 
@@ -418,14 +559,98 @@ Expands a macro invocation and returns the generated code. Critical for understa
 
 ### Resource limits
 
-| Resource | Limit | Rationale |
-|----------|-------|-----------|
-| Max concurrent RA sessions | 3 | Each session uses 1–4 GB RAM; 3 sessions cap peak at ~12 GB |
-| Per-session memory cap | 4 GB | Kill RA process if RSS exceeds this |
-| Per-request timeout | 30 seconds | Prevent runaway analysis on pathological crates |
-| Session idle TTL | 5 minutes | Amortize startup across related queries |
-| RA initialization timeout | 120 seconds | Large crates (tokio, bevy) take time to analyze |
-| Analysis cache TTL | 24 hours | Re-analyze if crate source changes (hash check) |
+All limits are configurable via the environment variables documented in the session management section above (`RA_MAX_SESSIONS`, `RA_SESSION_IDLE_SECS`, `RA_INIT_TIMEOUT_SECS`, `RA_REQUEST_TIMEOUT_SECS`, `RA_MEMORY_LIMIT_MB`). Defaults are chosen for a developer laptop running an IDE alongside the MCP server.
+
+### Threat model and hardening
+
+#### Container-wide network firewall
+
+The container should enforce an outbound network allowlist regardless of whether RA is enabled. The server has a small, well-defined set of external dependencies:
+
+| Destination | Purpose |
+| --- | --- |
+| `crates.io` | Crate metadata API |
+| `static.crates.io` | Crate download CDN (redirected from crates.io) |
+| `docs.rs` | Documentation page crawling |
+| `api.osv.dev` | OSV vulnerability database queries |
+
+All other outbound traffic (including from RA subprocesses and any proc-macro/build-script code) should be blocked by default.
+
+**Implementation**: `iptables` rules applied in `docker-entrypoint.sh` before dropping privileges. The entrypoint resolves allowed hostnames to IPs at startup and creates OUTPUT chain rules:
+
+```sh
+# Configurable allowlist with sensible defaults
+OUTBOUND_ALLOWLIST="${OUTBOUND_ALLOWLIST:-crates.io,static.crates.io,docs.rs,api.osv.dev}"
+
+# Always allow: loopback, established connections, DNS
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+
+# Allow HTTPS to each allowed host
+IFS=',' ; for host in $OUTBOUND_ALLOWLIST; do
+  for ip in $(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u); do
+    iptables -A OUTPUT -p tcp --dport 443 -d "$ip" -j ACCEPT
+  done
+done
+
+# Drop everything else outbound
+iptables -A OUTPUT -p tcp --dport 1:65535 -j DROP
+iptables -A OUTPUT -p udp --dport 1:65535 -j DROP
+```
+
+**Configuration**:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OUTBOUND_ALLOWLIST` | `crates.io,static.crates.io,docs.rs,api.osv.dev` | Comma-separated hostnames permitted for outbound HTTPS |
+| `OUTBOUND_FIREWALL` | `true` | Set to `false` to disable the firewall entirely (development/debugging) |
+
+**IPv6 policy**: The `iptables` rules above only cover IPv4. To prevent IPv6 bypass, the entrypoint should also apply matching `ip6tables` rules, or disable IPv6 in the container entirely (`sysctl net.ipv6.conf.all.disable_ipv6=1`). Since the allowlist destinations are resolved via `getent ahosts` (which returns both A and AAAA records), the firewall setup should iterate over both address families. The simpler approach is to disable IPv6 at the container level (planned addition to `docker-compose.yml`):
+
+```yaml
+# docker-compose.yml (planned)
+sysctls:
+  net.ipv6.conf.all.disable_ipv6: 1
+```
+
+**Caveats**:
+
+- Requires `iptables` package in the runtime image and `NET_ADMIN` capability (or `--cap-add=NET_ADMIN` in Docker). Alternatively, if the container runs as `--privileged` or with `--cap-add=NET_RAW,NET_ADMIN`, this works out of the box.
+- DNS resolution at startup means CDN IP changes during long container lifetimes won't be tracked. A periodic re-resolution cronjob or TTL-aware refresh could address this, but adds complexity. For typical container lifetimes (hours to days), startup resolution is sufficient.
+- Docker's own network policies (`--network=none`, custom bridge rules) are complementary and can provide an additional layer, but the in-container firewall is self-documenting and portable.
+
+#### RA-specific hardening
+
+RA upstream explicitly states: ["rust-analyzer assumes that all code is trusted."](https://rust-analyzer.github.io/book/security.html) By default, RA executes proc macros and build scripts, both of which run arbitrary code. Since this server analyzes third-party crate source from the cargo registry, this is a real attack surface. The container-wide firewall above provides the network layer; the controls below address RA-specific risks.
+
+**Safe mode (default)**: All RA sessions launch with proc-macro expansion and build-script execution disabled:
+
+```json
+{
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.cargo.buildScripts.enable": false
+}
+```
+
+These settings are passed via LSP `initialize` params. In safe mode, RA performs purely static analysis — name resolution, type inference, trait solving — without executing any crate code. The tradeoff is that derive macro expansions and build-script-generated code are invisible to analysis.
+
+**Macro mode (opt-in)**: When `RA_MACRO_EXPANSION=true` is set, RA sessions launch with `procMacro.enable=true` (which implies `buildScripts.enable=true`). This enables full macro expansion but requires additional hardening beyond the network firewall:
+
+- **Filesystem**: RA process restricted to read-only access on `/cargo/registry` and its session directory. No write access to other paths. Enforced via container user permissions (the `rust-mcp` user has no write access outside `/var/lib/rust-mcp/`).
+- **Network**: Already blocked by the container-wide firewall. Proc-macro and build-script code cannot make outbound connections to arbitrary hosts.
+- **Resource limits**: `RA_MEMORY_LIMIT_MB` enforced via RSS monitoring + SIGKILL. `RA_REQUEST_TIMEOUT_SECS` as hard wall-clock ceiling.
+- **`targetDir` isolation**: When macro mode creates build artifacts, constrain them to `/var/lib/rust-mcp/ra-sessions/<crate>-<version>/target/` via `rust-analyzer.cargo.targetDir` configuration. This directory is per-session and cleaned up on session eviction.
+- **Kill-on-timeout**: If RA does not respond to a cancellation request within 5 seconds, SIGKILL the process.
+
+**RA-specific configuration**:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RA_MACRO_EXPANSION` | `false` | Enable proc-macro expansion and build scripts in RA sessions |
+
+Macro mode is not required for Phase 1-2 tools (`ra.type_at`, `ra.definition`, `ra.completions`, `ra.references`, `ra.import_path`). It only becomes necessary for `ra.expand_macro` (Phase 3) and full-fidelity `crate.trait_impls` enrichment for derive-heavy crates.
 
 ### Graceful degradation
 
@@ -460,14 +685,20 @@ Merged results (syn + RA) use `"provenance": "syn+rust_analyzer"`.
 **Scope**: Container, session management, no user-facing tools.
 
 **Work**:
-- Add optional RA + toolchain to Dockerfile (build arg gated).
+
+- Add optional RA binary to Dockerfile (build arg gated for LSP approach; built from source for worker approach).
+- Add `~/.rustup/toolchains` volume mount to `docker-compose.yml`.
+- Implement MCP client sysroot handshake: accept sysroot path at initialization, validate `rust-src` presence in mounted toolchains.
 - Implement `RaSessionManager`: spawn, pool, LRU evict, timeout, health check.
 - Implement `rust-project.json` generation from indexed `dependency_edges` for a target crate version.
-- Implement sysroot detection and validation at startup.
 - Add `ra_enabled` flag to `index.status` response.
-- Add config: `RA_ENABLED`, `RA_MAX_SESSIONS`, `RA_SESSION_TTL_SECS`, `RA_REQUEST_TIMEOUT_SECS`, `RA_MEMORY_LIMIT_MB`.
+- Add config env vars as documented in session management section.
 
-**Exit criteria**: RA subprocess can be spawned, sent an `initialize` LSP request, and return capabilities for a cached crate version. Session pool manages lifecycle correctly.
+**Exit criteria**:
+
+- RA subprocess can be spawned, sent an `initialize` LSP request, and return capabilities for a cached crate version. Session pool manages lifecycle correctly.
+- `rust-project.json` generation from `dependency_edges` produces descriptors that RA accepts without initialization errors for a corpus of at least 10 popular crates with varying dependency complexity (e.g., `serde`, `tokio`, `axum`, `reqwest`, `sqlx`). Initialization success rate >= 80% on the test corpus, with explicit fallback taxonomy for failure modes (missing transitive deps, edition mismatches, feature resolution gaps).
+- Baseline benchmarks recorded: cold initialization p95 latency, warm query p95 latency, and peak RSS per session for the test corpus. These inform `RA_MAX_SESSIONS` and timeout defaults.
 
 ### Phase 1: Core query tools (P1)
 
@@ -476,6 +707,7 @@ Merged results (syn + RA) use `"provenance": "syn+rust_analyzer"`.
 **Rationale**: These are the highest-value tools targeting the most common agent failures (wrong types, wrong signatures, wrong methods). They also exercise the most common LSP request paths (hover, definition, completion), validating the infrastructure.
 
 **Exit criteria**:
+
 - `ra.type_at` returns correct inferred types for variables in indexed crate source.
 - `ra.definition` resolves cross-module definitions within a crate.
 - `ra.completions` returns method lists matching `cargo doc` output.
@@ -486,6 +718,7 @@ Merged results (syn + RA) use `"provenance": "syn+rust_analyzer"`.
 **Scope**: `ra.references`, `ra.diagnostics`, `ra.import_path` + enrichment for `crate.re_exports` and `crate.trait_impls`.
 
 **Exit criteria**:
+
 - `ra.references` finds intra-crate usages accurately.
 - `ra.import_path` returns canonical paths matching rustdoc output.
 - `crate.trait_impls` includes blanket and auto trait impls when RA is available.
@@ -495,14 +728,163 @@ Merged results (syn + RA) use `"provenance": "syn+rust_analyzer"`.
 **Scope**: `ra.expand_macro` + enrichments for `crate.error_types` and `crate.migration_path`.
 
 **Exit criteria**:
+
 - `ra.expand_macro` returns expanded derive macro code.
 - `crate.migration_path` can identify concrete breakage sites beyond API diff.
 
 ## Alternatives considered
 
+### Library integration (using RA crates directly)
+
+Instead of running RA as an LSP subprocess, pull its internal crates (`ide`, `hir`, `load-cargo`, `project-model`) as git dependencies and invoke analysis functions via Rust API rather than LSP JSON-RPC.
+
+**Background**: The `ide` crate provides `AnalysisHost` / `Analysis` types with direct function calls — `analysis.hover()`, `analysis.completions()`, `analysis.goto_definition()`, etc. The `load-cargo` crate provides `load_workspace()` which returns a `RootDatabase` that can be wrapped in `AnalysisHost`. The `project-model` crate supports `ProjectJson::new()` for programmatic project descriptor construction. The `analysis-stats` CLI command in the RA repo demonstrates this pattern working outside LSP.
+
+**Why it was considered**: RA is optimized for IDE environments and normally builds/checks all dependencies, causing `target/` directory explosion. Using RA crates directly would skip LSP transport overhead and could target only the semantic functions needed for dependency intelligence (type/impl/import/macro insights), emitting structured artifacts directly for DB indexing rather than parsing LSP-shaped responses.
+
+**Key finding: the `target/` concern is already solved in safe mode.** When RA loads via `rust-project.json` with proc-macro and build-script execution disabled (the default), it does **not** invoke `cargo check` or `cargo build`. Analysis is purely in-memory via the Salsa incremental computation database and a virtual filesystem (VFS). No `target/` directory is created. This applies to all integration approaches — `rust-project.json` + safe mode is the mechanism that avoids build artifact explosion, not the integration model. (When macro mode is enabled, build artifacts are created regardless of approach — see Threat Model section.)
+
+There are two distinct variants of library integration with different risk profiles.
+
+#### Variant A: In-process RA crates inside main rust-mcp binary (rejected)
+
+Compile RA crates directly into the rust-mcp binary and call `Analysis` methods from MCP tool handlers on the tokio runtime.
+
+**Rejected because**:
+
+1. **No process isolation.** RA's Salsa database for a moderately complex crate uses 1-4 GB of RAM. In-process, a panic in RA analysis code crashes the entire MCP server. Memory cannot be reclaimed without dropping the entire `AnalysisHost`. With a subprocess, `SIGKILL` provides hard guarantees on resource reclamation.
+
+2. **Thread pool conflicts.** RA uses rayon internally for parallel type inference. rust-mcp uses tokio. Two competing runtimes in the same process creates CPU scheduling contention and complicates resource accounting.
+
+3. **Blast radius.** A bug or OOM in RA analysis takes down the MCP server, PostgreSQL health checks, Prometheus metrics, and all in-flight tool requests. The server's reliability contract requires that RA failures degrade gracefully, not catastrophically.
+
+These are hard blockers for in-process embedding. The remaining risks (dependency chain, sysroot, version coupling) also apply but would be survivable in isolation.
+
+#### Variant B: RA semantic worker as a separate sub-binary (candidate for spike)
+
+Build a dedicated `rust-mcp-ra-worker` binary that links the RA crates and runs as a managed subprocess of rust-mcp. It communicates with the main process over a purpose-built protocol (e.g., structured IPC, not LSP), and emits semantic artifacts directly for DB indexing.
+
+**How it differs from the LSP subprocess approach**:
+
+| Aspect | LSP subprocess (current default) | RA semantic worker (Variant B) |
+| --- | --- | --- |
+| Binary | Stock `rust-analyzer` from Alpine apk | Custom `rust-mcp-ra-worker` built from RA crates |
+| Protocol | LSP JSON-RPC over stdio | Purpose-built IPC (e.g., bincode over stdio, or shared-memory) |
+| Output shape | LSP responses (hover markdown, completion items) that must be parsed and re-structured | Structured semantic data (types, impls, paths, signatures) written directly in rust-mcp's model types |
+| Analysis scope | Full LSP server surface; we use a subset | Only the semantic functions needed: type resolution, trait solving, import path resolution, macro expansion |
+| Container deps | `apk add rust-analyzer` (~305 MB opt-in) | Zero — binary built from source in build stage; sysroot from host mount |
+| RA version coupling | Independent; upgrade via `apk upgrade` | Pinned to a git commit; upgrade requires rebuild |
+
+**Potential advantages**:
+
+- **Targeted extraction.** The worker can invoke exactly the `hir` and `ide` functions needed for dependency intelligence — `Type::iterate_method_candidates()`, `Module::find_use_path()`, `Module::declarations()` — and emit results as structured data directly compatible with the `symbols`, `type_members`, and `trait_impls` DB tables. No parsing hover markdown or completion item labels.
+- **Batch indexing.** Instead of answering individual LSP queries, the worker can walk an entire crate's type graph in one pass, producing a complete semantic index. This amortizes RA initialization cost across all types in the crate, rather than paying per-query overhead.
+- **Process isolation preserved.** As a separate binary, it still runs as a subprocess. Panics, OOM, and runaway analysis are contained. `SIGKILL` still works for resource enforcement.
+- **No additional OS packages or toolchain dependencies.** The worker binary is built from source in the Docker build stage and copied alongside rust-mcp. No `apk add rust-analyzer`, no `rust` compiler package, no `rust-src` in the image. The only image size increase is the worker binary itself (estimated ~50-60 MB). Combined with the host-mounted sysroot (see Container image changes), there are no additional runtime package dependencies.
+
+**Risks that remain**:
+
+1. **Proc-macro expansion still needs a proc-macro server.** RA's proc-macro expansion loads dylibs via a separate server binary. The worker would either bundle `proc-macro-srv` (additional complexity) or operate in safe-mode-only for initial phases.
+
+2. **Version coupling and upgrade cost.** RA crates are versioned `0.0.0`, unpublished, and exist only in the rust-analyzer workspace. Depending on them requires git dependencies pinned to a specific commit hash. There are no stability guarantees — function signatures, types, and module structure can change between commits. This is a manageable but real maintenance cost. Mitigation strategies:
+   - Pin to tagged RA releases (weekly cadence) rather than arbitrary commits.
+   - Depend on the highest-level crate APIs (`ide::Analysis`, `hir::Semantics`) which change less frequently than internal modules.
+   - Budget periodic upgrade work (estimated: 2-4 hours per quarterly RA version bump for API migration, based on observed RA changelog cadence).
+   - Maintain a focused integration surface — fewer call sites into RA crates means less code to update on version bumps.
+
+**Build cost is an accepted tradeoff.** The `ide` crate transitively pulls in ~30 internal RA crates. A full `cargo build --release` of the entire rust-analyzer binary completes in ~54 seconds on a 16-core laptop (critical path: `hir-ty` 21s → `hir` → `ide-db` → `ide`). A `rust-mcp-ra-worker` with a narrower surface would be comparable or faster. This is acceptable given the release policy:
+
+- Image rebuilds are infrequent — monthly cadence, or when Rust releases new versions / critical RA bugfixes.
+- Docker layer caching amortizes RA crate compilation across builds where the RA pin is unchanged.
+- Users are expected to consume prebuilt images by default; source builds are for contributors.
+
+Build time is explicitly a non-goal for decision-making. The real decision criteria are semantic extraction quality, runtime memory/latency, RA API churn maintenance cost, and security posture.
+
+#### Decision: default path and spike evaluation
+
+The recommended default path remains **RA subprocess via LSP** for initial rollout (Phase 0-1). This is lower-risk, operationally simpler, and validates the core value proposition (does RA-backed semantic data measurably improve agent accuracy?) without committing to a custom binary.
+
+A bounded spike should evaluate the semantic worker approach in parallel with or after Phase 1. The spike should:
+
+1. Build a minimal `rust-mcp-ra-worker` binary that loads a single crate via `load-cargo` + `rust-project.json` and extracts the type/impl/trait graph via `hir` APIs.
+2. Compare the extracted data against the same crate processed via LSP subprocess.
+3. Measure against the acceptance criteria below.
+
+**Concrete prototype call chain** (pinned to `vendor/rust-analyzer` @ `c75729db68`):
+
+```rust
+// 1. Construct ProjectJson from dependency_edges data
+let project_json = ProjectJson::new(
+    None,                          // no manifest file
+    &crate_source_root,            // AbsPath to crate source
+    project_json_data,             // ProjectJsonData (serde struct)
+);
+
+// 2. Load workspace into RA's database
+let workspace = ProjectWorkspace::load_inline(
+    project_json,
+    &cargo_config,                 // CargoConfig with sysroot path
+    &|msg| tracing::debug!("{}", msg),
+);
+let load_config = LoadCargoConfig {
+    load_out_dirs_from_check: false, // safe mode: no build scripts
+    with_proc_macro_server: ProcMacroServerChoice::None,
+    prefill_caches: false,
+    proc_macro_processes: 0,       // no proc-macro server in safe mode
+};
+let (db, vfs, _) = load_workspace(workspace, &extra_env, &load_config)?;
+
+// 3. Wrap in AnalysisHost for semantic queries
+let host = AnalysisHost::with_database(db);
+let db = host.raw_database();
+
+// 4. Extract semantic data via hir APIs
+let all_impls = hir::Impl::all_in_crate(db, krate);
+let methods = ty.iterate_method_candidates(db, &scope, None, |f| { ... });
+let import_path = module.find_use_path(db, item, prefix_kind, cfg);
+```
+
+Key types: `ProjectJsonData` is the serde-deserializable struct matching `rust-project.json` format. `ProjectWorkspace::load_inline()` accepts a `ProjectJson` directly (no file I/O). `LoadCargoConfig` controls proc-macro/build-script behavior. `Module::find_use_path()` is a method on `hir::Module`, not a free function. This flow mirrors `analysis-stats` in `vendor/rust-analyzer/crates/rust-analyzer/src/cli/analysis_stats.rs`.
+
+Adopt the worker approach only if it demonstrates material improvement over LSP mode. If the LSP approach proves sufficient for the target accuracy and latency goals, the additional build complexity of a custom binary is not justified.
+
+**Spike acceptance criteria**:
+
+| Metric | Threshold | How to measure |
+| --- | --- | --- |
+| `crate.type_info` extraction coverage | Worker captures >= 15% more methods/trait-impls per type than LSP hover parsing, measured across 10-crate corpus | Diff symbol counts between worker and LSP output for each type |
+| `crate.trait_impls` completeness | Worker captures blanket/auto trait impls that LSP mode misses, for >= 50% of public types in the corpus | Count impls per type, compare against rustdoc JSON as ground truth |
+| `crate.re_exports` / import path accuracy | Worker produces correct canonical paths for >= 95% of public symbols (vs rustdoc JSON ground truth) | Path comparison against `cargo doc --output-format json` |
+| Cold indexing latency | Full crate semantic index in <= 2x the time of RA LSP initialization for the same crate | Wall-clock time for batch extraction vs LSP init + equivalent queries |
+| Peak RSS | Worker process stays within `RA_MEMORY_LIMIT_MB` for all corpus crates | Monitor RSS via `/proc/<pid>/status` during indexing |
+| Failure/timeout rate | <= 20% of corpus crates fail to produce a semantic index (matching Phase 0's `rust-project.json` fidelity bar) | Count indexing failures across the corpus |
+| Follow-up tool call reduction | Agent benchmark tasks require >= 20% fewer tool calls when using worker-indexed data vs LSP-indexed data | Run standardized agent task suite, count `ra.*` and `crate.*` calls per task |
+
+The last metric — follow-up tool call reduction — is a proxy for token/tool efficiency. If the worker's batch indexing produces richer pre-computed data in the DB, agents should need fewer round-trips to `ra.type_at`, `ra.completions`, etc. because more information is already available in `crate.type_info` and `crate.trait_impls` responses.
+
+**RA crate API surface** (pinned to `vendor/rust-analyzer` submodule, currently `c75729db68`):
+
+| Our tool / extraction target | RA function | Crate |
+| --- | --- | --- |
+| `ra.type_at` / type inference | `Analysis::hover()` | `ide` |
+| `ra.definition` / goto-def | `Analysis::goto_definition()` | `ide` |
+| `ra.completions` / method enumeration | `Analysis::completions()` | `ide` |
+| `ra.references` / intra-crate usage | `Analysis::find_all_refs()` | `ide` |
+| `ra.diagnostics` / semantic errors | `Analysis::full_diagnostics()` | `ide` |
+| `ra.expand_macro` / macro expansion | `Analysis::expand_macro()` | `ide` |
+| `ra.import_path` / canonical paths | `hir::Module::find_use_path()` | `hir` |
+| Batch type graph extraction | `hir::Type::iterate_method_candidates()`, `hir::Impl::all_in_crate()` | `hir` |
+| Batch trait impl enumeration | `hir::Impl::all_for_trait()`, `hir::Impl::all_in_crate()` + trait filtering, `hir::Type::impls_trait()` | `hir` |
+| Module/re-export tree | `hir::Module::declarations()`, `hir::Module::children()` | `hir` |
+
+Note: `hir::Trait` has no `all_in_crate()` method. Trait discovery uses `Impl::all_in_crate()` (returns all impls in a crate) with filtering, or `Impl::all_for_trait()` (returns all impls of a specific trait across crates). This table should be re-verified when the submodule pin is updated.
+
+This table applies to the LSP subprocess approach as well — the LSP request (`textDocument/hover`, etc.) is the transport for the same underlying `ide` / `hir` function call.
+
 ### Deepen rustdoc JSON instead of RA
 
 Rustdoc JSON (`cargo doc --output-format json`) provides authoritative public API data including:
+
 - Resolved types with full generic parameters
 - All trait implementations (including auto traits, blanket impls)
 - Canonical import paths
@@ -510,15 +892,18 @@ Rustdoc JSON (`cargo doc --output-format json`) provides authoritative public AP
 
 This covers ~60-70% of the value RA would provide for `crate.type_info`, `crate.trait_impls`, and `crate.re_exports`, at much lower operational cost (one-time generation, no persistent process).
 
-**Why not sufficient alone**: rustdoc JSON only covers public items. It doesn't help with `ra.type_at` (needs type inference in function bodies), `ra.completions` (needs context-aware method resolution), `ra.expand_macro` (needs the compiler's macro expander), or intra-crate references. It also requires `cargo doc` which needs network access for dependency resolution on first run.
+**Why not sufficient alone**: rustdoc JSON only covers public items. It doesn't help with `ra.type_at` (needs type inference in function bodies), `ra.completions` (needs context-aware method resolution), `ra.expand_macro` (needs the compiler's macro expander), or intra-crate references.
 
-**Recommendation**: continue deepening rustdoc JSON integration as the primary enrichment path. Use RA as a complementary layer for the capabilities rustdoc can't provide (type inference, completions, macro expansion, intra-crate navigation).
+**Important prerequisite**: `cargo doc --output-format json` is an [unstable feature](https://doc.rust-lang.org/rustdoc/unstable-features.html#json) requiring nightly Rust and `-Z unstable-options`. Container-side rustdoc JSON generation (enabled by the `rust` apk package in RA-enabled builds) therefore requires nightly toolchain installation. Host-provided rustdoc JSON via `RUSTDOC_JSON_DIR` / `index.refresh scope=rustdoc_json` remains the stable baseline and does not require nightly in the container.
+
+**Recommendation**: continue deepening rustdoc JSON integration as the primary enrichment path, with host-generated JSON as the stable default and container-side generation as an optional nightly-only capability. Use RA as a complementary layer for the capabilities rustdoc can't provide (type inference, completions, macro expansion, intra-crate navigation).
 
 ### Host-side RA bridge (MCP-to-LSP proxy)
 
 Leverage the user's existing rust-analyzer installation by proxying LSP requests from the MCP server to the host's RA.
 
 **Rejected because**:
+
 - Couples the MCP server to the user's editor state and RA version.
 - Can only analyze the exact crate versions in the user's current lock file, not arbitrary indexed versions.
 - Requires the user's IDE to be running and RA to be initialized.
@@ -530,11 +915,29 @@ Spawn RA fresh for each query, analyze, return, kill.
 
 **Rejected because**: RA initialization takes 10–120 seconds depending on crate complexity. This makes every query unacceptably slow. The session pool with TTL-based reuse is mandatory for usable latency.
 
+## Resolved decisions
+
+**Applies to both approaches (LSP subprocess and semantic worker)**:
+
+1. **Default session concurrency**: `RA_MAX_SESSIONS=1` until Phase 0 benchmarks establish safe concurrency levels on representative hardware. Promote to 2 only if measured peak RSS per session stays under 2 GB for the test corpus.
+
+2. **`rust-project.json` fidelity**: Promoted to Phase 0 hard exit criterion. Must demonstrate >= 80% initialization success rate on a 10-crate test corpus before proceeding to Phase 1.
+
+3. **Safe mode as default**: `procMacro.enable=false`, `cargo.buildScripts.enable=false` for all RA sessions unless `RA_MACRO_EXPANSION=true` is explicitly set.
+
+4. **Sysroot via host mount**: `~/.rustup/toolchains` mounted read-only into the container. The MCP client provides the sysroot path for the active workspace toolchain (via `rustc --print sysroot`). No `rust-src` or `rust` compiler package installed in the container image for sysroot purposes.
+
+**LSP subprocess mode only**:
+
+1. **RA version policy (LSP mode)**: Pin a specific Alpine `rust-analyzer` package version in the Dockerfile for reproducible builds (`apk add rust-analyzer=<version>`). Scheduled quarterly review to update the pin, aligned with Alpine stable release cadence. The Dockerfile should document the pinned version and the date of last review. This installs `rust-src` and `rust` (~305 MB) as transitive dependencies of the Alpine package.
+
+**Semantic worker mode only**:
+
+1. **RA version policy (worker mode)**: Pin a `rust-analyzer` git commit hash in `Cargo.toml` dependencies. The worker binary is built from source in the Docker build stage — no Alpine RA/rust/rust-src packages are installed in the runtime image. Quarterly review to update the pin, aligned with tagged RA releases.
+
 ## Open questions
 
 1. **Session isolation mechanism**: cgroups v2 memory limits (requires container privileges) vs simple RSS monitoring + SIGKILL? The former is more reliable; the latter is simpler.
-2. **Dependency source availability**: what percentage of the typical user's cargo cache has complete transitive dependency source? If low, RA analysis will frequently fail on unresolved imports. Need to measure this empirically.
-3. **`rust-project.json` fidelity**: can we generate accurate enough project descriptors from `dependency_edges` alone, or do we need to parse the cached `Cargo.toml` + `Cargo.lock` per crate version?
-4. **RA version pinning**: should the container pin a specific RA release, or track stable? Pinning avoids surprises but requires manual updates.
-5. **Feature flag handling**: how do we tell RA which features to enable when analyzing a crate? Default features only? All features? User-configurable?
-6. **Warm cache strategy**: should RA analysis be triggered proactively during `index.refresh scope=local_cache`, or only on first query? Proactive is better UX but consumes resources even for crates the user may never query.
+2. **Dependency source availability**: what percentage of the typical user's cargo cache has complete transitive dependency source? If low, RA analysis will frequently fail on unresolved imports. Need to measure this empirically during Phase 0.
+3. **Feature flag handling**: how do we tell RA which features to enable when analyzing a crate? Default features only? All features? User-configurable?
+4. **Warm cache strategy**: should RA analysis be triggered proactively during `index.refresh scope=local_cache`, or only on first query? Proactive is better UX but consumes resources even for crates the user may never query.

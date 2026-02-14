@@ -6,7 +6,11 @@ services:
       dockerfile: Dockerfile
     container_name: rust-mcp-server
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
     environment:
+      OUTBOUND_FIREWALL: ${OUTBOUND_FIREWALL:-true}
+      OUTBOUND_ALLOWLIST: ${OUTBOUND_ALLOWLIST:-crates.io,static.crates.io,docs.rs,api.osv.dev}
       DATABASE_URL: ${DATABASE_URL:-postgres://postgres@%2Frun%2Fpostgresql/rust_mcp}
       MCP_HTTP_BIND: ${MCP_HTTP_BIND:-0.0.0.0:43173}
       MCP_SSE_KEEP_ALIVE_SECS: ${MCP_SSE_KEEP_ALIVE_SECS:-15}

@@ -442,7 +442,7 @@ mod tests {
             Err(_) => return,
         };
 
-        if sqlx::migrate!("./migrations")
+        if sqlx::migrate!("../../migrations")
             .run(&pool)
             .await
             .is_err()
