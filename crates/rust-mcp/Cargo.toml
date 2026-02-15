@@ -5,6 +5,10 @@ edition = "2024"
 description = "Local-first Rust dependency intelligence MCP server"
 license = "MIT OR Apache-2.0"
 
+[features]
+integration-tests = []
+e2e-tests = []
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["json"] }
@@ -29,6 +33,19 @@ tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 rustdoc-types = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
+[dev-dependencies]
+rust-mcp-testing = { path = "../rust-mcp-testing" }
+
+[[test]]
+name = "postgres_integration"
+path = "tests/postgres_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "e2e_http"
+path = "tests/e2e_http.rs"
+required-features = ["e2e-tests"]
 
 [lints.rust]
 missing_docs = "warn"

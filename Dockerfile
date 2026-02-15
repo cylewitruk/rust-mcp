@@ -12,9 +12,12 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock README.md ./
 COPY crates/rust-mcp/Cargo.toml crates/rust-mcp/Cargo.toml
+COPY crates/rust-mcp-testing/Cargo.toml crates/rust-mcp-testing/Cargo.toml
 
 # Dummy source for dependency caching
-RUN mkdir -p crates/rust-mcp/src && echo 'fn main(){}' > crates/rust-mcp/src/main.rs
+RUN mkdir -p crates/rust-mcp/src crates/rust-mcp-testing/src && \
+    echo 'fn main(){}' > crates/rust-mcp/src/main.rs && \
+    echo 'pub fn _dummy() {}' > crates/rust-mcp-testing/src/lib.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
