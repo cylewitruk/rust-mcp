@@ -73,6 +73,11 @@ path = "tests/dependency_tools_integration.rs"
 required-features = ["integration-tests"]
 
 [[test]]
+name = "index_tools_integration"
+path = "tests/index_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
 name = "e2e_http"
 path = "tests/e2e_http.rs"
 required-features = ["e2e-tests"]

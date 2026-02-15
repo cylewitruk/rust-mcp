@@ -6,7 +6,7 @@ use anyhow::Result;
 use rust_mcp::config::{Config, LogFormat, TransportMode};
 use rust_mcp::http;
 use rust_mcp::state::AppState;
-use rust_mcp_testing::fixtures::seed_minimal_crate_graph;
+use rust_mcp_testing::fixtures::{MinimalCrateGraphFixture, seed_minimal_crate_graph};
 use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 use serde_json::Value;
@@ -41,7 +41,10 @@ fn test_config(database_url: String) -> Config {
 
 pub struct SeededMcpContext {
     pub mcp: LocalMcpHttpHarness,
-    _state: AppState,
+    #[allow(dead_code)]
+    pub state: AppState,
+    #[allow(dead_code)]
+    pub fixture: MinimalCrateGraphFixture,
     _postgres: PostgresTestContainer,
 }
 
@@ -54,7 +57,7 @@ pub async fn seeded_mcp_context() -> Result<SeededMcpContext> {
     );
     let state = AppState::connect(config.clone()).await?;
     state.run_migrations().await?;
-    let _fixture = seed_minimal_crate_graph(&state.db).await?;
+    let fixture = seed_minimal_crate_graph(&state.db).await?;
 
     // Disable proactive freshness probes to keep tests deterministic and offline.
     sqlx::query(
@@ -77,7 +80,8 @@ pub async fn seeded_mcp_context() -> Result<SeededMcpContext> {
 
     Ok(SeededMcpContext {
         mcp,
-        _state: state,
+        state,
+        fixture,
         _postgres: postgres,
     })
 }
