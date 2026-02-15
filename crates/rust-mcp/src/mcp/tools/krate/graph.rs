@@ -252,6 +252,7 @@ impl McpServer {
             "SELECT
                 id,
                 version,
+                rust_version,
                 published_at::TEXT AS published_at,
                 readme
              FROM crate_versions
@@ -283,6 +284,7 @@ impl McpServer {
                 "SELECT
                     id,
                     version,
+                    rust_version,
                     published_at::TEXT AS published_at,
                     readme
                  FROM crate_versions

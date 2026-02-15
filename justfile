@@ -19,11 +19,11 @@ fix:
     cargo +nightly --locked fmt --all
 
 test:
-  cargo --locked llvm-cov nextest --lcov --output-path ./target/lcov.info --no-fail-fast --all-targets
+  cargo --locked llvm-cov nextest --lcov --output-path ./target/lcov.info --no-fail-fast --all-targets --features integration-tests
   #cargo --locked nextest run --no-fail-fast --all-targets
 
 itest:
-  cargo --locked nextest run -p rust-mcp --features integration-tests --test postgres_integration
+  cargo --locked nextest run -p rust-mcp --features integration-tests --tests
 
 e2e-test:
   cargo --locked nextest run -p rust-mcp --features e2e-tests --test e2e_http

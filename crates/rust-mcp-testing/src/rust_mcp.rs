@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde_json::{Value, json};
 use testcontainers_modules::testcontainers::core::{BuildImageOptions, IntoContainerPort as _};
 use testcontainers_modules::testcontainers::runners::{AsyncBuilder as _, AsyncRunner as _};
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericBuildableImage, GenericImage, ImageExt as _,
 };
+use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
@@ -19,6 +20,9 @@ const DEFAULT_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_INTERNAL_PORT: u16 = 43173;
 const METRICS_INTERNAL_PORT: u16 = 9090;
 
+/// MCP session header name per the Streamable HTTP spec.
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+
 /// Running rust-mcp container plus endpoint URLs.
 #[derive(Debug)]
 pub struct RustMcpTestContainer {
@@ -26,7 +30,9 @@ pub struct RustMcpTestContainer {
     base_url: String,
     mcp_url: String,
     metrics_url: String,
+    client: reqwest::Client,
     next_request_id: AtomicU64,
+    session_id: Mutex<Option<String>>,
 }
 
 impl RustMcpTestContainer {
@@ -63,6 +69,8 @@ impl RustMcpTestContainer {
             .with_env_var("OUTBOUND_FIREWALL", "false")
             .with_env_var("MCP_HTTP_BIND", "0.0.0.0:43173")
             .with_env_var("PROMETHEUS_BIND", "0.0.0.0:9090")
+            // The runtime container runs Postgres over unix socket only.
+            .with_env_var("DATABASE_URL", "postgres://postgres@%2Frun%2Fpostgresql/rust_mcp")
             .with_env_var("RUST_LOG", "warn")
             .start()
             .await
@@ -90,7 +98,9 @@ impl RustMcpTestContainer {
             base_url,
             mcp_url,
             metrics_url,
+            client: reqwest::Client::new(),
             next_request_id: AtomicU64::new(1),
+            session_id: Mutex::new(None),
         })
     }
 
@@ -142,12 +152,12 @@ impl RustMcpTestContainer {
     /// Polls `/readyz` until the container is ready or times out.
     pub async fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
         let readyz_url = format!("{}/readyz", self.base_url);
-        let client = reqwest::Client::new();
         let started_at = Instant::now();
         let mut last_error = None;
 
         while started_at.elapsed() < timeout {
-            match client
+            match self
+                .client
                 .get(&readyz_url)
                 .send()
                 .await
@@ -182,16 +192,45 @@ impl RustMcpTestContainer {
             "params": params,
         });
 
-        let response = reqwest::Client::new()
+        let mut request = self
+            .client
             .post(&self.mcp_url)
             .header("content-type", "application/json")
-            .header("accept", "application/json")
+            .header("accept", "application/json, text/event-stream");
+
+        // Attach session ID if we have one from a prior request.
+        if let Some(sid) = self
+            .session_id
+            .lock()
+            .await
+            .as_deref()
+        {
+            request = request.header(MCP_SESSION_ID_HEADER, sid);
+        }
+
+        let response = request
             .json(&payload)
             .send()
             .await
             .with_context(|| format!("failed MCP request for method `{method}`"))?;
 
         let status = response.status();
+
+        // Capture session ID from response headers.
+        if let Some(sid) = response
+            .headers()
+            .get(MCP_SESSION_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+        {
+            *self.session_id.lock().await = Some(sid.to_string());
+        }
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let body = response
             .text()
             .await
@@ -200,14 +239,42 @@ impl RustMcpTestContainer {
             bail!("MCP request `{method}` failed with HTTP {status}: {body}");
         }
 
-        let parsed = serde_json::from_str::<Value>(&body)
-            .with_context(|| format!("MCP request `{method}` returned invalid JSON: {body}"))?;
+        let parsed = if content_type.contains("text/event-stream") {
+            parse_last_sse_json_data(&body).with_context(|| {
+                format!("MCP request `{method}` returned SSE with no JSON data event: {body}")
+            })?
+        } else {
+            serde_json::from_str::<Value>(&body)
+                .with_context(|| format!("MCP request `{method}` returned invalid JSON: {body}"))?
+        };
+
         if parsed.get("error").is_some() {
             bail!("MCP request `{method}` returned error payload: {parsed}");
         }
 
         Ok(parsed)
     }
+}
+
+/// Extracts the last JSON-RPC payload from an SSE response body.
+fn parse_last_sse_json_data(body: &str) -> Result<Value> {
+    let mut last_json: Option<Value> = None;
+
+    for line in body.lines() {
+        let Some(payload) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim();
+        if payload.is_empty() {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(payload) {
+            last_json = Some(value);
+        }
+    }
+
+    ensure!(last_json.is_some(), "no JSON data events found in SSE body");
+    Ok(last_json.unwrap())
 }
 
 fn workspace_root() -> Result<PathBuf> {

@@ -43,6 +43,36 @@ path = "tests/postgres_integration.rs"
 required-features = ["integration-tests"]
 
 [[test]]
+name = "core_tools_integration"
+path = "tests/core_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "crate_tools_integration"
+path = "tests/crate_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "source_tools_integration"
+path = "tests/source_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "symbol_tools_integration"
+path = "tests/symbol_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "docs_tools_integration"
+path = "tests/docs_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
+name = "dependency_tools_integration"
+path = "tests/dependency_tools_integration.rs"
+required-features = ["integration-tests"]
+
+[[test]]
 name = "e2e_http"
 path = "tests/e2e_http.rs"
 required-features = ["e2e-tests"]

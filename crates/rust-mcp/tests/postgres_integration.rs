@@ -108,7 +108,20 @@ async fn fixture_helpers_seed_rows_for_tool_level_tests() {
     assert!(fixture.dependent.version_id > 0);
     assert!(fixture.dependency.crate_id > 0);
     assert!(fixture.dependency.version_id > 0);
+    assert!(
+        fixture
+            .optional_dependency
+            .crate_id
+            > 0
+    );
+    assert!(
+        fixture
+            .optional_dependency
+            .version_id
+            > 0
+    );
     assert!(fixture.dependency_edge_id > 0);
+    assert!(fixture.optional_dependency_edge_id > 0);
     assert!(fixture.source_file_id > 0);
     assert!(fixture.symbol_id > 0);
     assert!(fixture.docs_page_id > 0);
@@ -117,7 +130,7 @@ async fn fixture_helpers_seed_rows_for_tool_level_tests() {
         .fetch_one(&state.db)
         .await
         .expect("failed to count crates");
-    assert_eq!(crate_count, 2);
+    assert_eq!(crate_count, 3);
 
     let symbol_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM symbols")
         .fetch_one(&state.db)

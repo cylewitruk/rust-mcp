@@ -2334,6 +2334,7 @@ name = "rust-mcp-testing"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "reqwest",
  "serde_json",
  "sha2",

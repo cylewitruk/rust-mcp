@@ -281,8 +281,12 @@ pub struct MinimalCrateGraphFixture {
     pub dependent: SeededCrateVersion,
     /// Dependency crate + version IDs.
     pub dependency: SeededCrateVersion,
+    /// Optional dependency crate + version IDs.
+    pub optional_dependency: SeededCrateVersion,
     /// Inserted dependency edge ID.
     pub dependency_edge_id: i64,
+    /// Inserted optional dependency edge ID.
+    pub optional_dependency_edge_id: i64,
     /// Inserted source file ID.
     pub source_file_id: i64,
     /// Inserted symbol ID.
@@ -305,6 +309,9 @@ pub async fn seed_minimal_crate_graph(pool: &PgPool) -> Result<MinimalCrateGraph
         Some("2026-01-02T00:00:00Z"),
     )
     .await?;
+    let optional_dependency =
+        seed_crate_release(pool, "indexmap", "2.8.0", 250_000_000, Some("2026-01-03T00:00:00Z"))
+            .await?;
 
     let dependency_edge_id = seed_dependency_edge(
         pool,
@@ -316,7 +323,18 @@ pub async fn seed_minimal_crate_graph(pool: &PgPool) -> Result<MinimalCrateGraph
     )
     .await?;
 
-    seed_feature_flag(pool, dependent.version_id, "preserve_order", &["indexmap"]).await?;
+    let optional_dependency_edge_id = seed_dependency_edge(
+        pool,
+        dependent.version_id,
+        optional_dependency.crate_id,
+        "^2",
+        "normal",
+        true,
+    )
+    .await?;
+
+    seed_feature_flag(pool, dependent.version_id, "default", &["preserve_order"]).await?;
+    seed_feature_flag(pool, dependent.version_id, "preserve_order", &["dep:indexmap"]).await?;
 
     let source_file_id = seed_source_file(
         pool,
@@ -343,7 +361,9 @@ pub async fn seed_minimal_crate_graph(pool: &PgPool) -> Result<MinimalCrateGraph
     Ok(MinimalCrateGraphFixture {
         dependent,
         dependency,
+        optional_dependency,
         dependency_edge_id,
+        optional_dependency_edge_id,
         source_file_id,
         symbol_id,
         docs_page_id,
