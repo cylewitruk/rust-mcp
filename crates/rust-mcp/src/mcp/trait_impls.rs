@@ -228,6 +228,7 @@ impl McpServer {
                     WHEN 'trait' THEN 1
                     ELSE 2
                 END,
+                CASE WHEN ci.index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
                 ci.type_name ASC,
                 ci.start_line ASC
              LIMIT $4",

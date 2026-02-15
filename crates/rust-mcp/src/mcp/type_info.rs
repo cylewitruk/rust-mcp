@@ -273,6 +273,7 @@ impl McpServer {
                AND LOWER(ct.type_name) = LOWER($2)
              ORDER BY
                 CASE WHEN ct.visibility = 'public' THEN 0 ELSE 1 END,
+                CASE WHEN ct.index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
                 ct.start_line ASC
              LIMIT 1",
         )
@@ -304,6 +305,7 @@ impl McpServer {
                     WHEN 'derive' THEN 1
                     ELSE 2
                 END,
+                CASE WHEN ci.index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
                 ci.start_line ASC",
         )
         .bind(selected_version.id)

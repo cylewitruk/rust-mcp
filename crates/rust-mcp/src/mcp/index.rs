@@ -1452,6 +1452,9 @@ impl McpServer {
                                 .map(|v| format!("{crate_name}@{v}"))
                                 .collect(),
                             errors: Vec::new(),
+                            synced_types: None,
+                            synced_impls: None,
+                            synced_traits: None,
                         }),
                         freshness: vec![
                             ResponseFreshnessSource {
@@ -1483,6 +1486,9 @@ impl McpServer {
                             synced_dependencies: 0,
                             selected_versions: Vec::new(),
                             errors: vec![error],
+                            synced_types: None,
+                            synced_impls: None,
+                            synced_traits: None,
                         }),
                         freshness: vec![
                             ResponseFreshnessSource {
@@ -1526,6 +1532,9 @@ impl McpServer {
                         synced_dependencies: sync_response.synced_dependencies,
                         selected_versions: sync_response.selected_versions,
                         errors: sync_response.errors,
+                        synced_types: None,
+                        synced_impls: None,
+                        synced_traits: None,
                     }),
                     freshness: sync_response.freshness,
                     provenance: sync_response.provenance,
@@ -1571,6 +1580,9 @@ impl McpServer {
                         synced_dependencies: 0,
                         selected_versions: outcome.touched_crates,
                         errors: outcome.errors,
+                        synced_types: None,
+                        synced_impls: None,
+                        synced_traits: None,
                     }),
                     freshness: vec![
                         ResponseFreshnessSource {
@@ -1636,6 +1648,9 @@ impl McpServer {
                         synced_dependencies: outcome.deleted_files,
                         selected_versions: outcome.touched_versions,
                         errors: outcome.errors,
+                        synced_types: None,
+                        synced_impls: None,
+                        synced_traits: None,
                     }),
                     freshness: vec![
                         ResponseFreshnessSource {
@@ -1680,6 +1695,9 @@ impl McpServer {
                         synced_dependencies: 0,
                         selected_versions: outcome.touched_versions,
                         errors: outcome.errors,
+                        synced_types: None,
+                        synced_impls: None,
+                        synced_traits: None,
                     }),
                     freshness: vec![
                         ResponseFreshnessSource {
@@ -1712,8 +1730,13 @@ impl McpServer {
                     },
                     message: format!(
                         "rustdoc JSON sync scanned {} files, synced {} crate versions, wrote {} \
-                         symbols",
-                        outcome.scanned_files, outcome.synced_versions, outcome.symbols_written
+                         symbols, {} types, {} impls, {} traits",
+                        outcome.scanned_files,
+                        outcome.synced_versions,
+                        outcome.symbols_written,
+                        outcome.types_written,
+                        outcome.impls_written,
+                        outcome.traits_written,
                     ),
                     estimated_seconds,
                     estimated_seconds_remaining: Some(0),
@@ -1725,6 +1748,9 @@ impl McpServer {
                         synced_dependencies: outcome.symbols_written,
                         selected_versions: outcome.touched_versions,
                         errors: outcome.errors,
+                        synced_types: Some(outcome.types_written),
+                        synced_impls: Some(outcome.impls_written),
+                        synced_traits: Some(outcome.traits_written),
                     }),
                     freshness: vec![
                         ResponseFreshnessSource {

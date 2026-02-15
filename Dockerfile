@@ -11,16 +11,17 @@ RUN apk add --no-cache build-base git openssl-dev pkgconfig
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock README.md ./
+COPY crates/rust-mcp/Cargo.toml crates/rust-mcp/Cargo.toml
 
 # Dummy source for dependency caching
-RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
+RUN mkdir -p crates/rust-mcp/src && echo 'fn main(){}' > crates/rust-mcp/src/main.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo fetch --locked
 
 # Copy real source
-COPY ./src ./src
+COPY ./crates ./crates
 COPY ./migrations ./migrations
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

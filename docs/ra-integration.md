@@ -8,21 +8,22 @@ Last updated: 2026-02-14
 
 | Item | Type | Description | Priority | Status |
 |------|------|-------------|----------|--------|
-| `ra.type_at` | New tool | Inferred type at file:line:col in indexed crate source | P1 | Planned |
-| `ra.definition` | New tool | Go-to-definition across module boundaries within a crate | P1 | Planned |
-| `ra.completions` | New tool | Method/field completions on a type at a location | P1 | Planned |
-| `ra.references` | New tool | Find all usages of a symbol within a crate | P2 | Planned |
-| `ra.diagnostics` | New tool | Semantic diagnostics for a crate version (no cargo build) | P2 | Planned |
-| `ra.expand_macro` | New tool | Expand a macro invocation and return generated code | P3 | Planned |
-| `ra.import_path` | New tool | Canonical import path for a symbol from crate root | P2 | Planned |
 | `source.context` | Enrichment | Upgrade from syn AST walk to RA-backed scope/import resolution | P1 | Planned |
 | `crate.type_info` | Enrichment | Add resolved trait bounds, auto traits, blanket impl coverage | P1 | Planned |
 | `crate.trait_impls` | Enrichment | Add blanket impls, where-clause resolution, auto trait detection | P1 | Planned |
-| `crate.re_exports` | Enrichment | Replace syntactic `pub use` parsing with semantic path resolution | P2 | Planned |
+| `crate.re_exports` | Enrichment | Replace syntactic `pub use` parsing with semantic path resolution | P1 | Planned |
+| Sysroot provisioning | Infrastructure | Host-mounted `rust-src` via MCP client-provided sysroot path | P0 | Planned |
+| `ra-worker` spike | Infrastructure | Validate worker extraction against rustdoc JSON ground truth | P0 | Planned |
+| `ra.import_path` | New tool | Canonical import path for a symbol from crate root | P2 | Planned |
 | `crate.error_types` | Enrichment | Add `?`-propagation chain analysis via RA diagnostics | P3 | Planned |
 | `crate.migration_path` | Enrichment | Ground breakage detection in RA diagnostics, not just API diff | P3 | Planned |
-| RA lifecycle service | Infrastructure | Managed RA subprocess pool with startup, caching, timeouts | P0 | Planned |
-| Sysroot provisioning | Infrastructure | Host-mounted `rust-src` via MCP client-provided sysroot path | P0 | Planned |
+| `ra.type_at` | New tool | Inferred type at file:line:col in indexed crate source | Deferred | Requires LSP mode |
+| `ra.definition` | New tool | Go-to-definition across module boundaries within a crate | Deferred | Requires LSP mode |
+| `ra.completions` | New tool | Method/field completions on a type at a location | Deferred | Requires LSP mode |
+| `ra.references` | New tool | Find all usages of a symbol within a crate | Deferred | Requires LSP mode |
+| `ra.diagnostics` | New tool | Semantic diagnostics for a crate version (no cargo build) | Deferred | Requires LSP mode |
+| `ra.expand_macro` | New tool | Expand a macro invocation and return generated code | Deferred | Requires LSP mode |
+| RA lifecycle service | Infrastructure | Managed RA subprocess pool with startup, caching, timeouts | Deferred | Requires LSP mode |
 
 ## Motivation
 
@@ -800,15 +801,17 @@ Build a dedicated `rust-mcp-ra-worker` binary that links the RA crates and runs 
 
 Build time is explicitly a non-goal for decision-making. The real decision criteria are semantic extraction quality, runtime memory/latency, RA API churn maintenance cost, and security posture.
 
-#### Decision: default path and spike evaluation
+#### Decision: default path
 
-The recommended default path remains **RA subprocess via LSP** for initial rollout (Phase 0-1). This is lower-risk, operationally simpler, and validates the core value proposition (does RA-backed semantic data measurably improve agent accuracy?) without committing to a custom binary.
+The recommended default path is **`ra-worker` (semantic extraction worker)** for dependency indexing. This aligns with the project's core goal — local-first dependency intelligence — which is fundamentally a batch indexing problem, not an interactive editor problem. The worker produces structured output directly compatible with rust-mcp's database tables, avoids the impedance mismatch of parsing LSP responses, and has a smaller dependency surface than a full RA/LSP subprocess.
 
-A bounded spike should evaluate the semantic worker approach in parallel with or after Phase 1. The spike should:
+**LSP subprocess mode is explicitly out-of-scope for the initial implementation.** It may be revisited in a future phase if user-workspace positional intelligence (e.g. "what's the type at this cursor position in my code?") becomes a product goal. For now, all interactive `ra.*` tools are deferred (see summary table).
+
+A bounded spike should validate the worker approach before full implementation:
 
 1. Build a minimal `rust-mcp-ra-worker` binary that loads a single crate via `load-cargo` + `rust-project.json` and extracts the type/impl/trait graph via `hir` APIs.
-2. Compare the extracted data against the same crate processed via LSP subprocess.
-3. Measure against the acceptance criteria below.
+2. Validate against the spike acceptance criteria in [ra-worker.md](ra-worker.md) and below.
+3. Compare extracted data against rustdoc JSON as ground truth.
 
 **Concrete prototype call chain** (pinned to `vendor/rust-analyzer` @ `c75729db68`):
 
@@ -846,7 +849,7 @@ let import_path = module.find_use_path(db, item, prefix_kind, cfg);
 
 Key types: `ProjectJsonData` is the serde-deserializable struct matching `rust-project.json` format. `ProjectWorkspace::load_inline()` accepts a `ProjectJson` directly (no file I/O). `LoadCargoConfig` controls proc-macro/build-script behavior. `Module::find_use_path()` is a method on `hir::Module`, not a free function. This flow mirrors `analysis-stats` in `vendor/rust-analyzer/crates/rust-analyzer/src/cli/analysis_stats.rs`.
 
-Adopt the worker approach only if it demonstrates material improvement over LSP mode. If the LSP approach proves sufficient for the target accuracy and latency goals, the additional build complexity of a custom binary is not justified.
+The worker approach is the primary implementation path. The LSP subprocess approach documented earlier in this document is retained as a reference alternative but is not the recommended direction for dependency indexing.
 
 **Spike acceptance criteria**:
 
@@ -917,23 +920,23 @@ Spawn RA fresh for each query, analyze, return, kill.
 
 ## Resolved decisions
 
-**Applies to both approaches (LSP subprocess and semantic worker)**:
+**Primary path: semantic worker (ra-worker)**:
 
-1. **Default session concurrency**: `RA_MAX_SESSIONS=1` until Phase 0 benchmarks establish safe concurrency levels on representative hardware. Promote to 2 only if measured peak RSS per session stays under 2 GB for the test corpus.
+1. **RA version policy**: Pin a `rust-analyzer` git commit hash in `Cargo.toml` dependencies. The worker binary is built from source in the Docker build stage — no Alpine RA/rust/rust-src packages are installed in the runtime image. Quarterly review to update the pin, aligned with tagged RA releases.
 
-2. **`rust-project.json` fidelity**: Promoted to Phase 0 hard exit criterion. Must demonstrate >= 80% initialization success rate on a 10-crate test corpus before proceeding to Phase 1.
+2. **`rust-project.json` fidelity**: Promoted to Phase 0 hard exit criterion. Must demonstrate >= 80% initialization success rate on a 10-crate test corpus before proceeding to implementation.
 
-3. **Safe mode as default**: `procMacro.enable=false`, `cargo.buildScripts.enable=false` for all RA sessions unless `RA_MACRO_EXPANSION=true` is explicitly set.
+3. **Safe mode as default**: No proc macros (`ProcMacroServerChoice::None`), no build scripts (`load_out_dirs_from_check: false`) for all worker extraction unless explicitly overridden.
 
 4. **Sysroot via host mount**: `~/.rustup/toolchains` mounted read-only into the container. The MCP client provides the sysroot path for the active workspace toolchain (via `rustc --print sysroot`). No `rust-src` or `rust` compiler package installed in the container image for sysroot purposes.
 
-**LSP subprocess mode only**:
+5. **Default concurrency**: Single worker process (`RA_MAX_SESSIONS=1`) until Phase 0 benchmarks establish safe concurrency levels. The worker processes crates sequentially, creating a fresh `RootDatabase` per crate.
 
-1. **RA version policy (LSP mode)**: Pin a specific Alpine `rust-analyzer` package version in the Dockerfile for reproducible builds (`apk add rust-analyzer=<version>`). Scheduled quarterly review to update the pin, aligned with Alpine stable release cadence. The Dockerfile should document the pinned version and the date of last review. This installs `rust-src` and `rust` (~305 MB) as transitive dependencies of the Alpine package.
+6. **LSP mode out of scope**: Interactive positional tools (`ra.type_at`, `ra.definition`, `ra.completions`, etc.) and the RA LSP subprocess architecture are deferred. They may be revisited if user-workspace positional intelligence becomes a product goal.
 
-**Semantic worker mode only**:
+**Retained for reference (LSP subprocess, if revisited)**:
 
-1. **RA version policy (worker mode)**: Pin a `rust-analyzer` git commit hash in `Cargo.toml` dependencies. The worker binary is built from source in the Docker build stage — no Alpine RA/rust/rust-src packages are installed in the runtime image. Quarterly review to update the pin, aligned with tagged RA releases.
+1. **RA version policy (LSP mode)**: Pin a specific Alpine `rust-analyzer` package version in the Dockerfile for reproducible builds (`apk add rust-analyzer=<version>`). This installs `rust-src` and `rust` (~305 MB) as transitive dependencies.
 
 ## Open questions
 

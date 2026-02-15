@@ -1,3 +1,6 @@
 [submodule "vendor/rust-analyzer"]
 	path = vendor/rust-analyzer
 	url = https://github.com/rust-lang/rust-analyzer.git
+[submodule "vendor/rustdoc-types"]
+	path = vendor/rustdoc-types
+	url = https://github.com/rust-lang/rustdoc-types.git

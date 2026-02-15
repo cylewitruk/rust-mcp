@@ -1,2 +1,3 @@
-<!-- markdownlint-disable MD041 -->
+# CLAUDE.md
+
 @AGENTS.md

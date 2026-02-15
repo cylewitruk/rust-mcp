@@ -550,6 +550,18 @@ pub struct IndexRefreshResult {
     pub synced_dependencies: usize,
     pub selected_versions: Vec<String>,
     pub errors: Vec<String>,
+    /// Rustdoc-specific: number of type rows written (omitted for non-rustdoc
+    /// scopes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced_types: Option<usize>,
+    /// Rustdoc-specific: number of impl rows written (omitted for non-rustdoc
+    /// scopes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced_impls: Option<usize>,
+    /// Rustdoc-specific: number of trait rows written (omitted for non-rustdoc
+    /// scopes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synced_traits: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
