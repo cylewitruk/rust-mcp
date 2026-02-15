@@ -5,35 +5,57 @@ use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Meta, ProgressNotificationParam, ServerCapabilities, ServerInfo};
-use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
+use rmcp::{Json, Peer, RoleServer, ServerHandler, schemars, tool, tool_handler, tool_router};
+use serde::Deserialize;
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
-use super::models::{
-    CrateAlternativesRequest, CrateAlternativesResponse, CrateApiDiffRequest, CrateApiDiffResponse,
-    CrateApiRequest, CrateApiResponse, CrateCompareRequest, CrateCompareResponse,
-    CrateCompatibilityMatrixRequest, CrateCompatibilityMatrixResponse, CrateCompatibilityRequest,
-    CrateCompatibilityResponse, CrateDeriveMacrosRequest, CrateDeriveMacrosResponse,
-    CrateErrorTypesRequest, CrateErrorTypesResponse, CrateFeaturesRequest, CrateFeaturesResponse,
-    CrateGraphRequest, CrateGraphResponse, CrateHotspotsRequest, CrateHotspotsResponse,
-    CrateIntelRequest, CrateIntelResponse, CrateLicenseCheckRequest, CrateLicenseCheckResponse,
-    CrateMigrationPathRequest, CrateMigrationPathResponse, CrateReExportsRequest,
-    CrateReExportsResponse, CrateSearchRequest, CrateSearchResponse, CrateTraitImplsRequest,
-    CrateTraitImplsResponse, CrateTypeInfoRequest, CrateTypeInfoResponse,
-    CrateUsagePatternsRequest, CrateUsagePatternsResponse, CrateVersionsRequest,
-    CrateVersionsResponse, DependencyAuditRequest, DependencyAuditResponse,
-    DependencyFeatureImpactRequest, DependencyFeatureImpactResponse, DependencyResolveRequest,
-    DependencyResolveResponse, DocsSearchRequest, DocsSearchResponse, IndexRefreshRequest,
-    IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
-    IndexSyncCratesResponse, PingRequest, SourceContextRequest, SourceContextResponse,
-    SourceReadRequest, SourceReadResponse, SourceSearchRequest, SourceSearchResponse,
-    SymbolSearchRequest, SymbolSearchResponse,
+use super::indexing::handlers::{
+    IndexRefreshRequest, IndexRefreshResponse, IndexStatusRequest, IndexStatusResponse,
+    IndexSyncCratesRequest, IndexSyncCratesResponse,
 };
+use super::models::{SourceReadRequest, SourceReadResponse};
+use super::tools::dependency::audit::{DependencyAuditRequest, DependencyAuditResponse};
+use super::tools::dependency::feature_impact::{
+    DependencyFeatureImpactRequest, DependencyFeatureImpactResponse,
+};
+use super::tools::dependency::resolve::{DependencyResolveRequest, DependencyResolveResponse};
+use super::tools::docs::{DocsSearchRequest, DocsSearchResponse};
+use super::tools::krate::alternatives::{CrateAlternativesRequest, CrateAlternativesResponse};
+use super::tools::krate::api_diff::{CrateApiDiffRequest, CrateApiDiffResponse};
+use super::tools::krate::api_surface::{CrateApiRequest, CrateApiResponse};
+use super::tools::krate::compare::{CrateCompareRequest, CrateCompareResponse};
+use super::tools::krate::compatibility::{
+    CrateCompatibilityMatrixRequest, CrateCompatibilityMatrixResponse, CrateCompatibilityRequest,
+    CrateCompatibilityResponse,
+};
+use super::tools::krate::derive_macros::{CrateDeriveMacrosRequest, CrateDeriveMacrosResponse};
+use super::tools::krate::error_types::{CrateErrorTypesRequest, CrateErrorTypesResponse};
+use super::tools::krate::features::{CrateFeaturesRequest, CrateFeaturesResponse};
+use super::tools::krate::graph::{CrateGraphRequest, CrateGraphResponse};
+use super::tools::krate::hotspots::{CrateHotspotsRequest, CrateHotspotsResponse};
+use super::tools::krate::intel::{CrateIntelRequest, CrateIntelResponse};
+use super::tools::krate::license::{CrateLicenseCheckRequest, CrateLicenseCheckResponse};
+use super::tools::krate::migration_path::{CrateMigrationPathRequest, CrateMigrationPathResponse};
+use super::tools::krate::re_exports::{CrateReExportsRequest, CrateReExportsResponse};
+use super::tools::krate::search::{CrateSearchRequest, CrateSearchResponse};
+use super::tools::krate::trait_impls::{CrateTraitImplsRequest, CrateTraitImplsResponse};
+use super::tools::krate::type_info::{CrateTypeInfoRequest, CrateTypeInfoResponse};
+use super::tools::krate::usage_patterns::{CrateUsagePatternsRequest, CrateUsagePatternsResponse};
+use super::tools::krate::versions::{CrateVersionsRequest, CrateVersionsResponse};
+use super::tools::source::context::{SourceContextRequest, SourceContextResponse};
+use super::tools::source::search::{SourceSearchRequest, SourceSearchResponse};
+use super::tools::symbol::{SymbolSearchRequest, SymbolSearchResponse};
 use crate::state::AppState;
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PingRequest {
+    pub message: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct McpServer {
-    pub(super) state: AppState,
+    pub(crate) state: AppState,
     tool_router: ToolRouter<Self>,
 }
 

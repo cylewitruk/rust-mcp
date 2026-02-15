@@ -4,7 +4,7 @@ use tracing::warn;
 use super::server::McpServer;
 
 impl McpServer {
-    pub(super) async fn query_cache_get(
+    pub(crate) async fn query_cache_get(
         &self,
         source: &str,
         key: &str,
@@ -36,7 +36,7 @@ impl McpServer {
         Ok(value)
     }
 
-    pub(super) async fn query_cache_put(
+    pub(crate) async fn query_cache_put(
         &self,
         source: &str,
         key: &str,

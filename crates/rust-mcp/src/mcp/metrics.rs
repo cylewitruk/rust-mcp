@@ -1,7 +1,7 @@
 use super::server::McpServer;
 
 impl McpServer {
-    pub(super) async fn record_tool_invocation(
+    pub(crate) async fn record_tool_invocation(
         &self,
         tool_name: &str,
         success: bool,
