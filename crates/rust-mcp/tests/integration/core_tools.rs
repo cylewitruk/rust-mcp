@@ -1,8 +1,8 @@
 //! Integration tests for namespace-free MCP tools.
 
-mod common;
-
 use serde_json::json;
+
+use super::common;
 
 #[tokio::test]
 async fn ping_tool_returns_db_ready() {

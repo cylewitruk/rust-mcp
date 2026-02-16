@@ -1,8 +1,8 @@
 //! Integration tests for `symbol.*` MCP tools.
 
-mod common;
-
 use serde_json::{Value, json};
+
+use super::common;
 
 #[tokio::test]
 async fn symbol_search_returns_seeded_symbol() {

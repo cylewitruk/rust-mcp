@@ -1,8 +1,8 @@
 //! Integration tests for `docs.*` MCP tools.
 
-mod common;
-
 use serde_json::{Value, json};
+
+use super::common;
 
 #[tokio::test]
 async fn docs_search_returns_seeded_docs_page() {

@@ -1,47 +1,17 @@
 //! Docker-backed integration test for AppState + migrations.
 
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
-
-use rust_mcp::config::{Config, LogFormat, TransportMode};
 use rust_mcp::state::AppState;
 use rust_mcp_testing::fixtures::seed_minimal_crate_graph;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 
-fn test_config(database_url: String) -> Config {
-    Config {
-        mcp_transport: TransportMode::Http,
-        http_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
-        mcp_sse_keep_alive_secs: 15,
-        mcp_sse_retry_ms: 3000,
-        database_url,
-        crates_io_base_url: "https://crates.io".to_string(),
-        crates_io_user_agent: "rust-mcp-tests/0.1.0".to_string(),
-        crates_io_timeout_secs: 20,
-        crates_io_min_interval_ms: 1,
-        docs_rs_base_url: "https://docs.rs".to_string(),
-        docs_rs_min_interval_ms: 1,
-        osv_min_interval_ms: 1,
-        database_min_connections: 1,
-        database_max_connections: 4,
-        max_concurrent_requests: 32,
-        prometheus_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
-        auto_migrate: false,
-        cargo_registry_dir: PathBuf::from("/tmp"),
-        data_dir: PathBuf::from("/tmp"),
-        rustsec_db_dir: None,
-        rustdoc_json_dir: None,
-        rust_log: "warn".to_string(),
-        log_format: LogFormat::Pretty,
-    }
-}
+use super::common;
 
 #[tokio::test]
 async fn app_state_connects_and_migrates_against_testcontainer_postgres() {
     let postgres = PostgresTestContainer::start()
         .await
         .expect("failed to start postgres test container");
-    let state = AppState::connect(test_config(
+    let state = AppState::connect(common::test_config(
         postgres
             .connection_string()
             .to_string(),
@@ -88,7 +58,7 @@ async fn fixture_helpers_seed_rows_for_tool_level_tests() {
     let postgres = PostgresTestContainer::start()
         .await
         .expect("failed to start postgres test container");
-    let state = AppState::connect(test_config(
+    let state = AppState::connect(common::test_config(
         postgres
             .connection_string()
             .to_string(),
