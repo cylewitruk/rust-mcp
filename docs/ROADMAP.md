@@ -1,0 +1,54 @@
+# ROADMAP
+
+Status: Active  
+Last updated: 2026-02-16
+
+This file tracks only open work and future direction.
+
+## Baseline Completed
+
+The previously planned milestone set through M13 is complete, including:
+
+- core indexing and refresh pipeline
+- expanded crate/dependency/source intelligence tools
+- confidence contract and progress notifications
+- modular integration/e2e test layout and broad tool-call coverage
+
+## P0: Correctness and Protocol Completeness
+
+- [ ] Implement true stdio transport mode or remove `stdio` from runtime config until implemented.
+- [ ] Add stricter MCP protocol conformance checks around session lifecycle edge cases (invalid ordering, missing/expired session headers, malformed request behavior).
+- [ ] Expand e2e protocol assertions for non-happy-path JSON-RPC/MCP error envelopes and status mappings.
+- [ ] Add clear compatibility policy for supported MCP protocol versions (currently tests use `2025-11-25`).
+
+## P1: Rustdoc Intelligence Quality
+
+- [ ] Complete rustdoc JSON enrichment for type/impl/trait fidelity (including better canonical path handling for re-exports).
+- [ ] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
+- [ ] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
+- [ ] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
+
+## P1: Tooling and UX Improvements
+
+- [ ] Add `crate.import_path` tool (best-known public import path resolution).
+- [ ] Improve `crate.migration_path` heuristics beyond simple rename candidates.
+- [ ] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
+- [ ] Publish a machine-readable tool contract snapshot for client generation/testing.
+
+## P2: Indexing and Operations
+
+- [ ] Optional container-side rustdoc JSON generation workflow (nightly, bounded/isolated execution).
+- [ ] Background refresh fairness/backpressure tuning for large local registries.
+- [ ] More granular per-source/per-tool SLO metrics and alertable counters.
+- [ ] CI split for faster feedback: lint, integration, and e2e lanes with artifact reuse.
+
+## P2: Optional Advanced Intelligence
+
+- [ ] Evaluate optional rust-analyzer-assisted enrichment for workspace-local, position-aware context where rustdoc/syn are insufficient.
+- [ ] Consider new tools for deprecations and feature-gated API surfacing after rustdoc data quality goals are met.
+
+## Out of Scope (For Now)
+
+- Multi-tenant remote deployment model.
+- Non-Rust ecosystems.
+- Full Cargo resolver parity as a hard guarantee (current behavior remains best-effort with confidence signaling).
