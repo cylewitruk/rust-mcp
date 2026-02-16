@@ -5,6 +5,184 @@ mod common;
 use rust_mcp_testing::fixtures::{seed_crate_version, seed_source_file, seed_symbol};
 use serde_json::{Value, json};
 
+async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
+    let source_file_id = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/error.rs",
+        Some("rust"),
+        "use std::fmt::{self, Display};\npub struct ParseError {\npub message: String,\n}\nimpl \
+         ParseError {\npub fn new(message: String) -> ParseError { ParseError { message } \
+         }\n}\nimpl Display for ParseError {\nfn fmt(&self, f: &mut fmt::Formatter<'_>) -> \
+         fmt::Result {\nwrite!(f, \"parse error: {}\", self.message)\n}\n}\nimpl From<String> for \
+         ParseError {\nfn from(value: String) -> ParseError { ParseError { message: value } \
+         }\n}\npub fn parse() -> Result<(), ParseError> { \
+         Err(ParseError::new(\"oops\".to_string())) }",
+    )
+    .await
+    .expect("failed to seed type-intelligence source file");
+
+    sqlx::query(
+        "INSERT INTO crate_types (
+            crate_version_id,
+            source_file_id,
+            type_name,
+            kind,
+            visibility,
+            generic_params,
+            fields,
+            variants,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'ParseError', 'struct', 'public', $3::JSONB, $4::JSONB, $5::JSONB, $6, $7, \
+         'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .bind(json!([]))
+    .bind(json!([{"name":"message","type":"String"}]))
+    .bind(json!([]))
+    .bind(2_i32)
+    .bind(4_i32)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed crate_types row");
+
+    sqlx::query(
+        "INSERT INTO crate_impls (
+            crate_version_id,
+            source_file_id,
+            type_name,
+            type_name_display,
+            trait_name,
+            trait_name_display,
+            impl_kind,
+            methods,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'ParseError', 'ParseError', NULL, NULL, 'inherent', $3::JSONB, $4, $5, \
+         'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .bind(json!([{"name":"new","signature":"fn new(message: String) -> ParseError"}]))
+    .bind(5_i32)
+    .bind(7_i32)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed inherent impl row");
+
+    sqlx::query(
+        "INSERT INTO crate_impls (
+            crate_version_id,
+            source_file_id,
+            type_name,
+            type_name_display,
+            trait_name,
+            trait_name_display,
+            impl_kind,
+            methods,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'ParseError', 'ParseError', 'Display', 'std::fmt::Display', 'trait', \
+         $3::JSONB, $4, $5, 'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .bind(json!([{"name":"fmt","signature":"fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result"}]))
+    .bind(8_i32)
+    .bind(12_i32)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed Display impl row");
+
+    sqlx::query(
+        "INSERT INTO crate_impls (
+            crate_version_id,
+            source_file_id,
+            type_name,
+            type_name_display,
+            trait_name,
+            trait_name_display,
+            impl_kind,
+            methods,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'ParseError', 'ParseError', 'From', 'From<String>', 'trait', $3::JSONB, $4, \
+         $5, 'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .bind(json!([{"name":"from","signature":"fn from(value: String) -> ParseError"}]))
+    .bind(13_i32)
+    .bind(15_i32)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed From impl row");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'parse', 'function', 'fn parse() -> Result<(), ParseError>', 'public', 16, 16, \
+         'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed parse symbol with Result signature");
+}
+
 #[tokio::test]
 async fn crate_search_returns_seeded_crates_without_freshness_probe() {
     let context = common::seeded_mcp_context()
@@ -180,6 +358,78 @@ async fn crate_api_and_versions_report_seeded_symbol_timeline() {
                     == Some(true)
             })
     );
+}
+
+#[tokio::test]
+async fn crate_api_prefers_rustdoc_json_symbols_when_available() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let rustdoc_source_file_id = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "rustdoc-json/serde_json-1.0.145.json",
+        Some("rustdoc_json"),
+        "{\"mock\":\"rustdoc\"}",
+    )
+    .await
+    .expect("failed to seed rustdoc-json source file");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES (
+            $1, $2, 'from_rustdoc', 'function', 'fn from_rustdoc() -> bool', 'public', 1, 1, \
+         'rustdoc_json'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(rustdoc_source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed rustdoc-json symbol");
+
+    let api_response = context
+        .mcp
+        .call_tool("crate.api", json!({"crate_name": "serde_json", "limit": 20}))
+        .await
+        .expect("crate.api call failed");
+    let api_payload = common::structured_content(&api_response);
+
+    let symbols = api_payload
+        .get("symbols")
+        .and_then(Value::as_array)
+        .expect("symbols should be an array");
+    assert!(!symbols.is_empty());
+    assert!(symbols.iter().all(|symbol| {
+        symbol
+            .get("index_source")
+            .and_then(Value::as_str)
+            == Some("rustdoc_json")
+    }));
+    assert!(symbols.iter().any(|symbol| {
+        symbol
+            .get("name")
+            .and_then(Value::as_str)
+            == Some("from_rustdoc")
+    }));
 }
 
 #[tokio::test]
@@ -663,5 +913,168 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
             .get("count")
             .and_then(Value::as_u64),
         Some(0)
+    );
+}
+
+#[tokio::test]
+async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intelligence() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+    seed_type_intelligence_fixture(&context).await;
+
+    let type_info_response = context
+        .mcp
+        .call_tool(
+            "crate.type_info",
+            json!({
+                "crate_name": "serde_json",
+                "type_name": "ParseError",
+                "include_methods": true,
+                "include_trait_impls": true
+            }),
+        )
+        .await
+        .expect("crate.type_info call failed");
+    let type_info_payload = common::structured_content(&type_info_response);
+
+    let type_definition = type_info_payload
+        .get("type_definition")
+        .and_then(Value::as_object)
+        .expect("type_definition should be present");
+    assert_eq!(
+        type_definition
+            .get("type_name")
+            .and_then(Value::as_str),
+        Some("ParseError")
+    );
+    assert_eq!(
+        type_definition
+            .get("kind")
+            .and_then(Value::as_str),
+        Some("struct")
+    );
+
+    let inherent_methods = type_info_payload
+        .get("inherent_methods")
+        .and_then(Value::as_array)
+        .expect("inherent_methods should be an array");
+    assert!(
+        inherent_methods
+            .iter()
+            .any(|method| {
+                method
+                    .get("name")
+                    .and_then(Value::as_str)
+                    == Some("new")
+            })
+    );
+
+    let conversions = type_info_payload
+        .get("conversions")
+        .and_then(Value::as_array)
+        .expect("conversions should be an array");
+    assert!(
+        conversions
+            .iter()
+            .any(|conversion| {
+                conversion
+                    .get("trait_name")
+                    .and_then(Value::as_str)
+                    == Some("From")
+                    && conversion
+                        .get("source_type")
+                        .and_then(Value::as_str)
+                        == Some("String")
+                    && conversion
+                        .get("target_type")
+                        .and_then(Value::as_str)
+                        == Some("ParseError")
+            })
+    );
+
+    let trait_impls_response = context
+        .mcp
+        .call_tool(
+            "crate.trait_impls",
+            json!({
+                "crate_name": "serde_json",
+                "type_name": "ParseError",
+                "limit": 20
+            }),
+        )
+        .await
+        .expect("crate.trait_impls call failed");
+    let trait_impls_payload = common::structured_content(&trait_impls_response);
+    assert!(
+        trait_impls_payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 3
+    );
+
+    let error_types_response = context
+        .mcp
+        .call_tool(
+            "crate.error_types",
+            json!({
+                "crate_name": "serde_json",
+                "type_name": "ParseError",
+                "limit": 10
+            }),
+        )
+        .await
+        .expect("crate.error_types call failed");
+    let error_types_payload = common::structured_content(&error_types_response);
+    assert_eq!(
+        error_types_payload
+            .get("count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+
+    let error_entry = error_types_payload
+        .get("error_types")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.first())
+        .expect("expected one error_types entry");
+    assert_eq!(
+        error_entry
+            .get("type_name")
+            .and_then(Value::as_str),
+        Some("ParseError")
+    );
+    assert!(
+        error_entry
+            .get("from_conversions")
+            .and_then(Value::as_array)
+            .is_some_and(|values| values
+                .iter()
+                .any(|value| value.as_str() == Some("String")))
+    );
+    assert!(
+        error_entry
+            .get("returned_by")
+            .and_then(Value::as_array)
+            .is_some_and(|values| {
+                values.iter().any(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|text| text.contains("parse"))
+                })
+            })
+    );
+    assert!(
+        error_entry
+            .get("display_patterns")
+            .and_then(Value::as_array)
+            .is_some_and(|values| {
+                values.iter().any(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|text| text.contains("parse error"))
+                })
+            })
     );
 }

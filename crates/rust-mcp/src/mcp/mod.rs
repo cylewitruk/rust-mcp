@@ -7,5 +7,20 @@ pub(crate) mod tools;
 mod transport;
 pub(crate) mod utils;
 
-pub(crate) use indexing::run_refresh_worker;
+pub(crate) use indexing::{run_refresh_worker, run_startup_rustdoc_json_refresh};
 pub use transport::streamable_http_service;
+
+#[cfg(feature = "integration-tests")]
+/// Test-only wrapper that runs the refresh worker loop for integration tests.
+pub async fn run_refresh_worker_for_tests(state: crate::state::AppState) {
+    indexing::run_refresh_worker(state).await;
+}
+
+#[cfg(feature = "integration-tests")]
+/// Test-only wrapper that runs startup rustdoc sync with a custom page size.
+pub async fn run_startup_rustdoc_json_refresh_for_tests(
+    state: crate::state::AppState,
+    per_page: u32,
+) {
+    indexing::run_startup_rustdoc_json_refresh_with_page_size(state, per_page).await;
+}

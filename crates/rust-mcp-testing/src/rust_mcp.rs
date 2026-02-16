@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde_json::{Value, json};
-use testcontainers_modules::testcontainers::core::{BuildImageOptions, IntoContainerPort as _};
+use testcontainers_modules::testcontainers::core::{
+    BuildImageOptions, Host, IntoContainerPort as _,
+};
 use testcontainers_modules::testcontainers::runners::{AsyncBuilder as _, AsyncRunner as _};
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericBuildableImage, GenericImage, ImageExt as _,
@@ -41,12 +43,49 @@ impl RustMcpTestContainer {
     /// The build uses `with_skip_if_exists(true)` so subsequent test runs can
     /// reuse an already-built `rust-mcp:test` image.
     pub async fn start() -> Result<Self> {
-        Self::start_with_build_options(BuildImageOptions::new().with_skip_if_exists(true)).await
+        Self::start_with_build_options_and_env(
+            BuildImageOptions::new().with_skip_if_exists(true),
+            Vec::<(String, String)>::new(),
+        )
+        .await
     }
 
     /// Builds (or reuses) and starts the rust-mcp Docker image with custom
     /// options.
     pub async fn start_with_build_options(build_options: BuildImageOptions) -> Result<Self> {
+        Self::start_with_build_options_and_env(build_options, Vec::<(String, String)>::new()).await
+    }
+
+    /// Builds (or reuses) and starts the rust-mcp Docker image with additional
+    /// container environment variables.
+    pub async fn start_with_env<K, V, I>(env_vars: I) -> Result<Self>
+    where
+        K: Into<String>,
+        V: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        Self::start_with_build_options_and_env(
+            BuildImageOptions::new().with_skip_if_exists(true),
+            env_vars,
+        )
+        .await
+    }
+
+    /// Builds (or reuses) and starts the rust-mcp Docker image with custom
+    /// build options and additional container environment variables.
+    pub async fn start_with_build_options_and_env<K, V, I>(
+        build_options: BuildImageOptions,
+        env_vars: I,
+    ) -> Result<Self>
+    where
+        K: Into<String>,
+        V: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        let extra_env_vars = env_vars
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect::<Vec<_>>();
         let workspace_root = workspace_root()?;
         let image = GenericBuildableImage::new(DEFAULT_IMAGE_NAME, DEFAULT_IMAGE_TAG)
             .with_dockerfile(required_path(&workspace_root, "Dockerfile")?)
@@ -63,15 +102,24 @@ impl RustMcpTestContainer {
             .await
             .context("failed to build rust-mcp Docker image")?;
 
-        let container = image
+        let mut container_request = image
             .with_exposed_port(MCP_INTERNAL_PORT.tcp())
             .with_exposed_port(METRICS_INTERNAL_PORT.tcp())
+            // Support containers reaching host-bound test fixtures via
+            // `host.docker.internal`.
+            .with_host("host.docker.internal", Host::HostGateway)
             .with_env_var("OUTBOUND_FIREWALL", "false")
             .with_env_var("MCP_HTTP_BIND", "0.0.0.0:43173")
             .with_env_var("PROMETHEUS_BIND", "0.0.0.0:9090")
             // The runtime container runs Postgres over unix socket only.
             .with_env_var("DATABASE_URL", "postgres://postgres@%2Frun%2Fpostgresql/rust_mcp")
-            .with_env_var("RUST_LOG", "warn")
+            .with_env_var("RUST_LOG", "warn");
+
+        for (key, value) in extra_env_vars {
+            container_request = container_request.with_env_var(key, value);
+        }
+
+        let container = container_request
             .start()
             .await
             .context("failed to start rust-mcp container")?;
@@ -126,15 +174,23 @@ impl RustMcpTestContainer {
 
     /// Performs MCP `initialize` and returns the raw JSON-RPC response payload.
     pub async fn initialize_mcp(&self) -> Result<Value> {
-        self.rpc_call(
-            "initialize",
-            json!({
-                "protocolVersion": DEFAULT_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "rust-mcp-e2e", "version": "0.1.0"},
-            }),
-        )
-        .await
+        let result = self
+            .rpc_call(
+                "initialize",
+                json!({
+                    "protocolVersion": DEFAULT_PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "rust-mcp-e2e", "version": "0.1.0"},
+                }),
+            )
+            .await?;
+
+        // The MCP spec requires the client to send `notifications/initialized`
+        // after receiving the initialize result.
+        self.notify("notifications/initialized", json!({}))
+            .await?;
+
+        Ok(result)
     }
 
     /// Calls an MCP tool over JSON-RPC and returns the raw JSON-RPC response.
@@ -179,6 +235,56 @@ impl RustMcpTestContainer {
             Some(error) => Err(error).context(format!("timed out waiting for {readyz_url}")),
             None => bail!("timed out waiting for {readyz_url}"),
         }
+    }
+
+    /// Sends a JSON-RPC notification (no `id`, no response expected).
+    pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+
+        let mut request = self
+            .client
+            .post(&self.mcp_url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream");
+
+        if let Some(sid) = self
+            .session_id
+            .lock()
+            .await
+            .as_deref()
+        {
+            request = request.header(MCP_SESSION_ID_HEADER, sid);
+        }
+
+        let response = request
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("MCP notification failed for method `{method}`"))?;
+
+        // Capture session ID if present.
+        if let Some(sid) = response
+            .headers()
+            .get(MCP_SESSION_ID_HEADER)
+            .and_then(|v| v.to_str().ok())
+        {
+            *self.session_id.lock().await = Some(sid.to_string());
+        }
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_default();
+            bail!("MCP notification `{method}` failed with HTTP {status}: {body}");
+        }
+
+        Ok(())
     }
 
     async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {

@@ -8,6 +8,10 @@ use reqwest::Client;
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+const MCP_ACCEPT_HEADER: &str = "application/json, text/event-stream";
+const PROTOCOL_VERSION: &str = "2025-11-25";
+
 #[derive(Debug, Parser)]
 #[command(name = "load-test-mcp", about = "Run concurrent MCP tool load tests")]
 struct Args {
@@ -34,26 +38,44 @@ struct SharedMetrics {
 async fn rpc_call(
     client: &Client,
     endpoint: &str,
+    session_id: Option<&str>,
     id: u64,
+    method: &str,
     params: Value,
-) -> Result<Value, String> {
+) -> Result<(Value, Option<String>), String> {
     let payload = json!({
         "jsonrpc": "2.0",
         "id": id,
-        "method": "tools/call",
+        "method": method,
         "params": params,
     });
 
-    let response = client
+    let mut request = client
         .post(endpoint)
         .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&payload)
+        .header("accept", MCP_ACCEPT_HEADER)
+        .json(&payload);
+    if let Some(sid) = session_id {
+        request = request.header(MCP_SESSION_ID_HEADER, sid);
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;
 
     let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let response_session_id = response
+        .headers()
+        .get(MCP_SESSION_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
     let body = response
         .text()
         .await
@@ -63,7 +85,72 @@ async fn rpc_call(
         return Err(format!("http status {status}: {body}"));
     }
 
-    serde_json::from_str::<Value>(&body).map_err(|e| format!("invalid JSON response: {e}"))
+    let parsed = if content_type.contains("text/event-stream") {
+        parse_last_sse_json_data(&body)?
+    } else {
+        serde_json::from_str::<Value>(&body).map_err(|e| format!("invalid JSON response: {e}"))?
+    };
+
+    Ok((parsed, response_session_id))
+}
+
+async fn rpc_notify(
+    client: &Client,
+    endpoint: &str,
+    session_id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Option<String>, String> {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    });
+
+    let response = client
+        .post(endpoint)
+        .header("content-type", "application/json")
+        .header("accept", MCP_ACCEPT_HEADER)
+        .header(MCP_SESSION_ID_HEADER, session_id)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("notification request failed: {e}"))?;
+
+    let status = response.status();
+    let response_session_id = response
+        .headers()
+        .get(MCP_SESSION_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(ToString::to_string);
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("failed to read notification response body: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("notification `{method}` failed with http status {status}: {body}"));
+    }
+
+    Ok(response_session_id)
+}
+
+fn parse_last_sse_json_data(body: &str) -> Result<Value, String> {
+    let mut last_json: Option<Value> = None;
+
+    for line in body.lines() {
+        let Some(payload) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim();
+        if payload.is_empty() {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(payload) {
+            last_json = Some(value);
+        }
+    }
+
+    last_json.ok_or_else(|| format!("no JSON data events found in SSE body: {body}"))
 }
 
 fn is_success_result(value: &Value) -> bool {
@@ -90,30 +177,31 @@ async fn main() -> Result<(), String> {
     let args = Args::parse();
     let client = Client::new();
 
-    let init_payload = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-25",
+    let (init, mut session_id) = rpc_call(
+        &client,
+        &args.endpoint,
+        None,
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "load-test-mcp", "version": "0.1.0"}
-        }
-    });
-    let init_response = client
-        .post(&args.endpoint)
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&init_payload)
-        .send()
-        .await
-        .map_err(|e| format!("initialize request failed: {e}"))?;
-    if !init_response
-        .status()
-        .is_success()
-    {
-        return Err(format!("initialize failed with status {}", init_response.status()));
+        }),
+    )
+    .await?;
+    if !is_success_result(&init) {
+        return Err(format!("initialize failed: {init}"));
     }
+    let sid = session_id
+        .as_deref()
+        .ok_or_else(|| "initialize response missing mcp-session-id header".to_string())?;
+    session_id = rpc_notify(&client, &args.endpoint, sid, "notifications/initialized", json!({}))
+        .await?
+        .or(session_id);
+    let session_id = Arc::new(
+        session_id.ok_or_else(|| "session id missing after initialize handshake".to_string())?,
+    );
 
     let metrics = Arc::new(Mutex::new(SharedMetrics::default()));
 
@@ -123,6 +211,7 @@ async fn main() -> Result<(), String> {
         let endpoint = args.endpoint.clone();
         let crate_name = args.crate_name.clone();
         let metrics = Arc::clone(&metrics);
+        let session_id = Arc::clone(&session_id);
 
         tasks.push(tokio::spawn(async move {
             for i in 0..args.requests_per_worker {
@@ -143,7 +232,15 @@ async fn main() -> Result<(), String> {
                 };
 
                 let started = Instant::now();
-                let result = rpc_call(&client, &endpoint, request_id, params).await;
+                let result = rpc_call(
+                    &client,
+                    &endpoint,
+                    Some(session_id.as_str()),
+                    request_id,
+                    "tools/call",
+                    params,
+                )
+                .await;
                 let latency_ms = started
                     .elapsed()
                     .as_secs_f64()
@@ -154,7 +251,7 @@ async fn main() -> Result<(), String> {
                 lock.latencies_ms
                     .push(latency_ms);
                 match result {
-                    Ok(body) => {
+                    Ok((body, _)) => {
                         if !is_success_result(&body) {
                             lock.failures += 1;
                         }

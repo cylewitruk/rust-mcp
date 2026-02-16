@@ -2,7 +2,7 @@ use metrics::gauge;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::time::{Duration, sleep};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
 use crate::mcp::server::McpServer;
@@ -251,6 +251,65 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
             }
         }
     }
+}
+
+pub(crate) async fn run_startup_rustdoc_json_refresh(state: AppState) {
+    run_startup_rustdoc_json_refresh_with_page_size(state, 100).await;
+}
+
+pub(crate) async fn run_startup_rustdoc_json_refresh_with_page_size(
+    state: AppState,
+    per_page: u32,
+) {
+    let page_size = sync_per_page(Some(per_page));
+    let server = McpServer::new(state);
+
+    let mut page = 1_u32;
+    let mut total_scanned_files = 0_usize;
+    let mut total_synced_versions = 0_usize;
+    let mut total_symbols_written = 0_usize;
+    let mut total_types_written = 0_usize;
+    let mut total_impls_written = 0_usize;
+    let mut total_traits_written = 0_usize;
+    let mut total_errors = 0_usize;
+
+    loop {
+        let outcome = match server
+            .sync_rustdoc_json_cache(None, Some(page), Some(page_size))
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                warn!(page, %error, "startup rustdoc JSON refresh failed");
+                break;
+            }
+        };
+
+        total_scanned_files += outcome.scanned_files;
+        total_synced_versions += outcome.synced_versions;
+        total_symbols_written += outcome.symbols_written;
+        total_types_written += outcome.types_written;
+        total_impls_written += outcome.impls_written;
+        total_traits_written += outcome.traits_written;
+        total_errors += outcome.errors.len();
+
+        if outcome.scanned_files < page_size as usize {
+            break;
+        }
+
+        page = page.saturating_add(1);
+    }
+
+    info!(
+        scanned_files = total_scanned_files,
+        synced_versions = total_synced_versions,
+        symbols_written = total_symbols_written,
+        types_written = total_types_written,
+        impls_written = total_impls_written,
+        traits_written = total_traits_written,
+        errors = total_errors,
+        "startup rustdoc JSON refresh finished"
+    );
 }
 
 #[cfg(test)]

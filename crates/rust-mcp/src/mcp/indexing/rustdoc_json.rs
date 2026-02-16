@@ -1,6 +1,9 @@
 use std::ffi::OsStr;
+use std::fmt::Write as _;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
 use rustdoc_types::{
     Attribute, Crate as RustdocCrate, Enum, FunctionPointer, FunctionSignature, GenericArg,
     GenericArgs, GenericBound, GenericParamDef, GenericParamDefKind, Id, Impl, Item, ItemEnum,
@@ -11,9 +14,9 @@ use semver::Version;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
-use crate::mcp::models::CrateVersionSelectionRow;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_required, sync_page, sync_per_page};
+use crate::state::OutboundSource;
 
 // ============================================================
 // Outcome tracking
@@ -40,6 +43,13 @@ struct RustdocCandidate {
     path: PathBuf,
     crate_name: String,
     crate_version: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RustdocSyncCandidateRow {
+    crate_name: String,
+    version: String,
+    crate_version_id: i64,
 }
 
 #[derive(Debug)]
@@ -126,7 +136,7 @@ fn file_sha256_hex(content: &[u8]) -> String {
     let digest = Sha256::digest(content);
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {
-        out.push_str(&format!("{byte:02x}"));
+        let _ = write!(&mut out, "{byte:02x}");
     }
     out
 }
@@ -208,6 +218,28 @@ fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
         .unwrap_or_else(|| "unknown.json".to_string());
 
     format!("rustdoc-json/{relative}")
+}
+
+fn docs_rs_rustdoc_synthetic_path(crate_name: &str, version: &str) -> String {
+    format!("rustdoc-json/docs.rs/{crate_name}-{version}.json")
+}
+
+fn decode_docs_rs_rustdoc_payload(payload_bytes: Vec<u8>) -> Result<String, String> {
+    if let Ok(content) = String::from_utf8(payload_bytes.clone()) {
+        return Ok(content);
+    }
+
+    let mut decoder = GzDecoder::new(payload_bytes.as_slice());
+    let mut decoded_bytes = Vec::new();
+    if decoder
+        .read_to_end(&mut decoded_bytes)
+        .is_ok()
+    {
+        return String::from_utf8(decoded_bytes)
+            .map_err(|e| format!("decoded docs.rs rustdoc JSON payload was invalid UTF-8: {e}"));
+    }
+
+    Err("docs.rs rustdoc JSON payload was not valid UTF-8 or gzip".to_string())
 }
 
 // ============================================================
@@ -1175,6 +1207,362 @@ fn extract_all(krate: &RustdocCrate) -> RustdocExtraction {
 // ============================================================
 
 impl McpServer {
+    fn docs_rs_rustdoc_json_url(&self, crate_name: &str, version: &str) -> String {
+        let base = self
+            .state
+            .config
+            .docs_rs_base_url
+            .trim_end_matches('/');
+        format!("{base}/crate/{crate_name}/{version}/json.gz")
+    }
+
+    async fn fetch_docs_rs_rustdoc_json(
+        &self,
+        crate_name: &str,
+        version: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.state
+            .acquire_outbound_slot(OutboundSource::DocsRs)
+            .await;
+        let url = self.docs_rs_rustdoc_json_url(crate_name, version);
+        let response = self
+            .state
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| {
+                format!("docs.rs rustdoc JSON request failed for {crate_name}@{version}: {e}")
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!(
+                "docs.rs rustdoc JSON request failed for {crate_name}@{version} with status \
+                 {status}"
+            ));
+        }
+
+        response
+            .bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| {
+                format!("docs.rs rustdoc JSON body read failed for {crate_name}@{version}: {e}")
+            })
+    }
+
+    async fn ingest_rustdoc_json_document(
+        &self,
+        candidate: &RustdocSyncCandidateRow,
+        source_path: &str,
+        content: &str,
+        outcome: &mut RustdocJsonRefreshOutcome,
+    ) -> Result<(), String> {
+        let krate = serde_json::from_str::<RustdocCrate>(content).map_err(|e| {
+            format!(
+                "failed to parse rustdoc JSON payload for {}@{} from {}: {e}",
+                candidate.crate_name, candidate.version, source_path
+            )
+        })?;
+
+        let resolved_crate_name = krate
+            .index
+            .get(&krate.root)
+            .and_then(|item| item.name.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.replace('_', "-"))
+            .unwrap_or_else(|| candidate.crate_name.clone());
+
+        if resolved_crate_name != candidate.crate_name {
+            return Err(format!(
+                "rustdoc JSON crate mismatch for {}@{} from {}: payload resolved to crate '{}'",
+                candidate.crate_name, candidate.version, source_path, resolved_crate_name
+            ));
+        }
+
+        let content_bytes = content.as_bytes();
+        sqlx::query(
+            "INSERT INTO source_files (
+                crate_version_id,
+                path,
+                sha256,
+                file_size,
+                language,
+                content,
+                indexed_at
+             ) VALUES (
+                $1, $2, $3, $4, $5, $6, NOW()
+             )
+             ON CONFLICT (crate_version_id, path) DO UPDATE
+             SET sha256 = EXCLUDED.sha256,
+                 file_size = EXCLUDED.file_size,
+                 language = EXCLUDED.language,
+                 content = EXCLUDED.content,
+                 indexed_at = NOW()",
+        )
+        .bind(candidate.crate_version_id)
+        .bind(source_path)
+        .bind(file_sha256_hex(content_bytes))
+        .bind(content_bytes.len() as i64)
+        .bind(Some("rustdoc_json"))
+        .bind(content)
+        .execute(&self.state.db)
+        .await
+        .map_err(|e| {
+            format!(
+                "failed to upsert rustdoc source file {} for {}@{}: {e}",
+                source_path, candidate.crate_name, candidate.version
+            )
+        })?;
+
+        let source_file_id = sqlx::query_scalar::<_, i64>(
+            "SELECT id
+             FROM source_files
+             WHERE crate_version_id = $1 AND path = $2
+             LIMIT 1",
+        )
+        .bind(candidate.crate_version_id)
+        .bind(source_path)
+        .fetch_one(&self.state.db)
+        .await
+        .map_err(|e| {
+            format!(
+                "failed to lookup rustdoc source file id {} for {}@{}: {e}",
+                source_path, candidate.crate_name, candidate.version
+            )
+        })?;
+
+        let extraction = extract_all(&krate);
+
+        let mut tx = self
+            .state
+            .db
+            .begin()
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to begin transaction for rustdoc sync of {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+
+        let err_ctx = |table: &str| {
+            format!(
+                "failed to clear rustdoc {table} for {}@{}",
+                candidate.crate_name, candidate.version
+            )
+        };
+
+        sqlx::query(
+            "DELETE FROM symbols
+             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
+        )
+        .bind(candidate.crate_version_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("{}: {e}", err_ctx("symbols")))?;
+
+        sqlx::query(
+            "DELETE FROM crate_types
+             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
+        )
+        .bind(candidate.crate_version_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("{}: {e}", err_ctx("crate_types")))?;
+
+        sqlx::query(
+            "DELETE FROM crate_impls
+             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
+        )
+        .bind(candidate.crate_version_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("{}: {e}", err_ctx("crate_impls")))?;
+
+        sqlx::query(
+            "DELETE FROM crate_traits
+             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
+        )
+        .bind(candidate.crate_version_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("{}: {e}", err_ctx("crate_traits")))?;
+
+        for symbol in &extraction.symbols {
+            sqlx::query(
+                "INSERT INTO symbols (
+                    crate_version_id, source_file_id, name, kind, signature,
+                    visibility, start_line, end_line, index_source, indexed_at,
+                    rustdoc_item_id, canonical_path, definition_path,
+                    deprecated_since, deprecated_note
+                 ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, 'rustdoc_json', NOW(),
+                    $9, $10, $11, $12, $13
+                 )",
+            )
+            .bind(candidate.crate_version_id)
+            .bind(source_file_id)
+            .bind(&symbol.name)
+            .bind(&symbol.kind)
+            .bind(&symbol.signature)
+            .bind(&symbol.visibility)
+            .bind(symbol.start_line)
+            .bind(symbol.end_line)
+            .bind(symbol.rustdoc_item_id)
+            .bind(&symbol.canonical_path)
+            .bind(&symbol.definition_path)
+            .bind(&symbol.deprecated_since)
+            .bind(&symbol.deprecated_note)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to insert rustdoc symbol for {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+            outcome.symbols_written += 1;
+        }
+
+        for extracted_type in &extraction.types {
+            sqlx::query(
+                "INSERT INTO crate_types (
+                    crate_version_id, source_file_id, type_name, kind, visibility,
+                    generic_params, fields, variants, start_line, end_line,
+                    index_source, indexed_at,
+                    rustdoc_item_id, canonical_path, definition_path,
+                    deprecated_since, deprecated_note, is_non_exhaustive,
+                    auto_traits, where_clauses
+                 ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    'rustdoc_json', NOW(),
+                    $11, $12, $13, $14, $15, $16, $17, $18
+                 )",
+            )
+            .bind(candidate.crate_version_id)
+            .bind(source_file_id)
+            .bind(&extracted_type.type_name)
+            .bind(&extracted_type.kind)
+            .bind(&extracted_type.visibility)
+            .bind(&extracted_type.generic_params)
+            .bind(&extracted_type.fields)
+            .bind(&extracted_type.variants)
+            .bind(extracted_type.start_line)
+            .bind(extracted_type.end_line)
+            .bind(extracted_type.rustdoc_item_id)
+            .bind(&extracted_type.canonical_path)
+            .bind(&extracted_type.definition_path)
+            .bind(&extracted_type.deprecated_since)
+            .bind(&extracted_type.deprecated_note)
+            .bind(extracted_type.is_non_exhaustive)
+            .bind(&extracted_type.auto_traits)
+            .bind(&extracted_type.where_clauses)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to insert rustdoc type for {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+            outcome.types_written += 1;
+        }
+
+        for extracted_impl in &extraction.impls {
+            sqlx::query(
+                "INSERT INTO crate_impls (
+                    crate_version_id, source_file_id, type_name, type_name_display,
+                    trait_name, trait_name_display, impl_kind, methods,
+                    start_line, end_line, index_source, indexed_at,
+                    rustdoc_item_id, is_blanket, is_synthetic, is_negative,
+                    blanket_type, generics, where_clauses
+                 ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    'rustdoc_json', NOW(),
+                    $11, $12, $13, $14, $15, $16, $17
+                 )",
+            )
+            .bind(candidate.crate_version_id)
+            .bind(source_file_id)
+            .bind(&extracted_impl.type_name)
+            .bind(&extracted_impl.type_name_display)
+            .bind(&extracted_impl.trait_name)
+            .bind(&extracted_impl.trait_name_display)
+            .bind(&extracted_impl.impl_kind)
+            .bind(&extracted_impl.methods)
+            .bind(extracted_impl.start_line)
+            .bind(extracted_impl.end_line)
+            .bind(extracted_impl.rustdoc_item_id)
+            .bind(extracted_impl.is_blanket)
+            .bind(extracted_impl.is_synthetic)
+            .bind(extracted_impl.is_negative)
+            .bind(&extracted_impl.blanket_type)
+            .bind(&extracted_impl.generics)
+            .bind(&extracted_impl.where_clauses)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to insert rustdoc impl for {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+            outcome.impls_written += 1;
+        }
+
+        for extracted_trait in &extraction.traits {
+            sqlx::query(
+                "INSERT INTO crate_traits (
+                    crate_version_id, trait_name, is_auto, is_unsafe,
+                    is_dyn_compatible, supertraits, required_methods,
+                    provided_methods, associated_types, generics,
+                    index_source, indexed_at, rustdoc_item_id
+                 ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    'rustdoc_json', NOW(), $11
+                 )",
+            )
+            .bind(candidate.crate_version_id)
+            .bind(&extracted_trait.trait_name)
+            .bind(extracted_trait.is_auto)
+            .bind(extracted_trait.is_unsafe)
+            .bind(extracted_trait.is_dyn_compatible)
+            .bind(&extracted_trait.supertraits)
+            .bind(&extracted_trait.required_methods)
+            .bind(&extracted_trait.provided_methods)
+            .bind(&extracted_trait.associated_types)
+            .bind(&extracted_trait.generics)
+            .bind(extracted_trait.rustdoc_item_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to insert rustdoc trait for {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+            outcome.traits_written += 1;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to commit rustdoc sync transaction for {}@{}: {e}",
+                    candidate.crate_name, candidate.version
+                )
+            })?;
+
+        outcome.synced_versions += 1;
+        outcome
+            .touched_versions
+            .push(format!("{}@{}", candidate.crate_name, candidate.version));
+        Ok(())
+    }
+
     pub(crate) async fn sync_rustdoc_json_cache(
         &self,
         crate_name: Option<String>,
@@ -1185,473 +1573,184 @@ impl McpServer {
             Some(value) => Some(normalize_required(value, "crate_name")?),
             None => None,
         };
+        let page = sync_page(page);
+        let per_page = sync_per_page(per_page);
+        let offset = page
+            .saturating_sub(1)
+            .saturating_mul(per_page);
 
-        let Some(root_dir) = self
+        let candidates = sqlx::query_as::<_, RustdocSyncCandidateRow>(
+            "SELECT
+                c.name AS crate_name,
+                cv.version,
+                cv.id AS crate_version_id
+             FROM crate_versions cv
+             JOIN crates c ON c.id = cv.crate_id
+             WHERE ($1::TEXT IS NULL OR c.name = $1)
+             ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
+             LIMIT $2 OFFSET $3",
+        )
+        .bind(crate_filter.as_deref())
+        .bind(i64::from(per_page))
+        .bind(i64::from(offset))
+        .fetch_all(&self.state.db)
+        .await
+        .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;
+
+        let (local_fallback, local_fallback_unavailable) = match self
             .state
             .config
             .rustdoc_json_dir
             .clone()
-        else {
-            return Ok(RustdocJsonRefreshOutcome {
-                errors: vec![
-                    "RUSTDOC_JSON_DIR is not configured; skipping rustdoc JSON refresh".to_string(),
-                ],
-                ..Default::default()
-            });
+        {
+            None => (
+                None,
+                Some(
+                    "local rustdoc fallback unavailable: RUSTDOC_JSON_DIR is not configured"
+                        .to_string(),
+                ),
+            ),
+            Some(root_dir) if !root_dir.exists() => (
+                None,
+                Some(format!(
+                    "local rustdoc fallback unavailable: rustdoc JSON directory not found: {}",
+                    root_dir.display()
+                )),
+            ),
+            Some(root_dir) => match walk_json_files(&root_dir) {
+                Ok(files) => {
+                    let mut local_candidates = files
+                        .into_iter()
+                        .filter_map(|path| {
+                            let stem = path
+                                .file_stem()?
+                                .to_string_lossy()
+                                .to_string();
+                            let (candidate_crate, candidate_version) = crate_from_stem(&stem);
+                            if candidate_crate.is_empty() {
+                                return None;
+                            }
+                            if let Some(filter) = crate_filter.as_ref()
+                                && candidate_crate != *filter
+                            {
+                                return None;
+                            }
+                            Some(RustdocCandidate {
+                                path,
+                                crate_name: candidate_crate,
+                                crate_version: candidate_version,
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    local_candidates.sort_by(|left, right| left.path.cmp(&right.path));
+                    (Some((root_dir, local_candidates)), None)
+                }
+                Err(error) => (None, Some(format!("local rustdoc fallback unavailable: {error}"))),
+            },
         };
-
-        if !root_dir.exists() {
-            return Ok(RustdocJsonRefreshOutcome {
-                errors: vec![format!("rustdoc JSON directory not found: {}", root_dir.display())],
-                ..Default::default()
-            });
-        }
-
-        let files = walk_json_files(&root_dir)?;
-        let mut candidates = files
-            .into_iter()
-            .filter_map(|path| {
-                let stem = path
-                    .file_stem()?
-                    .to_string_lossy()
-                    .to_string();
-                let (candidate_crate, candidate_version) = crate_from_stem(&stem);
-                if candidate_crate.is_empty() {
-                    return None;
-                }
-                if let Some(filter) = crate_filter.as_ref()
-                    && candidate_crate != *filter
-                {
-                    return None;
-                }
-                Some(RustdocCandidate {
-                    path,
-                    crate_name: candidate_crate,
-                    crate_version: candidate_version,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        candidates.sort_by(|left, right| left.path.cmp(&right.path));
-
-        let page = sync_page(page);
-        let per_page = sync_per_page(per_page) as usize;
-        let offset = ((page - 1) as usize).saturating_mul(per_page);
-        let selected = candidates
-            .into_iter()
-            .skip(offset)
-            .take(per_page)
-            .collect::<Vec<_>>();
 
         let mut outcome = RustdocJsonRefreshOutcome::default();
 
-        for candidate in selected {
+        for candidate in candidates {
             outcome.scanned_files += 1;
 
-            let bytes = match std::fs::read(&candidate.path) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    outcome.errors.push(format!(
-                        "failed to read rustdoc JSON file {}: {error}",
-                        candidate.path.display()
-                    ));
-                    continue;
-                }
-            };
+            let docs_source_path =
+                docs_rs_rustdoc_synthetic_path(&candidate.crate_name, &candidate.version);
+            let mut source_errors = Vec::new();
 
-            let content = match String::from_utf8(bytes.clone()) {
-                Ok(content) => content,
-                Err(error) => {
-                    outcome.errors.push(format!(
-                        "invalid UTF-8 in rustdoc JSON file {}: {error}",
-                        candidate.path.display()
-                    ));
-                    continue;
-                }
-            };
-
-            // Typed deserialization via rustdoc-types
-            let krate = match serde_json::from_str::<RustdocCrate>(&content) {
-                Ok(krate) => krate,
-                Err(error) => {
-                    outcome.errors.push(format!(
-                        "failed to parse rustdoc JSON file {}: {error}",
-                        candidate.path.display()
-                    ));
-                    continue;
-                }
-            };
-
-            // Resolve crate name from root module item (rustdoc uses underscores
-            // internally)
-            let resolved_crate_name = krate
-                .index
-                .get(&krate.root)
-                .and_then(|item| item.name.as_deref())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.replace('_', "-"))
-                .unwrap_or_else(|| candidate.crate_name.clone());
-
-            if let Some(filter) = crate_filter.as_ref()
-                && resolved_crate_name != *filter
+            match self
+                .fetch_docs_rs_rustdoc_json(&candidate.crate_name, &candidate.version)
+                .await
             {
-                continue;
+                Ok(payload_bytes) => match decode_docs_rs_rustdoc_payload(payload_bytes) {
+                    Ok(payload) => {
+                        match self
+                            .ingest_rustdoc_json_document(
+                                &candidate,
+                                &docs_source_path,
+                                &payload,
+                                &mut outcome,
+                            )
+                            .await
+                        {
+                            Ok(()) => continue,
+                            Err(error) => source_errors.push(error),
+                        }
+                    }
+                    Err(error) => source_errors.push(format!(
+                        "docs.rs rustdoc JSON payload for {}@{} could not be decoded: {error}",
+                        candidate.crate_name, candidate.version
+                    )),
+                },
+                Err(error) => source_errors.push(error),
             }
 
-            let metadata_version = krate
-                .crate_version
-                .clone()
-                .or(candidate
-                    .crate_version
-                    .clone());
+            let mut local_ingested = false;
+            if let Some((root_dir, local_candidates)) = local_fallback.as_ref() {
+                let local_candidate = local_candidates
+                    .iter()
+                    .find(|local| {
+                        local.crate_name == candidate.crate_name
+                            && local.crate_version.as_deref() == Some(candidate.version.as_str())
+                    })
+                    .or_else(|| {
+                        local_candidates
+                            .iter()
+                            .find(|local| {
+                                local.crate_name == candidate.crate_name
+                                    && local.crate_version.is_none()
+                            })
+                    });
 
-            let crate_version = if let Some(version) = metadata_version {
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        cv.id,
-                        cv.version,
-                        cv.rust_version,
-                        cv.published_at::TEXT AS published_at,
-                        cv.readme
-                     FROM crate_versions cv
-                     JOIN crates c ON c.id = cv.crate_id
-                     WHERE c.name = $1 AND cv.version = $2
-                     LIMIT 1",
-                )
-                .bind(&resolved_crate_name)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "rustdoc JSON crate version lookup failed for {}@{}: {e}",
-                        resolved_crate_name, version
-                    )
-                })?
-            } else {
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        cv.id,
-                        cv.version,
-                        cv.rust_version,
-                        cv.published_at::TEXT AS published_at,
-                        cv.readme
-                     FROM crate_versions cv
-                     JOIN crates c ON c.id = cv.crate_id
-                     WHERE c.name = $1
-                     ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                     LIMIT 1",
-                )
-                .bind(&resolved_crate_name)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "rustdoc JSON latest version lookup failed for {}: {e}",
-                        resolved_crate_name
-                    )
-                })?
-            };
+                if let Some(local_candidate) = local_candidate {
+                    let local_source_path = synthetic_rustdoc_path(root_dir, &local_candidate.path);
 
-            let Some(crate_version) = crate_version else {
+                    match std::fs::read(&local_candidate.path) {
+                        Ok(payload_bytes) => match String::from_utf8(payload_bytes) {
+                            Ok(payload) => {
+                                match self
+                                    .ingest_rustdoc_json_document(
+                                        &candidate,
+                                        &local_source_path,
+                                        &payload,
+                                        &mut outcome,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        local_ingested = true;
+                                    }
+                                    Err(error) => source_errors.push(error),
+                                }
+                            }
+                            Err(error) => source_errors.push(format!(
+                                "invalid UTF-8 in rustdoc JSON file {} (local fallback): {error}",
+                                local_candidate.path.display()
+                            )),
+                        },
+                        Err(error) => source_errors.push(format!(
+                            "failed to read local rustdoc JSON file {}: {error}",
+                            local_candidate.path.display()
+                        )),
+                    }
+                } else {
+                    source_errors.push(format!(
+                        "no local rustdoc JSON file found for {}@{}",
+                        candidate.crate_name, candidate.version
+                    ));
+                }
+            } else if let Some(reason) = local_fallback_unavailable.as_ref() {
+                source_errors.push(reason.clone());
+            }
+
+            if !local_ingested {
                 outcome.errors.push(format!(
-                    "crate/version not indexed for rustdoc JSON file {} (crate '{}')",
-                    candidate.path.display(),
-                    resolved_crate_name
+                    "rustdoc JSON sync failed for {}@{}: {}",
+                    candidate.crate_name,
+                    candidate.version,
+                    source_errors.join("; ")
                 ));
-                continue;
-            };
-
-            let synthetic_path = synthetic_rustdoc_path(&root_dir, &candidate.path);
-
-            sqlx::query(
-                "INSERT INTO source_files (
-                    crate_version_id,
-                    path,
-                    sha256,
-                    file_size,
-                    language,
-                    content,
-                    indexed_at
-                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, NOW()
-                 )
-                 ON CONFLICT (crate_version_id, path) DO UPDATE
-                 SET sha256 = EXCLUDED.sha256,
-                     file_size = EXCLUDED.file_size,
-                     language = EXCLUDED.language,
-                     content = EXCLUDED.content,
-                     indexed_at = NOW()",
-            )
-            .bind(crate_version.id)
-            .bind(&synthetic_path)
-            .bind(file_sha256_hex(&bytes))
-            .bind(bytes.len() as i64)
-            .bind(Some("rustdoc_json"))
-            .bind(&content)
-            .execute(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to upsert rustdoc source file {} for {}@{}: {e}",
-                    synthetic_path, resolved_crate_name, crate_version.version
-                )
-            })?;
-
-            let source_file_id = sqlx::query_scalar::<_, i64>(
-                "SELECT id
-                 FROM source_files
-                 WHERE crate_version_id = $1 AND path = $2
-                 LIMIT 1",
-            )
-            .bind(crate_version.id)
-            .bind(&synthetic_path)
-            .fetch_one(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to lookup rustdoc source file id {} for {}@{}: {e}",
-                    synthetic_path, resolved_crate_name, crate_version.version
-                )
-            })?;
-
-            // Extract all data from typed rustdoc JSON (before DB work)
-            let extraction = extract_all(&krate);
-
-            // All deletes + inserts run in a single transaction per candidate
-            // so partial failures cannot leave inconsistent state.
-            let mut tx = self
-                .state
-                .db
-                .begin()
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to begin transaction for rustdoc sync of {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-
-            // Delete old rustdoc rows by crate_version_id + index_source
-            // (not source_file_id) to ensure complete cleanup regardless of
-            // which synthetic path was used previously.
-            let err_ctx = |table: &str| {
-                format!(
-                    "failed to clear rustdoc {table} for {}@{}",
-                    resolved_crate_name, crate_version.version
-                )
-            };
-
-            sqlx::query(
-                "DELETE FROM symbols
-                 WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-            )
-            .bind(crate_version.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("{}: {e}", err_ctx("symbols")))?;
-
-            sqlx::query(
-                "DELETE FROM crate_types
-                 WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-            )
-            .bind(crate_version.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("{}: {e}", err_ctx("crate_types")))?;
-
-            sqlx::query(
-                "DELETE FROM crate_impls
-                 WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-            )
-            .bind(crate_version.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("{}: {e}", err_ctx("crate_impls")))?;
-
-            sqlx::query(
-                "DELETE FROM crate_traits
-                 WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-            )
-            .bind(crate_version.id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("{}: {e}", err_ctx("crate_traits")))?;
-
-            // Insert symbols
-            for symbol in &extraction.symbols {
-                sqlx::query(
-                    "INSERT INTO symbols (
-                        crate_version_id, source_file_id, name, kind, signature,
-                        visibility, start_line, end_line, index_source, indexed_at,
-                        rustdoc_item_id, canonical_path, definition_path,
-                        deprecated_since, deprecated_note
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, 'rustdoc_json', NOW(),
-                        $9, $10, $11, $12, $13
-                     )",
-                )
-                .bind(crate_version.id)
-                .bind(source_file_id)
-                .bind(&symbol.name)
-                .bind(&symbol.kind)
-                .bind(&symbol.signature)
-                .bind(&symbol.visibility)
-                .bind(symbol.start_line)
-                .bind(symbol.end_line)
-                .bind(symbol.rustdoc_item_id)
-                .bind(&symbol.canonical_path)
-                .bind(&symbol.definition_path)
-                .bind(&symbol.deprecated_since)
-                .bind(&symbol.deprecated_note)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to insert rustdoc symbol for {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-                outcome.symbols_written += 1;
             }
-
-            // Insert types
-            for extracted_type in &extraction.types {
-                sqlx::query(
-                    "INSERT INTO crate_types (
-                        crate_version_id, source_file_id, type_name, kind, visibility,
-                        generic_params, fields, variants, start_line, end_line,
-                        index_source, indexed_at,
-                        rustdoc_item_id, canonical_path, definition_path,
-                        deprecated_since, deprecated_note, is_non_exhaustive,
-                        auto_traits, where_clauses
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        'rustdoc_json', NOW(),
-                        $11, $12, $13, $14, $15, $16, $17, $18
-                     )",
-                )
-                .bind(crate_version.id)
-                .bind(source_file_id)
-                .bind(&extracted_type.type_name)
-                .bind(&extracted_type.kind)
-                .bind(&extracted_type.visibility)
-                .bind(&extracted_type.generic_params)
-                .bind(&extracted_type.fields)
-                .bind(&extracted_type.variants)
-                .bind(extracted_type.start_line)
-                .bind(extracted_type.end_line)
-                .bind(extracted_type.rustdoc_item_id)
-                .bind(&extracted_type.canonical_path)
-                .bind(&extracted_type.definition_path)
-                .bind(&extracted_type.deprecated_since)
-                .bind(&extracted_type.deprecated_note)
-                .bind(extracted_type.is_non_exhaustive)
-                .bind(&extracted_type.auto_traits)
-                .bind(&extracted_type.where_clauses)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to insert rustdoc type for {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-                outcome.types_written += 1;
-            }
-
-            // Insert impls
-            for extracted_impl in &extraction.impls {
-                sqlx::query(
-                    "INSERT INTO crate_impls (
-                        crate_version_id, source_file_id, type_name, type_name_display,
-                        trait_name, trait_name_display, impl_kind, methods,
-                        start_line, end_line, index_source, indexed_at,
-                        rustdoc_item_id, is_blanket, is_synthetic, is_negative,
-                        blanket_type, generics, where_clauses
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        'rustdoc_json', NOW(),
-                        $11, $12, $13, $14, $15, $16, $17
-                     )",
-                )
-                .bind(crate_version.id)
-                .bind(source_file_id)
-                .bind(&extracted_impl.type_name)
-                .bind(&extracted_impl.type_name_display)
-                .bind(&extracted_impl.trait_name)
-                .bind(&extracted_impl.trait_name_display)
-                .bind(&extracted_impl.impl_kind)
-                .bind(&extracted_impl.methods)
-                .bind(extracted_impl.start_line)
-                .bind(extracted_impl.end_line)
-                .bind(extracted_impl.rustdoc_item_id)
-                .bind(extracted_impl.is_blanket)
-                .bind(extracted_impl.is_synthetic)
-                .bind(extracted_impl.is_negative)
-                .bind(&extracted_impl.blanket_type)
-                .bind(&extracted_impl.generics)
-                .bind(&extracted_impl.where_clauses)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to insert rustdoc impl for {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-                outcome.impls_written += 1;
-            }
-
-            // Insert traits
-            for extracted_trait in &extraction.traits {
-                sqlx::query(
-                    "INSERT INTO crate_traits (
-                        crate_version_id, trait_name, is_auto, is_unsafe,
-                        is_dyn_compatible, supertraits, required_methods,
-                        provided_methods, associated_types, generics,
-                        index_source, indexed_at, rustdoc_item_id
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        'rustdoc_json', NOW(), $11
-                     )",
-                )
-                .bind(crate_version.id)
-                .bind(&extracted_trait.trait_name)
-                .bind(extracted_trait.is_auto)
-                .bind(extracted_trait.is_unsafe)
-                .bind(extracted_trait.is_dyn_compatible)
-                .bind(&extracted_trait.supertraits)
-                .bind(&extracted_trait.required_methods)
-                .bind(&extracted_trait.provided_methods)
-                .bind(&extracted_trait.associated_types)
-                .bind(&extracted_trait.generics)
-                .bind(extracted_trait.rustdoc_item_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to insert rustdoc trait for {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-                outcome.traits_written += 1;
-            }
-
-            tx.commit()
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to commit rustdoc sync transaction for {}@{}: {e}",
-                        resolved_crate_name, crate_version.version
-                    )
-                })?;
-
-            outcome.synced_versions += 1;
-            outcome
-                .touched_versions
-                .push(format!("{}@{}", resolved_crate_name, crate_version.version));
         }
 
         outcome
@@ -1667,8 +1766,11 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::io::Write as _;
     use std::path::PathBuf;
 
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
     use rustdoc_types::{
         Abi, Deprecation, Function, FunctionHeader, FunctionSignature, Generics, Id, Impl, Item,
         ItemEnum, ItemKind, ItemSummary, Module, Path, Span, Struct, StructKind, Target, Trait,
@@ -1676,6 +1778,36 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn decode_docs_rs_payload_accepts_plain_utf8() {
+        let expected = "{\"hello\":\"world\"}".to_string();
+        let decoded =
+            decode_docs_rs_rustdoc_payload(expected.clone().into_bytes()).expect("decode failed");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn decode_docs_rs_payload_accepts_gzip_utf8() {
+        let expected = "{\"hello\":\"world\"}".to_string();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(expected.as_bytes())
+            .expect("failed to write gzip payload");
+        let payload = encoder
+            .finish()
+            .expect("failed to finish gzip payload");
+
+        let decoded = decode_docs_rs_rustdoc_payload(payload).expect("decode failed");
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn decode_docs_rs_payload_rejects_invalid_bytes() {
+        let error =
+            decode_docs_rs_rustdoc_payload(vec![0, 159, 146, 150]).expect_err("expected error");
+        assert!(error.contains("not valid UTF-8 or gzip"));
+    }
 
     // ---- Fixture builder helpers ----
 
