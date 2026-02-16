@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde_json::{Value, json};
 use testcontainers_modules::testcontainers::core::{
-    BuildImageOptions, Host, IntoContainerPort as _,
+    BuildImageOptions, Host, IntoContainerPort as _, Mount,
 };
 use testcontainers_modules::testcontainers::runners::{AsyncBuilder as _, AsyncRunner as _};
 use testcontainers_modules::testcontainers::{
@@ -71,6 +71,25 @@ impl RustMcpTestContainer {
         .await
     }
 
+    /// Builds (or reuses) and starts the rust-mcp Docker image with additional
+    /// container environment variables and bind mounts.
+    pub async fn start_with_env_and_mounts<K, V, I, P, Q, M>(env_vars: I, mounts: M) -> Result<Self>
+    where
+        K: Into<String>,
+        V: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+        P: Into<String>,
+        Q: Into<String>,
+        M: IntoIterator<Item = (P, Q)>,
+    {
+        Self::start_with_build_options_env_and_mounts(
+            BuildImageOptions::new().with_skip_if_exists(true),
+            env_vars,
+            mounts,
+        )
+        .await
+    }
+
     /// Builds (or reuses) and starts the rust-mcp Docker image with custom
     /// build options and additional container environment variables.
     pub async fn start_with_build_options_and_env<K, V, I>(
@@ -82,10 +101,37 @@ impl RustMcpTestContainer {
         V: Into<String>,
         I: IntoIterator<Item = (K, V)>,
     {
+        Self::start_with_build_options_env_and_mounts(
+            build_options,
+            env_vars,
+            Vec::<(String, String)>::new(),
+        )
+        .await
+    }
+
+    /// Builds (or reuses) and starts the rust-mcp Docker image with custom
+    /// build options, additional container environment variables, and mounts.
+    pub async fn start_with_build_options_env_and_mounts<K, V, I, P, Q, M>(
+        build_options: BuildImageOptions,
+        env_vars: I,
+        mounts: M,
+    ) -> Result<Self>
+    where
+        K: Into<String>,
+        V: Into<String>,
+        I: IntoIterator<Item = (K, V)>,
+        P: Into<String>,
+        Q: Into<String>,
+        M: IntoIterator<Item = (P, Q)>,
+    {
         let extra_env_vars = env_vars
             .into_iter()
             .map(|(k, v)| (k.into(), v.into()))
             .collect::<Vec<_>>();
+        let extra_mounts = mounts
+            .into_iter()
+            .map(|(host_path, container_path)| (host_path.into(), container_path.into()))
+            .collect::<Vec<(String, String)>>();
         let workspace_root = workspace_root()?;
         let image = GenericBuildableImage::new(DEFAULT_IMAGE_NAME, DEFAULT_IMAGE_TAG)
             .with_dockerfile(required_path(&workspace_root, "Dockerfile")?)
@@ -117,6 +163,11 @@ impl RustMcpTestContainer {
 
         for (key, value) in extra_env_vars {
             container_request = container_request.with_env_var(key, value);
+        }
+
+        for (host_path, container_path) in extra_mounts {
+            container_request =
+                container_request.with_mount(Mount::bind_mount(host_path, container_path));
         }
 
         let container = container_request
@@ -172,17 +223,15 @@ impl RustMcpTestContainer {
         &self.container
     }
 
+    /// Clears the locally cached MCP session identifier.
+    pub async fn clear_session(&self) {
+        *self.session_id.lock().await = None;
+    }
+
     /// Performs MCP `initialize` and returns the raw JSON-RPC response payload.
     pub async fn initialize_mcp(&self) -> Result<Value> {
         let result = self
-            .rpc_call(
-                "initialize",
-                json!({
-                    "protocolVersion": DEFAULT_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": "rust-mcp-e2e", "version": "0.1.0"},
-                }),
-            )
+            .initialize_only_mcp()
             .await?;
 
         // The MCP spec requires the client to send `notifications/initialized`
@@ -191,6 +240,26 @@ impl RustMcpTestContainer {
             .await?;
 
         Ok(result)
+    }
+
+    /// Performs MCP `initialize` but does not send
+    /// `notifications/initialized`.
+    pub async fn initialize_only_mcp(&self) -> Result<Value> {
+        self.rpc_call(
+            "initialize",
+            json!({
+                "protocolVersion": DEFAULT_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "rust-mcp-e2e", "version": "0.1.0"},
+            }),
+        )
+        .await
+    }
+
+    /// Calls MCP `tools/list` and returns the raw JSON-RPC response.
+    pub async fn list_tools_mcp(&self) -> Result<Value> {
+        self.rpc_call("tools/list", json!({}))
+            .await
     }
 
     /// Calls an MCP tool over JSON-RPC and returns the raw JSON-RPC response.
