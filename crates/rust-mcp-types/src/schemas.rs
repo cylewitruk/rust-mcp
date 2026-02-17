@@ -46,6 +46,23 @@ pub mod core {
     }
 }
 
+/// Schema exports for `schema.*` tools.
+pub mod schema {
+    use super::{ToolSchema, types};
+
+    /// JSON Schemas for `schema.get`.
+    pub fn get() -> ToolSchema {
+        ToolSchema::new::<types::schema::ToolSchemasRequest, types::schema::ToolSchemasResponse>(
+            "schema.get",
+        )
+    }
+
+    /// Returns all schema tool schemas.
+    pub fn all() -> Vec<ToolSchema> {
+        vec![get()]
+    }
+}
+
 /// Schema exports for `index.*` tools.
 pub mod index {
     use super::{ToolSchema, types};
@@ -358,6 +375,7 @@ pub mod krate {
 pub fn all_tool_schemas() -> Vec<ToolSchema> {
     let mut out = Vec::new();
     out.extend(core::all());
+    out.extend(schema::all());
     out.extend(index::all());
     out.extend(krate::all());
     out.extend(dependency::all());
@@ -389,12 +407,12 @@ mod tests {
             .collect::<BTreeSet<_>>();
 
         assert_eq!(schemas.len(), names.len(), "duplicate tool names found");
-        assert_eq!(schemas.len(), 32, "unexpected tool schema count");
+        assert_eq!(schemas.len(), 33, "unexpected tool schema count");
     }
 
     #[test]
     fn tool_schema_lookup_finds_known_tool() {
-        let schema = tool_schema("crate.search");
-        assert!(schema.is_some(), "expected crate.search schema to exist");
+        let schema = tool_schema("schema.get");
+        assert!(schema.is_some(), "expected schema.get schema to exist");
     }
 }

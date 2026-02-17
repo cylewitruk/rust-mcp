@@ -38,7 +38,10 @@ The previously planned milestone set through M13 is complete, including:
 - [ ] Add `crate.import_path` tool (best-known public import path resolution).
 - [ ] Improve `crate.migration_path` heuristics beyond simple rename candidates.
 - [ ] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
-- [ ] Publish a machine-readable tool contract snapshot for client generation/testing.
+- [x] Publish a machine-readable tool contract snapshot for client generation/testing.
+  - `schema.get` now exposes per-tool request/response JSON Schemas over MCP.
+  - HTTP endpoints now expose the same schema catalog at `/schemas` and `/schemas/{tool_name}`.
+  - `SCHEMA_EXPORT_DIR` now writes `tool-schemas.json` plus per-tool artifacts at startup.
 
 ## P2: Indexing and Operations
 

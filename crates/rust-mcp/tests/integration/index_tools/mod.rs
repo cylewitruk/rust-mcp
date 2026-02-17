@@ -61,6 +61,7 @@ fn test_config(
         data_dir: PathBuf::from("/tmp"),
         rustsec_db_dir: None,
         rustdoc_json_dir,
+        schema_export_dir: None,
         rust_log: "warn".to_string(),
         log_format: LogFormat::Pretty,
     }

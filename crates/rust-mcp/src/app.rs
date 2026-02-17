@@ -5,12 +5,31 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::state::AppState;
-use crate::{http, logging, mcp};
+use crate::{contracts, http, logging, mcp};
 
 /// Runs the HTTP and MCP server lifecycle.
 pub async fn run() -> Result<()> {
     let config = Config::load();
     logging::init(&config)?;
+
+    if let Some(schema_export_dir) = config
+        .schema_export_dir
+        .as_deref()
+    {
+        let export =
+            contracts::export_tool_schema_artifacts(schema_export_dir).with_context(|| {
+                format!(
+                    "failed to export tool schema artifacts into `{}`",
+                    schema_export_dir.display()
+                )
+            })?;
+        info!(
+            output_dir = %schema_export_dir.display(),
+            aggregate_file = %export.aggregate_file.display(),
+            per_tool_files = export.per_tool_files.len(),
+            "exported tool schema artifacts"
+        );
+    }
 
     let state = AppState::connect(config.clone())
         .await

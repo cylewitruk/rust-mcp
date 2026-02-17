@@ -13,7 +13,7 @@ The primary transport today is MCP Streamable HTTP.
 
 ## Current Status
 
-- Active development, with 32 MCP tools currently registered.
+- Active development, with 33 MCP tools currently registered.
 - Health/readiness endpoints are exposed on the same HTTP listener as MCP.
 - The index can ingest crates.io metadata, local cargo registry source, docs.rs pages, and optional rustdoc JSON files.
 
@@ -22,6 +22,7 @@ The primary transport today is MCP Streamable HTTP.
 Core and indexing:
 
 - `ping`
+- `schema.get`
 - `index.sync_crates`
 - `index.status`
 - `index.refresh`
@@ -136,6 +137,8 @@ curl -sS \
 - HTTP health endpoints:
   - `GET /healthz`
   - `GET /readyz`
+  - `GET /schemas` (all tool request/response JSON Schemas)
+  - `GET /schemas/{tool_name}` (single tool request/response JSON Schema)
 - Tool invocation metrics are recorded for count/latency and exported to Prometheus.
 
 ## Configuration
@@ -153,6 +156,7 @@ Important environment variables:
 - `CARGO_REGISTRY_DIR`
 - `RUSTSEC_DB_DIR` (optional local advisory-db checkout)
 - `RUSTDOC_JSON_DIR` (optional pre-generated rustdoc JSON files)
+- `SCHEMA_EXPORT_DIR` (optional startup export of tool schema artifacts)
 
 ## Development
 

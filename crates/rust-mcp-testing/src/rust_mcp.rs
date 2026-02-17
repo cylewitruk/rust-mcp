@@ -1,11 +1,14 @@
 //! E2E container harness for the full rust-mcp Docker image.
 
+use std::fs::{self, File};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use testcontainers_modules::testcontainers::core::{
     BuildImageOptions, Host, IntoContainerPort as _, Mount,
 };
@@ -19,7 +22,6 @@ use tokio::time::{Instant, sleep};
 use crate::env;
 
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
-const DEFAULT_IMAGE_TAG: &str = "test";
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_INTERNAL_PORT: u16 = 43173;
 const METRICS_INTERNAL_PORT: u16 = 9090;
@@ -42,8 +44,9 @@ pub struct RustMcpTestContainer {
 impl RustMcpTestContainer {
     /// Builds (if needed) and starts the rust-mcp Docker image.
     ///
-    /// The build uses `with_skip_if_exists(true)` so subsequent test runs can
-    /// reuse an already-built `rust-mcp:test` image.
+    /// The build uses `with_skip_if_exists(true)` and a source-fingerprinted
+    /// image tag so identical source trees are reused while source changes
+    /// trigger a fresh image build.
     pub async fn start() -> Result<Self> {
         Self::start_with_build_options_and_env(
             BuildImageOptions::new().with_skip_if_exists(true),
@@ -135,7 +138,8 @@ impl RustMcpTestContainer {
             .map(|(host_path, container_path)| (host_path.into(), container_path.into()))
             .collect::<Vec<(String, String)>>();
         let workspace_root = workspace_root()?;
-        let image = GenericBuildableImage::new(DEFAULT_IMAGE_NAME, DEFAULT_IMAGE_TAG)
+        let image_tag = default_image_tag(&workspace_root)?;
+        let image = GenericBuildableImage::new(DEFAULT_IMAGE_NAME, image_tag)
             .with_dockerfile(required_path(&workspace_root, "Dockerfile")?)
             .with_file(required_path(&workspace_root, "Cargo.toml")?, "Cargo.toml")
             .with_file(required_path(&workspace_root, "Cargo.lock")?, "Cargo.lock")
@@ -469,4 +473,96 @@ fn required_path(workspace_root: &Path, relative: &str) -> Result<PathBuf> {
         bail!("required path missing for rust-mcp image build: {}", path.display());
     }
     Ok(path)
+}
+
+fn default_image_tag(workspace_root: &Path) -> Result<String> {
+    let mut hasher = Sha256::new();
+
+    for path in [
+        required_path(workspace_root, "Dockerfile")?,
+        required_path(workspace_root, "docker-entrypoint.sh")?,
+        required_path(workspace_root, "Cargo.toml")?,
+        required_path(workspace_root, "Cargo.lock")?,
+        required_path(workspace_root, "README.md")?,
+    ] {
+        hash_file(&path, workspace_root, &mut hasher)?;
+    }
+
+    hash_tree(&required_path(workspace_root, "crates")?, workspace_root, &mut hasher)?;
+    hash_tree(&required_path(workspace_root, "migrations")?, workspace_root, &mut hasher)?;
+
+    let digest = hasher.finalize();
+    let mut prefix = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        use std::fmt::Write as _;
+        let _ = write!(prefix, "{byte:02x}");
+    }
+
+    Ok(format!("test-{prefix}"))
+}
+
+fn hash_tree(path: &Path, workspace_root: &Path, hasher: &mut Sha256) -> Result<()> {
+    if path.is_file() {
+        return hash_file(path, workspace_root, hasher);
+    }
+
+    let mut entries = fs::read_dir(path)
+        .with_context(|| format!("failed to list {}", path.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to read entries under {}", path.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            hash_tree(&entry_path, workspace_root, hasher)?;
+            continue;
+        }
+        if entry_path.is_file() {
+            hash_file(&entry_path, workspace_root, hasher)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn hash_file(path: &Path, workspace_root: &Path, hasher: &mut Sha256) -> Result<()> {
+    let relative = path
+        .strip_prefix(workspace_root)
+        .with_context(|| {
+            format!(
+                "failed to strip workspace prefix `{}` from `{}`",
+                workspace_root.display(),
+                path.display()
+            )
+        })?;
+    let relative = relative
+        .components()
+        .map(|component| {
+            component
+                .as_os_str()
+                .to_string_lossy()
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+
+    hasher.update(b"file:");
+    hasher.update(relative.as_bytes());
+    hasher.update(b"\n");
+
+    let mut file =
+        File::open(path).with_context(|| format!("failed to open file {}", path.display()))?;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    hasher.update(b"\n");
+
+    Ok(())
 }

@@ -34,6 +34,7 @@ pub(crate) fn test_config(database_url: String) -> Config {
         data_dir: PathBuf::from("/tmp"),
         rustsec_db_dir: None,
         rustdoc_json_dir: None,
+        schema_export_dir: None,
         rust_log: "warn".to_string(),
         log_format: LogFormat::Pretty,
     }

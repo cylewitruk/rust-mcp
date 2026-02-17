@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -25,6 +25,8 @@ pub fn router(state: AppState, config: Config) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/schemas", get(list_tool_schemas))
+        .route("/schemas/{tool_name}", get(get_tool_schema))
         .nest_service("/mcp", mcp_service)
         .with_state(state)
         .layer(ConcurrencyLimitLayer::new(
@@ -40,6 +42,11 @@ struct StatusPayload<'a> {
     status: &'a str,
 }
 
+#[derive(Debug, Serialize)]
+struct ErrorPayload {
+    error: String,
+}
+
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, Json(StatusPayload { status: "ok" }))
 }
@@ -49,4 +56,20 @@ async fn readyz(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
         .readiness_check()
         .await?;
     Ok((StatusCode::OK, Json(StatusPayload { status: "ready" })))
+}
+
+async fn list_tool_schemas() -> impl IntoResponse {
+    match crate::contracts::tool_schemas_response(None) {
+        Ok(payload) => (StatusCode::OK, Json(payload)).into_response(),
+        Err(error) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorPayload { error })).into_response()
+        }
+    }
+}
+
+async fn get_tool_schema(Path(tool_name): Path<String>) -> impl IntoResponse {
+    match crate::contracts::tool_schemas_response(Some(tool_name)) {
+        Ok(payload) => (StatusCode::OK, Json(payload)).into_response(),
+        Err(error) => (StatusCode::NOT_FOUND, Json(ErrorPayload { error })).into_response(),
+    }
 }

@@ -4,6 +4,8 @@
 pub mod app;
 /// Typed runtime configuration loaded from CLI flags and environment variables.
 pub mod config;
+/// Tool-schema contract assembly and artifact export helpers.
+mod contracts;
 /// Database models and access layer.
 pub mod db;
 /// HTTP-layer error types and shared API result alias.

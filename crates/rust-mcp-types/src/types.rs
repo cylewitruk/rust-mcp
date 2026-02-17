@@ -78,6 +78,42 @@ pub mod common {
     }
 }
 
+/// Contracts for schema introspection MCP tools.
+pub mod schema {
+    use super::*;
+
+    /// Request payload for `schema.get`.
+    #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct ToolSchemasRequest {
+        /// Optional MCP tool name filter.
+        ///
+        /// When omitted, the server returns all known tool contracts.
+        pub tool_name: Option<String>,
+    }
+
+    /// Request/response JSON Schemas for one MCP tool.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct ToolSchemaContract {
+        /// MCP tool name (for example `crate.search`).
+        pub tool_name: String,
+        /// JSON Schema for the tool request payload.
+        pub request: schemars::Schema,
+        /// JSON Schema for the tool response payload.
+        pub response: schemars::Schema,
+    }
+
+    /// Response payload for `schema.get`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct ToolSchemasResponse {
+        /// Echoed filter for tool selection, if provided.
+        pub tool_name: Option<String>,
+        /// Number of schema entries returned.
+        pub total_tools: usize,
+        /// Schema entries for the selected tools.
+        pub schemas: Vec<ToolSchemaContract>,
+    }
+}
+
 /// Contracts for `index.*` MCP tools.
 pub mod index {
     use super::common::ResponseFreshnessSource;

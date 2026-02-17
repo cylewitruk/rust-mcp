@@ -7,6 +7,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Meta, ProgressNotificationParam, ServerCapabilities, ServerInfo};
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use rust_mcp_types::types::common::PingRequest;
+use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
@@ -172,6 +173,21 @@ impl McpServer {
         };
 
         format!("pong ({db_state}) {suffix}")
+    }
+
+    #[tool(
+        name = "schema.get",
+        description = "Return request/response JSON Schemas for one MCP tool or for the full tool \
+                       catalog."
+    )]
+    async fn schema_get(
+        &self,
+        Parameters(request): Parameters<ToolSchemasRequest>,
+    ) -> Result<Json<ToolSchemasResponse>, String> {
+        self.instrument_tool("schema.get", async move {
+            crate::contracts::tool_schemas_response(request.tool_name).map(Json)
+        })
+        .await
     }
 
     #[tool(

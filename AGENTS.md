@@ -13,7 +13,7 @@ This file is the agent-facing source of truth, alongside:
 
 - Runtime: single container with embedded PostgreSQL.
 - Primary protocol: MCP Streamable HTTP at `/mcp`.
-- Health endpoints: `/healthz`, `/readyz`.
+- HTTP endpoints: `/healthz`, `/readyz`, `/schemas`, `/schemas/{tool_name}`.
 - Metrics: Prometheus exporter on a dedicated bind.
 
 ## Current Source Layout
@@ -24,6 +24,7 @@ crates/rust-mcp/
     main.rs
     app.rs
     config.rs
+    contracts.rs               # tool-schema catalog assembly + export
     http.rs
     state.rs
     mcp/
@@ -68,7 +69,7 @@ crates/rust-mcp/
 
 ## MCP Tool Inventory (Current)
 
-- Core/index: `ping`, `index.sync_crates`, `index.status`, `index.refresh`
+- Core/index: `ping`, `schema.get`, `index.sync_crates`, `index.status`, `index.refresh`
 - Crate: `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.error_types`, `crate.derive_macros`, `crate.compare`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.migration_path`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `crate.usage_patterns`
 - Dependency: `dependency.audit`, `dependency.resolve`, `dependency.feature_impact`
 - Source/symbol/docs: `source.search`, `source.read`, `source.context`, `symbol.search`, `docs.search`

@@ -26,6 +26,7 @@ pub(crate) mod env_vars {
     pub(crate) const MCP_DATA_DIR: &str = "MCP_DATA_DIR";
     pub(crate) const RUSTSEC_DB_DIR: &str = "RUSTSEC_DB_DIR";
     pub(crate) const RUSTDOC_JSON_DIR: &str = "RUSTDOC_JSON_DIR";
+    pub(crate) const SCHEMA_EXPORT_DIR: &str = "SCHEMA_EXPORT_DIR";
     pub(crate) const RUST_LOG: &str = "RUST_LOG";
     pub(crate) const LOG_FORMAT: &str = "LOG_FORMAT";
 }
@@ -140,6 +141,10 @@ pub struct Config {
     /// Optional local directory containing pre-generated rustdoc JSON files.
     #[arg(long, env = env_vars::RUSTDOC_JSON_DIR)]
     pub rustdoc_json_dir: Option<PathBuf>,
+
+    /// Optional directory where tool schema artifacts are written on startup.
+    #[arg(long, env = env_vars::SCHEMA_EXPORT_DIR)]
+    pub schema_export_dir: Option<PathBuf>,
 
     /// Tracing filter string (RUST_LOG style).
     #[arg(long, env = env_vars::RUST_LOG, default_value = "info,rust_mcp=debug,sqlx=warn")]

@@ -22,7 +22,7 @@ test:
   cargo --locked llvm-cov nextest --lcov --output-path ./target/lcov.info --no-fail-fast --all-targets --features integration-tests
 
 test-e2e:
-  cargo --locked nextest run -p rust-mcp --features e2e-tests --test e2e_http
+  cargo --locked nextest run -p rust-mcp --test e2e_http --no-fail-fast --all-targets --features e2e-tests
 
 run:
   cargo --locked run -p rust-mcp

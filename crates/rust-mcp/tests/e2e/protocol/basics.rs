@@ -1,5 +1,5 @@
 use super::{
-    BTreeSet, Value, initialize_raw_session, json, jsonrpc_request, notify_initialized,
+    BTreeSet, StatusCode, Value, initialize_raw_session, json, jsonrpc_request, notify_initialized,
     parse_mcp_response_from_http, post_mcp_jsonrpc, start_ready_rust_mcp,
 };
 
@@ -37,6 +37,63 @@ async fn rust_mcp_container_serves_health_and_ready_endpoints() {
                 .status()
                 .is_success()
     );
+}
+
+#[tokio::test]
+async fn rust_mcp_container_exposes_http_schema_catalog_endpoints() {
+    let rust_mcp = start_ready_rust_mcp().await;
+    let client = reqwest::Client::new();
+
+    let all_schemas = client
+        .get(format!("{}/schemas", rust_mcp.base_url()))
+        .send()
+        .await
+        .expect("schemas endpoint request failed");
+    assert_eq!(all_schemas.status(), StatusCode::OK);
+    let all_payload = all_schemas
+        .json::<Value>()
+        .await
+        .expect("schemas endpoint should return JSON payload");
+    let total_tools = all_payload
+        .get("total_tools")
+        .and_then(Value::as_u64)
+        .expect("schemas endpoint should include total_tools");
+    assert!(total_tools >= 33, "expected at least 33 tool schemas, got: {all_payload}");
+
+    let ping_schema = client
+        .get(format!("{}/schemas/ping", rust_mcp.base_url()))
+        .send()
+        .await
+        .expect("ping schema endpoint request failed");
+    assert_eq!(ping_schema.status(), StatusCode::OK);
+    let ping_payload = ping_schema
+        .json::<Value>()
+        .await
+        .expect("ping schema endpoint should return JSON payload");
+    assert_eq!(
+        ping_payload
+            .get("total_tools")
+            .and_then(Value::as_u64),
+        Some(1),
+        "single-tool schema endpoint should return exactly one entry: {ping_payload}"
+    );
+    assert_eq!(
+        ping_payload
+            .get("schemas")
+            .and_then(Value::as_array)
+            .and_then(|schemas| schemas.first())
+            .and_then(|schema| schema.get("tool_name"))
+            .and_then(Value::as_str),
+        Some("ping"),
+        "ping schema endpoint should return ping contract: {ping_payload}"
+    );
+
+    let unknown = client
+        .get(format!("{}/schemas/unknown.tool", rust_mcp.base_url()))
+        .send()
+        .await
+        .expect("unknown schema endpoint request failed");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -205,6 +262,7 @@ async fn rust_mcp_container_supports_tools_list_after_initialize() {
         .collect::<BTreeSet<_>>();
     let expected_names = [
         "ping",
+        "schema.get",
         "index.sync_crates",
         "index.status",
         "index.refresh",
