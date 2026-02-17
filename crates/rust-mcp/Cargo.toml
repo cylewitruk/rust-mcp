@@ -7,8 +7,9 @@ license = "MIT OR Apache-2.0"
 autotests = false
 
 [features]
-integration-tests = []
-e2e-tests = []
+integration-tests = ["testing"]
+e2e-tests = ["testing"]
+testing = []
 
 [dependencies]
 anyhow = "1.0"
@@ -38,6 +39,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 
 [dev-dependencies]
 rust-mcp-testing = { path = "../rust-mcp-testing" }
+rust-mcp = { path = ".", features = ["testing"] }
 
 [[test]]
 name = "integration"

@@ -1,107 +1,19 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use reqwest::header::CONTENT_TYPE;
 use rmcp::{Json, schemars};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, Postgres, Transaction};
 
+use crate::integration::crates_io::{
+    CratesIoClient, CratesIoCrateDetailResponse, CratesIoSearchResponse,
+};
 use crate::mcp::models::ResponseFreshnessSource;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
     sync_per_page,
 };
-use crate::state::OutboundSource;
-
-// ---------------------------------------------------------------------------
-// Types moved from models.rs — crates.io API response types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoSearchResponse {
-    pub(crate) crates: Vec<CratesIoSearchCrate>,
-    pub(crate) meta: CratesIoSearchMeta,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoSearchMeta {
-    pub(crate) total: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoSearchCrate {
-    pub(crate) id: String,
-    #[allow(dead_code)]
-    pub(crate) name: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoCrateDetailResponse {
-    #[serde(rename = "crate")]
-    pub(crate) krate: CratesIoCrateRecord,
-    pub(crate) versions: Vec<CratesIoVersionRecord>,
-    #[serde(default)]
-    pub(crate) keywords: Vec<CratesIoKeyword>,
-    #[serde(default)]
-    pub(crate) categories: Vec<CratesIoCategory>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoCrateRecord {
-    pub(crate) name: String,
-    pub(crate) description: Option<String>,
-    pub(crate) repository: Option<String>,
-    pub(crate) documentation: Option<String>,
-    pub(crate) homepage: Option<String>,
-    pub(crate) max_version: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoVersionRecord {
-    pub(crate) num: String,
-    pub(crate) created_at: Option<String>,
-    pub(crate) updated_at: Option<String>,
-    #[serde(default)]
-    pub(crate) yanked: bool,
-    pub(crate) downloads: Option<i64>,
-    pub(crate) checksum: Option<String>,
-    pub(crate) rust_version: Option<String>,
-    pub(crate) license: Option<String>,
-    #[serde(default)]
-    pub(crate) features: BTreeMap<String, Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoKeyword {
-    pub(crate) id: String,
-    pub(crate) keyword: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoCategory {
-    pub(crate) id: String,
-    pub(crate) slug: Option<String>,
-    pub(crate) category: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoDependenciesResponse {
-    #[serde(default)]
-    pub(crate) dependencies: Vec<CratesIoDependency>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct CratesIoDependency {
-    pub(crate) crate_id: String,
-    pub(crate) req: String,
-    pub(crate) kind: Option<String>,
-    #[serde(default)]
-    pub(crate) optional: bool,
-    #[serde(default)]
-    pub(crate) features: Vec<String>,
-}
 
 #[derive(Debug)]
 pub(crate) struct SyncCrateOutcome {
@@ -287,148 +199,6 @@ struct RetryDistributionRow {
 }
 
 impl McpServer {
-    pub(crate) fn crates_io_url(&self, path: &str) -> String {
-        let base = self
-            .state
-            .config
-            .crates_io_base_url
-            .trim_end_matches('/');
-        let suffix = path.trim_start_matches('/');
-        format!("{base}/{suffix}")
-    }
-
-    pub(crate) async fn crates_io_get_json<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        params: &[(&str, String)],
-    ) -> Result<T, String> {
-        self.state
-            .acquire_outbound_slot(OutboundSource::CratesIo)
-            .await;
-        let url = self.crates_io_url(path);
-        let response = self
-            .state
-            .http
-            .get(&url)
-            .query(params)
-            .send()
-            .await
-            .map_err(|e| format!("request to {url} failed: {e}"))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "<body unavailable>".to_string());
-            return Err(format!("request to {url} failed with status {}: {}", status, body));
-        }
-
-        response
-            .json::<T>()
-            .await
-            .map_err(|e| format!("failed to decode JSON response from {url}: {e}"))
-    }
-
-    async fn crates_io_get_readme(
-        &self,
-        crate_name: &str,
-        version: &str,
-    ) -> Result<Option<String>, String> {
-        self.state
-            .acquire_outbound_slot(OutboundSource::CratesIo)
-            .await;
-        let url = self.crates_io_url(&format!("api/v1/crates/{crate_name}/{version}/readme"));
-        let response = self
-            .state
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("readme request failed for {crate_name}@{version}: {e}"))?;
-
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "<body unavailable>".to_string());
-            return Err(format!(
-                "readme request failed for {crate_name}@{version} with status {}: {}",
-                status, body
-            ));
-        }
-
-        let content_type = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| format!("failed to read readme body for {crate_name}@{version}: {e}"))?;
-
-        if body.trim().is_empty() {
-            return Ok(None);
-        }
-
-        let maybe_readme = if content_type.contains("application/json") {
-            let parsed = serde_json::from_str::<Value>(&body).ok();
-            parsed.and_then(|value| {
-                value
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .or_else(|| {
-                        value
-                            .get("readme")
-                            .and_then(Value::as_str)
-                    })
-                    .or_else(|| {
-                        value
-                            .get("message")
-                            .and_then(Value::as_str)
-                    })
-                    .map(ToString::to_string)
-            })
-        } else {
-            Some(body)
-        };
-
-        Ok(maybe_readme.and_then(|value| {
-            let trimmed = value.trim().to_string();
-            if trimmed.is_empty() {
-                None
-            } else if trimmed.len() > 1_000_000 {
-                Some(
-                    trimmed
-                        .chars()
-                        .take(1_000_000)
-                        .collect(),
-                )
-            } else {
-                Some(trimmed)
-            }
-        }))
-    }
-
-    async fn fetch_crate_dependencies(
-        &self,
-        crate_name: &str,
-        version: &str,
-    ) -> Result<Vec<CratesIoDependency>, String> {
-        let path = format!("api/v1/crates/{crate_name}/{version}/dependencies");
-        let response: CratesIoDependenciesResponse = self
-            .crates_io_get_json(&path, &[])
-            .await?;
-        Ok(response.dependencies)
-    }
-
     fn pick_primary_version(detail: &CratesIoCrateDetailResponse) -> Option<String> {
         if let Some(max_version) = detail
             .krate
@@ -475,13 +245,15 @@ impl McpServer {
         crate_name: &str,
         include_dependencies: bool,
     ) -> Result<SyncCrateOutcome, String> {
-        let detail: CratesIoCrateDetailResponse = self
-            .crates_io_get_json(&format!("api/v1/crates/{crate_name}"), &[])
+        let crates_io = CratesIoClient::new(&self.state);
+        let detail = crates_io
+            .fetch_crate_detail(crate_name)
             .await?;
 
         let selected_version = Self::pick_primary_version(&detail);
         let readme = if let Some(version) = selected_version.as_deref() {
-            self.crates_io_get_readme(crate_name, version)
+            crates_io
+                .fetch_readme(crate_name, version)
                 .await?
         } else {
             None
@@ -490,7 +262,8 @@ impl McpServer {
         let dependencies = if include_dependencies {
             if let Some(version) = selected_version.as_deref() {
                 Some(
-                    self.fetch_crate_dependencies(crate_name, version)
+                    crates_io
+                        .fetch_crate_dependencies(crate_name, version)
                         .await?,
                 )
             } else {
@@ -854,8 +627,9 @@ impl McpServer {
             ("page", page.to_string()),
             ("per_page", per_page.to_string()),
         ];
-        let search_response: CratesIoSearchResponse = self
-            .crates_io_get_json("api/v1/crates", &params)
+        let crates_io = CratesIoClient::new(&self.state);
+        let search_response: CratesIoSearchResponse = crates_io
+            .search_crates(&params)
             .await?;
 
         let mut synced_crates = 0_usize;

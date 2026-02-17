@@ -15,9 +15,9 @@ use semver::Version;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
+use crate::integration::docs_rs::DocsRsClient;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_required, sync_page, sync_per_page};
-use crate::state::OutboundSource;
 
 // ============================================================
 // Outcome tracking
@@ -1323,51 +1323,6 @@ fn extract_all(krate: &RustdocCrate) -> RustdocExtraction {
 // ============================================================
 
 impl McpServer {
-    fn docs_rs_rustdoc_json_url(&self, crate_name: &str, version: &str) -> String {
-        let base = self
-            .state
-            .config
-            .docs_rs_base_url
-            .trim_end_matches('/');
-        format!("{base}/crate/{crate_name}/{version}/json.gz")
-    }
-
-    async fn fetch_docs_rs_rustdoc_json(
-        &self,
-        crate_name: &str,
-        version: &str,
-    ) -> Result<Vec<u8>, String> {
-        self.state
-            .acquire_outbound_slot(OutboundSource::DocsRs)
-            .await;
-        let url = self.docs_rs_rustdoc_json_url(crate_name, version);
-        let response = self
-            .state
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                format!("docs.rs rustdoc JSON request failed for {crate_name}@{version}: {e}")
-            })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!(
-                "docs.rs rustdoc JSON request failed for {crate_name}@{version} with status \
-                 {status}"
-            ));
-        }
-
-        response
-            .bytes()
-            .await
-            .map(|b| b.to_vec())
-            .map_err(|e| {
-                format!("docs.rs rustdoc JSON body read failed for {crate_name}@{version}: {e}")
-            })
-    }
-
     async fn ingest_rustdoc_json_document(
         &self,
         candidate: &RustdocSyncCandidateRow,
@@ -1766,6 +1721,7 @@ impl McpServer {
         };
 
         let mut outcome = RustdocJsonRefreshOutcome::default();
+        let docs_rs = DocsRsClient::new(&self.state);
 
         for candidate in candidates {
             outcome.scanned_files += 1;
@@ -1774,8 +1730,8 @@ impl McpServer {
                 docs_rs_rustdoc_synthetic_path(&candidate.crate_name, &candidate.version);
             let mut source_errors = Vec::new();
 
-            match self
-                .fetch_docs_rs_rustdoc_json(&candidate.crate_name, &candidate.version)
+            match docs_rs
+                .fetch_rustdoc_json(&candidate.crate_name, &candidate.version)
                 .await
             {
                 Ok(payload_bytes) => match decode_docs_rs_rustdoc_payload(payload_bytes) {

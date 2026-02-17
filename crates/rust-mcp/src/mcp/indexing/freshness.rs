@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::mcp::indexing::handlers::CratesIoCrateDetailResponse;
+use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
 use crate::mcp::server::McpServer;
 
 #[derive(Debug, Default)]
@@ -80,8 +80,9 @@ impl McpServer {
 
         let (ttl_seconds, ttl_reason) = ttl_hint_seconds(days_since_latest, releases_last_year);
 
-        let detail: CratesIoCrateDetailResponse = match self
-            .crates_io_get_json(&format!("api/v1/crates/{crate_name}"), &[])
+        let crates_io = CratesIoClient::new(&self.state);
+        let detail: CratesIoCrateDetailResponse = match crates_io
+            .fetch_crate_detail(crate_name)
             .await
         {
             Ok(detail) => detail,

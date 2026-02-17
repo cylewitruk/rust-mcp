@@ -4,12 +4,12 @@ use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
+use crate::integration::docs_rs::DocsRsClient;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     docs_search_limit, normalize_optional, normalize_required, sync_page, sync_per_page,
 };
-use crate::state::OutboundSource;
 
 fn default_confidence_assessment() -> ConfidenceAssessment {
     ConfidenceAssessment {
@@ -283,51 +283,14 @@ fn resolve_docs_href(
 }
 
 impl McpServer {
-    fn docs_rs_url(&self, path: &str) -> String {
-        let base = self
-            .state
-            .config
-            .docs_rs_base_url
-            .trim_end_matches('/');
-        let suffix = path.trim_start_matches('/');
-        format!("{base}/{suffix}")
-    }
-
-    async fn fetch_docs_page_html(&self, path: &str) -> Result<String, String> {
-        self.state
-            .acquire_outbound_slot(OutboundSource::DocsRs)
-            .await;
-        let url = self.docs_rs_url(path);
-        let response = self
-            .state
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("docs fetch failed {url}: {e}"))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("docs fetch failed {url}: status {status}"));
-        }
-
-        response
-            .text()
-            .await
-            .map_err(|e| format!("docs body read failed {url}: {e}"))
-    }
-
     fn discover_docs_paths(
         &self,
         current_path: &str,
         html: &str,
         crate_prefix: &str,
     ) -> Vec<String> {
-        let docs_base_url = self
-            .state
-            .config
-            .docs_rs_base_url
-            .trim_end_matches('/')
+        let docs_base_url = DocsRsClient::new(&self.state)
+            .base_url()
             .to_string();
 
         let mut unique = HashSet::new();
@@ -378,6 +341,7 @@ impl McpServer {
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;
 
         let mut outcome = DocsRefreshOutcome::default();
+        let docs_rs = DocsRsClient::new(&self.state);
 
         for candidate in candidates {
             let crate_prefix = format!("{}/{}/", candidate.crate_name, candidate.version);
@@ -397,8 +361,8 @@ impl McpServer {
                     continue;
                 }
 
-                let html = match self
-                    .fetch_docs_page_html(&path)
+                let html = match docs_rs
+                    .fetch_page_html(&path)
                     .await
                 {
                     Ok(html) => html,
@@ -410,7 +374,7 @@ impl McpServer {
 
                 let title = extract_title(&html);
                 let content = strip_html(&html);
-                let source_url = self.docs_rs_url(&path);
+                let source_url = docs_rs.url(&path);
 
                 let rows_affected = sqlx::query(
                     "INSERT INTO docs_pages (

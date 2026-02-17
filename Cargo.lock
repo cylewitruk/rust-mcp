@@ -2382,6 +2382,7 @@ dependencies = [
  "quote",
  "reqwest",
  "rmcp",
+ "rust-mcp",
  "rust-mcp-testing",
  "rustdoc-types",
  "semver",

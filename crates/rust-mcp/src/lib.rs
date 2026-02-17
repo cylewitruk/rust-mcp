@@ -11,6 +11,10 @@ pub mod error;
 /// Axum HTTP router and health/readiness handlers.
 pub mod http;
 /// External integration request/response models and validation logic.
+#[cfg(feature = "testing")]
+pub mod integration;
+/// External integration request/response models and validation logic.
+#[cfg(not(feature = "testing"))]
 mod integration;
 /// Tracing/logging initialization.
 pub mod logging;

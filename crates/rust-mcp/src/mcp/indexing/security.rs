@@ -6,65 +6,10 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::integration::osv::{
+    OsvAffected, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
+};
 use crate::mcp::server::McpServer;
-use crate::state::OutboundSource;
-
-#[derive(Debug, Deserialize)]
-struct OsvQueryResponse {
-    #[serde(default)]
-    vulns: Vec<OsvVulnerability>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvVulnerability {
-    id: String,
-    summary: Option<String>,
-    details: Option<String>,
-    #[serde(default)]
-    aliases: Vec<String>,
-    #[serde(default)]
-    affected: Vec<OsvAffected>,
-    #[serde(default)]
-    references: Vec<OsvReference>,
-    #[serde(default)]
-    severity: Vec<OsvSeverity>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvAffected {
-    #[serde(default)]
-    versions: Vec<String>,
-    #[serde(default)]
-    ranges: Vec<OsvRange>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvRange {
-    #[serde(rename = "type")]
-    range_type: String,
-    #[serde(default)]
-    events: Vec<OsvRangeEvent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvRangeEvent {
-    introduced: Option<String>,
-    fixed: Option<String>,
-    last_affected: Option<String>,
-    limit: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvReference {
-    url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OsvSeverity {
-    #[serde(rename = "type")]
-    severity_type: Option<String>,
-    score: Option<String>,
-}
 
 #[derive(Debug, sqlx::FromRow)]
 struct SecurityCrateRow {
@@ -331,42 +276,6 @@ fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
 }
 
 impl McpServer {
-    async fn query_osv_for_crate(&self, crate_name: &str) -> Result<OsvQueryResponse, String> {
-        self.state
-            .acquire_outbound_slot(OutboundSource::Osv)
-            .await;
-        let response = self
-            .state
-            .http
-            .post("https://api.osv.dev/v1/query")
-            .json(&json!({
-                "package": {
-                    "name": crate_name,
-                    "ecosystem": "crates.io"
-                }
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("OSV query failed for {crate_name}: {e}"))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "<body unavailable>".to_string());
-            return Err(format!(
-                "OSV query failed for {crate_name} with status {}: {}",
-                status, body
-            ));
-        }
-
-        response
-            .json::<OsvQueryResponse>()
-            .await
-            .map_err(|e| format!("failed to decode OSV response for {crate_name}: {e}"))
-    }
-
     pub(crate) async fn sync_osv_security(
         &self,
         limit: u32,
@@ -385,6 +294,7 @@ impl McpServer {
         .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
 
         let mut outcome = SecuritySyncOutcome::default();
+        let osv_client = OsvDevClient::new(&self.state);
 
         for krate in crate_rows {
             let version_rows = sqlx::query_as::<_, SecurityVersionRow>(
@@ -402,8 +312,8 @@ impl McpServer {
                 .map(|v| (v.version.clone(), v.id))
                 .collect::<HashMap<_, _>>();
 
-            let osv = match self
-                .query_osv_for_crate(&krate.name)
+            let osv: OsvQueryResponse = match osv_client
+                .query_crate(&krate.name)
                 .await
             {
                 Ok(value) => value,
