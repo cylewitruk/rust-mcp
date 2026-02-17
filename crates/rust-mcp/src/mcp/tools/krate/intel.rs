@@ -1,5 +1,8 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateIntelAdvisory, CrateIntelDependency, CrateIntelDependent, CrateIntelRequest,
+    CrateIntelResponse, CrateIntelVersion,
+};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
@@ -8,86 +11,6 @@ use crate::mcp::utils::{
     dependents_limit, normalize_optional, normalize_required, readme_limit, truncate_optional_text,
     value_to_string_vec, version_limit,
 };
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateIntelRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub versions_limit: Option<u32>,
-    pub dependents_limit: Option<u32>,
-    pub readme_max_chars: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateIntelResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub selected_rust_version: Option<String>,
-    pub selected_version_published_at: Option<String>,
-    pub latest_version: String,
-    pub latest_rust_version: Option<String>,
-    pub total_downloads: i64,
-    pub last_updated_at: Option<String>,
-    pub description: Option<String>,
-    pub repository_url: Option<String>,
-    pub docs_url: Option<String>,
-    pub homepage_url: Option<String>,
-    pub categories: Vec<String>,
-    pub keywords: Vec<String>,
-    pub readme: Option<String>,
-    pub readme_truncated: bool,
-    pub version_history: Vec<CrateIntelVersion>,
-    pub dependencies: Vec<CrateIntelDependency>,
-    pub dependents: Vec<CrateIntelDependent>,
-    pub dependent_crate_count: i64,
-    pub advisories: Vec<CrateIntelAdvisory>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateIntelVersion {
-    pub version: String,
-    pub rust_version: Option<String>,
-    pub published_at: Option<String>,
-    pub yanked: bool,
-    pub downloads: i64,
-    pub has_advisory: bool,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateIntelDependency {
-    pub crate_name: String,
-    pub requirement: String,
-    pub dependency_kind: String,
-    pub optional: bool,
-    pub features: Vec<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateIntelDependent {
-    pub crate_name: String,
-    pub latest_version: Option<String>,
-    pub total_downloads: i64,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateIntelAdvisory {
-    pub advisory_id: String,
-    pub title: String,
-    pub severity: Option<String>,
-    pub url: Option<String>,
-    pub affected_range: String,
-    pub fixed_versions: Vec<String>,
-    pub source: String,
-}
 
 impl McpServer {
     pub(crate) async fn handle_crate_intel(

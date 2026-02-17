@@ -2384,6 +2384,7 @@ dependencies = [
  "rmcp",
  "rust-mcp",
  "rust-mcp-testing",
+ "rust-mcp-types",
  "rustdoc-types",
  "semver",
  "serde",
@@ -2418,6 +2419,10 @@ dependencies = [
 [[package]]
 name = "rust-mcp-types"
 version = "0.1.0"
+dependencies = [
+ "rmcp",
+ "serde",
+]
 
 [[package]]
 name = "rustc-hash"

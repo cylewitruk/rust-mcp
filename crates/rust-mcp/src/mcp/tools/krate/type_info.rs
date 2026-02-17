@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateTraitImpl, CrateTypeConversion, CrateTypeDefinition, CrateTypeField, CrateTypeInfoRequest,
+    CrateTypeInfoResponse, CrateTypeVariant,
+};
 use sqlx::types::Json as SqlJson;
 
 use crate::db::models::{
@@ -15,97 +18,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateTypeInfoRequest {
-    pub crate_name: String,
-    pub type_name: String,
-    pub version: Option<String>,
-    pub include_methods: Option<bool>,
-    pub include_trait_impls: Option<bool>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTypeInfoResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub type_name: String,
-    pub include_methods: bool,
-    pub include_trait_impls: bool,
-    pub type_definition: Option<CrateTypeDefinition>,
-    pub inherent_methods: Vec<CrateImplMethod>,
-    pub trait_impls: Vec<CrateTraitImpl>,
-    pub trait_definitions: Vec<CrateTraitDefinition>,
-    pub conversions: Vec<CrateTypeConversion>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTypeDefinition {
-    pub type_name: String,
-    pub kind: String,
-    pub visibility: Option<String>,
-    pub canonical_path: Option<String>,
-    pub definition_path: Option<String>,
-    pub generic_params: Vec<String>,
-    pub where_clauses: Vec<String>,
-    pub fields: Vec<CrateTypeField>,
-    pub variants: Vec<CrateTypeVariant>,
-    pub deprecated_since: Option<String>,
-    pub deprecated_note: Option<String>,
-    pub is_non_exhaustive: bool,
-    pub auto_traits: Vec<String>,
-    pub source_path: String,
-    pub start_line: i32,
-    pub end_line: i32,
-    pub index_source: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTypeField {
-    pub name: Option<String>,
-    pub field_type: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTypeVariant {
-    pub name: String,
-    pub fields: Vec<CrateTypeField>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTraitImpl {
-    pub trait_name: Option<String>,
-    pub trait_name_display: Option<String>,
-    pub impl_kind: String,
-    pub blanket_impl: bool,
-    pub synthetic_impl: bool,
-    pub negative_impl: bool,
-    pub blanket_type: Option<String>,
-    pub generic_params: Vec<String>,
-    pub where_clauses: Vec<String>,
-    pub methods: Vec<CrateImplMethod>,
-    pub source_path: String,
-    pub start_line: i32,
-    pub end_line: i32,
-    pub index_source: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateTypeConversion {
-    pub trait_name: String,
-    pub source_type: Option<String>,
-    pub target_type: Option<String>,
-}
 
 fn parse_type_fields(value: &SqlJson<Vec<TypeFieldEntry>>) -> Vec<CrateTypeField> {
     value

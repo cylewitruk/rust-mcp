@@ -1,5 +1,7 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateSearchHit, CrateSearchRequest, CrateSearchResponse, CrateSearchSort,
+};
 use sqlx::{Postgres, QueryBuilder};
 
 use crate::mcp::models::{
@@ -7,57 +9,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{match_reasons, normalize_optional, search_limit};
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum CrateSearchSort {
-    Relevance,
-    Downloads,
-    Recent,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateSearchRequest {
-    pub query: Option<String>,
-    pub category: Option<String>,
-    pub keyword: Option<String>,
-    pub sort: Option<CrateSearchSort>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateSearchResponse {
-    pub query: Option<String>,
-    pub category: Option<String>,
-    pub keyword: Option<String>,
-    pub sort: CrateSearchSort,
-    pub limit: u32,
-    pub count: usize,
-    pub freshness_checks_performed: usize,
-    pub refresh_jobs_enqueued: usize,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-    pub hits: Vec<CrateSearchHit>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateSearchHit {
-    pub name: String,
-    pub description: Option<String>,
-    pub repository_url: Option<String>,
-    pub docs_url: Option<String>,
-    pub homepage_url: Option<String>,
-    pub categories: Vec<String>,
-    pub keywords: Vec<String>,
-    pub total_downloads: i64,
-    pub latest_published_at: Option<String>,
-    pub dependent_crates: i64,
-    pub rank_score: f64,
-    pub match_reasons: Vec<String>,
-}
 
 impl McpServer {
     async fn run_crate_search(

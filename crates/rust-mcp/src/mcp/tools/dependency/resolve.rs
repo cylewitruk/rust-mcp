@@ -1,9 +1,13 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
-use rmcp::{Json, schemars};
+use rmcp::Json;
+pub use rust_mcp_types::types::dependency::{
+    DependencyResolveConflict, DependencyResolveFeatureSummary, DependencyResolveInputDependency,
+    DependencyResolveRequest, DependencyResolveResolvedDependency,
+    DependencyResolveResolvedVersion, DependencyResolveResponse,
+};
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::FromRow;
 use toml::Value;
@@ -11,67 +15,6 @@ use toml::Value;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{dependency_resolve_limit, normalize_required};
-
-// ---------------------------------------------------------------------------
-// Types (colocated from models.rs)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DependencyResolveRequest {
-    pub dependencies: Option<Vec<DependencyResolveInputDependency>>,
-    pub cargo_toml_path: Option<String>,
-    pub additions: Option<Vec<DependencyResolveInputDependency>>,
-    pub check_features: Option<bool>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-pub struct DependencyResolveInputDependency {
-    pub name: String,
-    pub version_req: Option<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyResolveResponse {
-    pub input_dependencies: Vec<DependencyResolveResolvedDependency>,
-    pub resolvable: bool,
-    pub resolved_versions: Vec<DependencyResolveResolvedVersion>,
-    pub conflicts: Vec<DependencyResolveConflict>,
-    pub check_features: bool,
-    pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyResolveResolvedDependency {
-    pub name: String,
-    pub version_req: Option<String>,
-    pub source: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyResolveResolvedVersion {
-    pub name: String,
-    pub version: String,
-    pub yanked: bool,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyResolveConflict {
-    pub dependency_name: String,
-    pub requirement: Option<String>,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyResolveFeatureSummary {
-    pub dependency_edges_evaluated: usize,
-    pub unique_optional_dependencies: usize,
-    pub unique_feature_flags_referenced: usize,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct DependencyResolveCrateRow {

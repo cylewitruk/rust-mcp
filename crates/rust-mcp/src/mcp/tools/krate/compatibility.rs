@@ -1,75 +1,18 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateCompatibilityMatrixEntry, CrateCompatibilityMatrixRequest,
+    CrateCompatibilityMatrixResponse, CrateCompatibilityRequest, CrateCompatibilityResponse,
+};
 
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::tools::dependency::resolve::{
-    DependencyResolveConflict, DependencyResolveFeatureSummary, DependencyResolveInputDependency,
-    DependencyResolveRequest, DependencyResolveResolvedVersion,
+    DependencyResolveInputDependency, DependencyResolveRequest,
 };
 use crate::mcp::utils::{
     compatibility_matrix_max_pairs, compatibility_matrix_version_limit, dedupe_strings,
     normalize_required,
 };
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateCompatibilityRequest {
-    pub left_crate: String,
-    pub left_version: Option<String>,
-    pub right_crate: String,
-    pub right_version: Option<String>,
-    pub check_features: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateCompatibilityMatrixRequest {
-    pub left_crate: String,
-    pub right_crate: String,
-    pub left_versions: Option<Vec<String>>,
-    pub right_versions: Option<Vec<String>>,
-    pub check_features: Option<bool>,
-    pub version_limit: Option<u32>,
-    pub max_pairs: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateCompatibilityResponse {
-    pub left_crate: String,
-    pub left_version: Option<String>,
-    pub right_crate: String,
-    pub right_version: Option<String>,
-    pub resolvable: bool,
-    pub resolved_versions: Vec<DependencyResolveResolvedVersion>,
-    pub conflicts: Vec<DependencyResolveConflict>,
-    pub check_features: bool,
-    pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateCompatibilityMatrixResponse {
-    pub left_crate: String,
-    pub right_crate: String,
-    pub check_features: bool,
-    pub pairs_tested: usize,
-    pub compatible_pairs: Vec<CrateCompatibilityMatrixEntry>,
-    pub incompatible_pairs: Vec<CrateCompatibilityMatrixEntry>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateCompatibilityMatrixEntry {
-    pub left_version: String,
-    pub right_version: String,
-    pub resolvable: bool,
-    pub conflict_messages: Vec<String>,
-}
 
 fn exact_req(version: Option<String>) -> Option<String> {
     version

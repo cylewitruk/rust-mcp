@@ -1,5 +1,7 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::source::{
+    SourceSearchHit, SourceSearchMode, SourceSearchRequest, SourceSearchResponse,
+};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use crate::mcp::models::{
@@ -10,49 +12,6 @@ use crate::mcp::utils::{
     normalize_optional, normalize_required, path_glob_to_like, source_read_end_line,
     source_search_limit,
 };
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceSearchMode {
-    Text,
-    Regex,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SourceSearchRequest {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub path_glob: Option<String>,
-    pub mode: Option<SourceSearchMode>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct SourceSearchResponse {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub path_glob: Option<String>,
-    pub mode: SourceSearchMode,
-    pub limit: u32,
-    pub count: usize,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-    pub hits: Vec<SourceSearchHit>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct SourceSearchHit {
-    pub crate_name: String,
-    pub version: String,
-    pub path: String,
-    pub indexed_at: String,
-    pub match_line: Option<u32>,
-    pub snippet: String,
-}
 
 #[derive(Debug, FromRow)]
 pub(crate) struct SourceSearchRow {

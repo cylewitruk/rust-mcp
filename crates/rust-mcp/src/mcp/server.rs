@@ -5,8 +5,8 @@ use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Meta, ProgressNotificationParam, ServerCapabilities, ServerInfo};
-use rmcp::{Json, Peer, RoleServer, ServerHandler, schemars, tool, tool_handler, tool_router};
-use serde::Deserialize;
+use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
+use rust_mcp_types::types::common::PingRequest;
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
@@ -47,11 +47,6 @@ use super::tools::source::context::{SourceContextRequest, SourceContextResponse}
 use super::tools::source::search::{SourceSearchRequest, SourceSearchResponse};
 use super::tools::symbol::{SymbolSearchRequest, SymbolSearchResponse};
 use crate::state::AppState;
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PingRequest {
-    pub message: Option<String>,
-}
 
 #[derive(Debug, Clone)]
 pub struct McpServer {

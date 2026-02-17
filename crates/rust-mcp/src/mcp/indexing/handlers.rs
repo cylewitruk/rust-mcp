@@ -1,5 +1,10 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::index::{
+    IndexCoverage, IndexFailureByScope, IndexFreshness, IndexOperationalMetrics, IndexQueue,
+    IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
+    IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
+    IndexSyncCratesResponse,
+};
 use serde_json::Value;
 
 use crate::db::indexing::{
@@ -23,161 +28,6 @@ pub(crate) struct SyncCrateOutcome {
     pub(crate) versions_synced: usize,
     pub(crate) dependencies_synced: usize,
     pub(crate) selected_version: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Types moved from models.rs — index sync/refresh/status request & response
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct IndexSyncCratesRequest {
-    pub query: Option<String>,
-    pub page: Option<u32>,
-    pub per_page: Option<u32>,
-    pub include_dependencies: Option<bool>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexSyncCratesResponse {
-    pub query: String,
-    pub page: u32,
-    pub per_page: u32,
-    pub total_candidates: u64,
-    pub synced_crates: usize,
-    pub synced_versions: usize,
-    pub synced_dependencies: usize,
-    pub selected_versions: Vec<String>,
-    pub errors: Vec<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum IndexRefreshScope {
-    Crate,
-    All,
-    Security,
-    Docs,
-    LocalCache,
-    RustdocJson,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct IndexRefreshRequest {
-    pub scope: Option<IndexRefreshScope>,
-    pub crate_name: Option<String>,
-    pub query: Option<String>,
-    pub page: Option<u32>,
-    pub per_page: Option<u32>,
-    pub include_dependencies: Option<bool>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexRefreshResponse {
-    pub job_id: String,
-    pub scope: IndexRefreshScope,
-    pub accepted: bool,
-    pub status: String,
-    pub message: String,
-    pub estimated_seconds: Option<u32>,
-    pub estimated_seconds_remaining: Option<u32>,
-    pub started_at_epoch_ms: u128,
-    pub finished_at_epoch_ms: Option<u128>,
-    pub result: Option<IndexRefreshResult>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexRefreshResult {
-    pub synced_crates: usize,
-    pub synced_versions: usize,
-    pub synced_dependencies: usize,
-    pub selected_versions: Vec<String>,
-    pub errors: Vec<String>,
-    /// Rustdoc-specific: number of type rows written (omitted for non-rustdoc
-    /// scopes).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synced_types: Option<usize>,
-    /// Rustdoc-specific: number of impl rows written (omitted for non-rustdoc
-    /// scopes).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synced_impls: Option<usize>,
-    /// Rustdoc-specific: number of trait rows written (omitted for non-rustdoc
-    /// scopes).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub synced_traits: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct IndexStatusRequest {}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexStatusResponse {
-    pub freshness: IndexFreshness,
-    pub coverage: IndexCoverage,
-    pub operational_metrics: IndexOperationalMetrics,
-    pub queue: IndexQueue,
-    pub retry_distribution: IndexRetryDistribution,
-    pub failures_by_scope: Vec<IndexFailureByScope>,
-    pub last_errors: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexOperationalMetrics {
-    pub window: String,
-    pub query_count: i64,
-    pub average_latency_ms: Option<f64>,
-    pub error_rate: Option<f64>,
-    pub cache_hit_rate: Option<f64>,
-    pub index_lag_seconds: Option<i64>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexFreshness {
-    pub crates_updated_at: Option<String>,
-    pub source_indexed_at: Option<String>,
-    pub symbols_indexed_at: Option<String>,
-    pub docs_indexed_at: Option<String>,
-    pub advisories_updated_at: Option<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexCoverage {
-    pub crates: i64,
-    pub crate_versions: i64,
-    pub dependency_edges: i64,
-    pub advisory_matches: i64,
-    pub source_files: i64,
-    pub symbols: i64,
-    pub docs_pages: i64,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexQueue {
-    pub pending_jobs: i64,
-    pub delayed_jobs: i64,
-    pub retrying_jobs: i64,
-    pub running_jobs: i64,
-    pub failed_jobs: i64,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexRetryDistribution {
-    pub inflight_attempt_1: i64,
-    pub inflight_attempt_2: i64,
-    pub inflight_attempt_3_plus: i64,
-    pub failed_attempt_1: i64,
-    pub failed_attempt_2: i64,
-    pub failed_attempt_3_plus: i64,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct IndexFailureByScope {
-    pub scope: String,
-    pub failed_jobs: i64,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,59 +1,12 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::source::{
+    SourceContextImplBlock, SourceContextRequest, SourceContextResponse, SourceContextTypeContext,
+};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SourceContextRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub path: String,
-    pub line: Option<u32>,
-    pub symbol_name: Option<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct SourceContextResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub path: String,
-    pub line: u32,
-    pub symbol_name: Option<String>,
-    pub module_path: String,
-    pub imports_in_scope: Vec<String>,
-    pub containing_impl: Option<SourceContextImplBlock>,
-    pub surrounding_types: Vec<SourceContextTypeContext>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct SourceContextImplBlock {
-    pub type_name: String,
-    pub type_name_display: Option<String>,
-    pub trait_name: Option<String>,
-    pub trait_name_display: Option<String>,
-    pub impl_kind: String,
-    pub source_line: i32,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct SourceContextTypeContext {
-    pub type_name: String,
-    pub kind: String,
-    pub source_line: i32,
-}
 
 fn module_path_from_source_path(crate_name: &str, path: &str) -> String {
     let normalized = path.trim_start_matches("./");

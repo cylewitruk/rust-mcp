@@ -1,5 +1,7 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateUsagePattern, CrateUsagePatternsRequest, CrateUsagePatternsResponse,
+};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -8,45 +10,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, usage_patterns_limit};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateUsagePatternsRequest {
-    pub crate_name: String,
-    pub symbol_name: String,
-    pub version: Option<String>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateUsagePatternsResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub symbol_name: String,
-    pub limit: u32,
-    pub count: usize,
-    pub patterns: Vec<CrateUsagePattern>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateUsagePattern {
-    pub dependent_crate: String,
-    pub dependent_version: String,
-    pub dependent_downloads: i64,
-    pub path: String,
-    pub line_start: u32,
-    pub line_end: u32,
-    pub snippet: String,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct CrateUsageSourceRow {

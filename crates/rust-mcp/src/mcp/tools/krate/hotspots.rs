@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateHotspotHit, CrateHotspotsRequest, CrateHotspotsResponse, HotspotKind, HotspotSeverity,
+};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -12,64 +14,6 @@ use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     hotspots_limit, normalize_optional, normalize_required, path_glob_to_like,
 };
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateHotspotsRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub path_glob: Option<String>,
-    pub include_unsafe: Option<bool>,
-    pub include_concurrency: Option<bool>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum HotspotKind {
-    Unsafe,
-    Concurrency,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum HotspotSeverity {
-    Low,
-    Medium,
-    High,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateHotspotsResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub path_glob: Option<String>,
-    pub include_unsafe: bool,
-    pub include_concurrency: bool,
-    pub limit: u32,
-    pub scanned_files: usize,
-    pub count: usize,
-    pub hotspots: Vec<CrateHotspotHit>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateHotspotHit {
-    pub path: String,
-    pub line: u32,
-    pub kind: HotspotKind,
-    pub pattern: String,
-    pub severity: HotspotSeverity,
-    pub snippet: String,
-}
 
 #[derive(Debug, FromRow)]
 pub(crate) struct HotspotSourceFileRow {

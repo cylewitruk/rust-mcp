@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 
 use quote::ToTokens as _;
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateAttributeMacroEntry, CrateDeriveMacroEntry, CrateDeriveMacrosRequest,
+    CrateDeriveMacrosResponse, CrateFunctionLikeMacroEntry,
+};
 use sqlx::FromRow;
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Item};
@@ -13,58 +16,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{dedupe_strings, normalize_optional, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateDeriveMacrosRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateDeriveMacrosResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub derive_macros: Vec<CrateDeriveMacroEntry>,
-    pub attribute_macros: Vec<CrateAttributeMacroEntry>,
-    pub function_like_macros: Vec<CrateFunctionLikeMacroEntry>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateDeriveMacroEntry {
-    pub name: String,
-    pub accepted_attributes: Vec<String>,
-    pub usage_pattern: String,
-    pub source_path: String,
-    pub source_line: i32,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateAttributeMacroEntry {
-    pub name: String,
-    pub usage_pattern: String,
-    pub signature_pattern: Option<String>,
-    pub source_path: String,
-    pub source_line: i32,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateFunctionLikeMacroEntry {
-    pub name: String,
-    pub usage_pattern: String,
-    pub signature_pattern: Option<String>,
-    pub source_path: String,
-    pub source_line: i32,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct DeriveMacroSourceRow {

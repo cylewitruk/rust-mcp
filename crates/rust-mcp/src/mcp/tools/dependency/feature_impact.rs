@@ -1,7 +1,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
-use rmcp::{Json, schemars};
-use serde::Serialize;
+use rmcp::Json;
+pub use rust_mcp_types::types::dependency::{
+    DependencyFeatureImpactEntry, DependencyFeatureImpactRequest, DependencyFeatureImpactResponse,
+};
 use serde_json::Value;
 use sqlx::FromRow;
 
@@ -13,47 +15,6 @@ use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     feature_impact_heavy_threshold, normalize_optional, normalize_required, value_to_string_vec,
 };
-
-// ---------------------------------------------------------------------------
-// Types (colocated from models.rs)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct DependencyFeatureImpactRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub features: Vec<String>,
-    pub heavy_threshold: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyFeatureImpactResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub features: Vec<String>,
-    pub heavy_threshold: u32,
-    pub baseline_dependency_count: usize,
-    pub combined_dependency_count: usize,
-    pub per_feature: Vec<DependencyFeatureImpactEntry>,
-    pub heavy_features: Vec<String>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyFeatureImpactEntry {
-    pub feature: String,
-    pub additional_dependency_count: usize,
-    pub additional_dependencies: Vec<String>,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct FeatureImpactFeatureRow {

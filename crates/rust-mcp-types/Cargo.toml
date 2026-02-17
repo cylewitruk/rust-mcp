@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Shared types and API contracts/models for rust-mcp"
 license = "MIT OR Apache-2.0"
+
+[dependencies]
+rmcp = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

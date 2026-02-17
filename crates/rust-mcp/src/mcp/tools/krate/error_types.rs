@@ -1,7 +1,9 @@
 use std::collections::{BTreeSet, HashMap};
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateErrorTypeEntry, CrateErrorTypesRequest, CrateErrorTypesResponse,
+};
 use serde_json::Value;
 use sqlx::FromRow;
 
@@ -11,47 +13,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{error_types_limit, normalize_optional, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateErrorTypesRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub type_name: Option<String>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateErrorTypesResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub type_name: Option<String>,
-    pub limit: u32,
-    pub count: usize,
-    pub error_types: Vec<CrateErrorTypeEntry>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateErrorTypeEntry {
-    pub type_name: String,
-    pub kind: String,
-    pub variants: Vec<String>,
-    pub fields: Vec<String>,
-    pub display_patterns: Vec<String>,
-    pub from_conversions: Vec<String>,
-    pub returned_by: Vec<String>,
-    pub source_path: String,
-    pub source_line: i32,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct ErrorTypeTypeRow {

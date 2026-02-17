@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateGraphDirection, CrateGraphEdge, CrateGraphNode, CrateGraphRequest, CrateGraphResponse,
+};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -10,64 +12,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{graph_depth, normalize_optional, normalize_required};
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum CrateGraphDirection {
-    Dependencies,
-    Dependents,
-    Both,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateGraphRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub direction: Option<CrateGraphDirection>,
-    pub depth: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateGraphResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub direction: CrateGraphDirection,
-    pub depth: u32,
-    pub node_count: usize,
-    pub edge_count: usize,
-    pub nodes: Vec<CrateGraphNode>,
-    pub edges: Vec<CrateGraphEdge>,
-    pub cycle_safe_traversal_notes: Vec<String>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateGraphNode {
-    pub crate_name: String,
-    pub latest_version: Option<String>,
-    pub min_distance: u32,
-    pub role: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateGraphEdge {
-    pub from_crate: String,
-    pub from_version: Option<String>,
-    pub to_crate: String,
-    pub to_version: Option<String>,
-    pub requirement: String,
-    pub dependency_kind: String,
-    pub optional: bool,
-    pub depth: u32,
-}
 
 #[derive(Debug, FromRow)]
 pub(crate) struct GraphLatestVersionRow {

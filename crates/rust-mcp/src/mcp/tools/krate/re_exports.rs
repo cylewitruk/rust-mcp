@@ -1,5 +1,7 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateReExportEntry, CrateReExportsRequest, CrateReExportsResponse,
+};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -8,45 +10,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, re_exports_limit};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateReExportsRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub path_prefix: Option<String>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateReExportsResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub path_prefix: Option<String>,
-    pub limit: u32,
-    pub count: usize,
-    pub re_exports: Vec<CrateReExportEntry>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateReExportEntry {
-    pub canonical_path: String,
-    pub original_definition_path: String,
-    pub kind: String,
-    pub visibility: String,
-    pub shortest_public_path: bool,
-    pub source_path: String,
-    pub source_line: u32,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct ReExportSourceRow {

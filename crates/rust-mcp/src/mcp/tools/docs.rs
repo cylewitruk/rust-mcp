@@ -1,7 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::docs::{DocsSearchHit, DocsSearchRequest, DocsSearchResponse};
+use serde::Serialize;
 
 use crate::db::{indexing, tools};
 use crate::integration::docs_rs::{DocsRsClient, discover_docs_paths, extract_title, strip_html};
@@ -11,47 +12,13 @@ use crate::mcp::utils::{
     docs_search_limit, normalize_optional, normalize_required, sync_page, sync_per_page,
 };
 
-fn default_confidence_assessment() -> ConfidenceAssessment {
-    ConfidenceAssessment {
-        level: ConfidenceLevel::Low,
-        reason: "confidence assessment unavailable in cached legacy response".to_string(),
-    }
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DocsSearchRequest {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub path_prefix: Option<String>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct DocsSearchResponse {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub path_prefix: Option<String>,
-    pub limit: u32,
-    pub count: usize,
-    pub confidence: String,
-    #[serde(default = "default_confidence_assessment")]
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-    pub hits: Vec<DocsSearchHit>,
-}
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct DocsSearchHit {
-    pub crate_name: String,
-    pub version: String,
-    pub path: String,
-    pub title: Option<String>,
-    pub source_url: Option<String>,
-    pub indexed_at: String,
-    pub snippet: String,
+#[derive(Debug, Serialize)]
+struct DocsSearchCacheKey<'a> {
+    query: &'a str,
+    crate_name: Option<&'a str>,
+    version: Option<&'a str>,
+    path_prefix: Option<&'a str>,
+    limit: u32,
 }
 
 #[derive(Debug, Default)]
@@ -205,13 +172,13 @@ impl McpServer {
         let path_prefix = normalize_optional(request.path_prefix);
         let limit = docs_search_limit(request.limit);
 
-        let cache_key = serde_json::to_string(&serde_json::json!({
-            "query": query,
-            "crate_name": crate_name,
-            "version": version,
-            "path_prefix": path_prefix,
-            "limit": limit,
-        }))
+        let cache_key = serde_json::to_string(&DocsSearchCacheKey {
+            query: &query,
+            crate_name: crate_name.as_deref(),
+            version: version.as_deref(),
+            path_prefix: path_prefix.as_deref(),
+            limit,
+        })
         .map_err(|e| format!("failed to build docs.search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("docs.search", &cache_key)

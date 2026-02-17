@@ -1,5 +1,8 @@
 use base64::Engine as _;
-use rmcp::{Json, schemars};
+use rmcp::Json;
+pub use rust_mcp_types::types::symbol::{
+    SymbolSearchHit, SymbolSearchRequest, SymbolSearchResponse,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
@@ -7,62 +10,17 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, symbol_search_limit, sync_page};
 
-fn default_confidence_assessment() -> ConfidenceAssessment {
-    ConfidenceAssessment {
-        level: ConfidenceLevel::Low,
-        reason: "confidence assessment unavailable in cached legacy response".to_string(),
-    }
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SymbolSearchRequest {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub kind: Option<String>,
-    pub include_all_versions: Option<bool>,
-    pub collapse_by_canonical: Option<bool>,
-    pub cursor: Option<String>,
-    pub page: Option<u32>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct SymbolSearchResponse {
-    pub query: String,
-    pub crate_name: Option<String>,
-    pub version: Option<String>,
-    pub kind: Option<String>,
-    pub include_all_versions: bool,
-    pub collapse_by_canonical: bool,
-    pub cursor: Option<String>,
-    pub next_cursor: Option<String>,
-    pub page: u32,
-    pub limit: u32,
-    pub total_count: usize,
-    pub has_more: bool,
-    pub count: usize,
-    pub confidence: String,
-    #[serde(default = "default_confidence_assessment")]
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-    pub hits: Vec<SymbolSearchHit>,
-}
-
-#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
-pub struct SymbolSearchHit {
-    pub crate_name: String,
-    pub version: String,
-    pub source_path: String,
-    pub name: String,
-    pub kind: String,
-    pub signature: Option<String>,
-    pub visibility: Option<String>,
-    pub start_line: i32,
-    pub end_line: i32,
-    pub index_source: String,
-    pub indexed_at: String,
+#[derive(Debug, Serialize)]
+struct SymbolSearchCacheKey<'a> {
+    query: &'a str,
+    crate_name: Option<&'a str>,
+    version: Option<&'a str>,
+    kind: Option<&'a str>,
+    include_all_versions: bool,
+    collapse_by_canonical: bool,
+    cursor: Option<&'a str>,
+    page: u32,
+    limit: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -120,17 +78,17 @@ impl McpServer {
         let page = sync_page(request.page);
         let requested_limit = symbol_search_limit(request.limit);
 
-        let cache_key = serde_json::to_string(&serde_json::json!({
-            "query": query,
-            "crate_name": crate_name,
-            "version": version,
-            "kind": kind,
-            "include_all_versions": include_all_versions,
-            "collapse_by_canonical": collapse_by_canonical,
-            "cursor": cursor,
-            "page": page,
-            "limit": requested_limit,
-        }))
+        let cache_key = serde_json::to_string(&SymbolSearchCacheKey {
+            query: &query,
+            crate_name: crate_name.as_deref(),
+            version: version.as_deref(),
+            kind: kind.as_deref(),
+            include_all_versions,
+            collapse_by_canonical,
+            cursor: cursor.as_deref(),
+            page,
+            limit: requested_limit,
+        })
         .map_err(|e| format!("failed to build symbol.search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("symbol.search", &cache_key)

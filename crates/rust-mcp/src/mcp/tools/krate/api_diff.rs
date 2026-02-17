@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateApiDiffChange, CrateApiDiffChangeType, CrateApiDiffRequest, CrateApiDiffResponse,
+};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -10,57 +12,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{api_diff_limit, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct CrateApiDiffRequest {
-    pub crate_name: String,
-    pub from_version: String,
-    pub to_version: String,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateApiDiffResponse {
-    pub crate_name: String,
-    pub from_version: String,
-    pub to_version: String,
-    pub added_count: usize,
-    pub removed_count: usize,
-    pub changed_count: usize,
-    pub breaking_changes_detected: bool,
-    pub changes: Vec<CrateApiDiffChange>,
-    pub truncated: bool,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
-pub(crate) struct CrateApiDiffChange {
-    pub name: String,
-    pub kind: String,
-    pub change_type: CrateApiDiffChangeType,
-    pub from_signature: Option<String>,
-    pub to_signature: Option<String>,
-    pub from_visibility: Option<String>,
-    pub to_visibility: Option<String>,
-    pub breaking_change: bool,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum CrateApiDiffChangeType {
-    Added,
-    Removed,
-    SignatureChanged,
-    VisibilityChanged,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct ApiDiffSymbolRow {

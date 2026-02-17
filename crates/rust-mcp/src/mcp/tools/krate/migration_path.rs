@@ -1,44 +1,14 @@
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{
+    CrateMigrationAction, CrateMigrationPathRequest, CrateMigrationPathResponse,
+};
 
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
-use crate::mcp::tools::krate::api_diff::{CrateApiDiffChangeType, CrateApiDiffRequest};
+use crate::mcp::tools::krate::api_diff::{
+    CrateApiDiffChange, CrateApiDiffChangeType, CrateApiDiffRequest,
+};
 use crate::mcp::utils::{api_diff_limit, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateMigrationPathRequest {
-    pub crate_name: String,
-    pub from_version: String,
-    pub to_version: String,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateMigrationPathResponse {
-    pub crate_name: String,
-    pub from_version: String,
-    pub to_version: String,
-    pub breaking_changes_detected: bool,
-    pub added_count: usize,
-    pub removed_count: usize,
-    pub changed_count: usize,
-    pub migration_actions: Vec<CrateMigrationAction>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateMigrationAction {
-    pub action: String,
-    pub rationale: String,
-    pub affected_symbol: String,
-    pub kind: String,
-    pub from_signature: Option<String>,
-    pub to_signature: Option<String>,
-}
 
 fn normalized_symbol_key(name: &str) -> String {
     name.chars()
@@ -67,9 +37,9 @@ fn maybe_renamed(from_name: &str, to_name: &str) -> bool {
 }
 
 fn rename_candidate<'a>(
-    removed_change: &crate::mcp::tools::krate::api_diff::CrateApiDiffChange,
-    changes: &'a [crate::mcp::tools::krate::api_diff::CrateApiDiffChange],
-) -> Option<&'a crate::mcp::tools::krate::api_diff::CrateApiDiffChange> {
+    removed_change: &CrateApiDiffChange,
+    changes: &'a [CrateApiDiffChange],
+) -> Option<&'a CrateApiDiffChange> {
     changes
         .iter()
         .find(|candidate| {
@@ -79,9 +49,7 @@ fn rename_candidate<'a>(
         })
 }
 
-fn action_for_change(
-    change: &crate::mcp::tools::krate::api_diff::CrateApiDiffChange,
-) -> (String, String) {
+fn action_for_change(change: &CrateApiDiffChange) -> (String, String) {
     match change.change_type {
         CrateApiDiffChangeType::Removed => (
             "replace removed API usage".to_string(),

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{CrateApiRequest, CrateApiResponse, CrateApiSymbol};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -12,48 +12,6 @@ use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     crate_api_limit, normalize_optional, normalize_required, path_glob_to_like,
 };
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateApiRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub path_glob: Option<String>,
-    pub kinds: Option<Vec<String>>,
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateApiResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub path_glob: Option<String>,
-    pub kinds: Vec<String>,
-    pub limit: u32,
-    pub count: usize,
-    pub symbols: Vec<CrateApiSymbol>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateApiSymbol {
-    pub name: String,
-    pub kind: String,
-    pub signature: Option<String>,
-    pub visibility: Option<String>,
-    pub source_path: String,
-    pub start_line: i32,
-    pub end_line: i32,
-    pub index_source: String,
-}
 
 #[derive(Debug, FromRow)]
 pub(crate) struct ApiSurfaceRow {

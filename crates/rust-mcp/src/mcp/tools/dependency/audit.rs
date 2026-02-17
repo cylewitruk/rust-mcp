@@ -1,82 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use rmcp::{Json, schemars};
+use rmcp::Json;
+pub use rust_mcp_types::types::dependency::{
+    DependencyAuditDependency, DependencyAuditIssue, DependencyAuditIssueCategory,
+    DependencyAuditRequest, DependencyAuditResponse, DependencyAuditSeverity,
+};
 use semver::{Version, VersionReq};
-use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use toml::Value;
 
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::normalize_required;
-
-// ---------------------------------------------------------------------------
-// Types (colocated from models.rs)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DependencyAuditRequest {
-    pub cargo_toml_path: String,
-}
-
-#[derive(
-    Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq, PartialOrd, Ord,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyAuditIssueCategory {
-    Yanked,
-    Advisory,
-    Outdated,
-    MsrvConflict,
-    Unresolved,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyAuditSeverity {
-    Low,
-    Medium,
-    High,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyAuditResponse {
-    pub cargo_toml_path: String,
-    pub package_name: Option<String>,
-    pub package_rust_version: Option<String>,
-    pub dependency_count: usize,
-    pub issue_count: usize,
-    pub dependencies: Vec<DependencyAuditDependency>,
-    pub issues: Vec<DependencyAuditIssue>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyAuditDependency {
-    pub dependency_name: String,
-    pub requirement: Option<String>,
-    pub selected_version: Option<String>,
-    pub latest_version: Option<String>,
-    pub selected_rust_version: Option<String>,
-    pub yanked: bool,
-    pub advisory_count: i64,
-    pub status_markers: Vec<String>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct DependencyAuditIssue {
-    pub dependency_name: String,
-    pub category: DependencyAuditIssueCategory,
-    pub severity: DependencyAuditSeverity,
-    pub message: String,
-    pub selected_version: Option<String>,
-    pub latest_version: Option<String>,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct DependencyAuditCrateRow {

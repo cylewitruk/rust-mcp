@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use rmcp::{Json, schemars};
-use serde::{Deserialize, Serialize};
+use rmcp::Json;
+pub use rust_mcp_types::types::krate::{CrateLicenseCheckRequest, CrateLicenseCheckResponse};
 use sqlx::FromRow;
 
 use crate::mcp::models::{
@@ -10,36 +10,6 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct CrateLicenseCheckRequest {
-    pub crate_name: String,
-    pub version: Option<String>,
-    pub allow_licenses: Option<Vec<String>>,
-    pub deny_licenses: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct CrateLicenseCheckResponse {
-    pub crate_name: String,
-    pub selected_version: String,
-    pub latest_version: String,
-    pub license_expression: Option<String>,
-    pub matched_licenses: Vec<String>,
-    pub allow_licenses: Vec<String>,
-    pub deny_licenses: Vec<String>,
-    pub policy_result: LicensePolicyResult,
-    pub policy_reasons: Vec<String>,
-    pub freshness_check_performed: bool,
-    pub freshness_check_result: String,
-    pub refresh_enqueued: bool,
-    pub refresh_job_id: Option<String>,
-    pub freshness: Vec<ResponseFreshnessSource>,
-    pub confidence: String,
-    pub confidence_assessment: ConfidenceAssessment,
-    pub next_best_calls: Vec<String>,
-    pub provenance: String,
-}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct CrateVersionLicenseRow {
