@@ -2,13 +2,16 @@ use std::collections::HashMap;
 
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sqlx::FromRow;
+use sqlx::types::Json as SqlJson;
 
+use crate::db::models::{
+    CrateCoreRow, CrateImplLookupRow, CrateTraitLookupRow, CrateTypeInfoRow,
+    CrateVersionSelectionRow, GenericParamEntry, ImplMethodEntry, TraitAssociatedTypeEntry,
+    TypeFieldEntry, TypeVariantEntry,
+};
 use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateImplLookupRow, CrateImplMethod,
-    CrateTraitAssociatedType, CrateTraitDefinition, CrateTraitLookupRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
+    ConfidenceAssessment, ConfidenceLevel, CrateImplMethod, CrateTraitAssociatedType,
+    CrateTraitDefinition, ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
@@ -104,115 +107,59 @@ pub struct CrateTypeConversion {
     pub target_type: Option<String>,
 }
 
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct CrateTypeInfoRow {
-    pub(crate) type_name: String,
-    pub(crate) kind: String,
-    pub(crate) visibility: Option<String>,
-    pub(crate) canonical_path: Option<String>,
-    pub(crate) definition_path: Option<String>,
-    pub(crate) generic_params: Value,
-    pub(crate) where_clauses: Value,
-    pub(crate) fields: Value,
-    pub(crate) variants: Value,
-    pub(crate) deprecated_since: Option<String>,
-    pub(crate) deprecated_note: Option<String>,
-    pub(crate) is_non_exhaustive: bool,
-    pub(crate) auto_traits: Value,
-    pub(crate) source_path: String,
-    pub(crate) start_line: i32,
-    pub(crate) end_line: i32,
-    pub(crate) index_source: String,
+fn parse_type_fields(value: &SqlJson<Vec<TypeFieldEntry>>) -> Vec<CrateTypeField> {
+    value
+        .0
+        .iter()
+        .map(|field| CrateTypeField {
+            name: field.name.clone(),
+            field_type: field.field_type.clone(),
+        })
+        .collect()
 }
 
-fn parse_type_fields(value: &Value) -> Vec<CrateTypeField> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let field_type = entry
-                    .get("type")?
-                    .as_str()?
-                    .to_string();
-                let name = entry
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                Some(CrateTypeField { name, field_type })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_type_variants(value: &SqlJson<Vec<TypeVariantEntry>>) -> Vec<CrateTypeVariant> {
+    value
+        .0
+        .iter()
+        .map(|variant| CrateTypeVariant {
+            name: variant.name.clone(),
+            fields: variant
+                .fields
+                .iter()
+                .map(|field| CrateTypeField {
+                    name: field.name.clone(),
+                    field_type: field.field_type.clone(),
+                })
+                .collect(),
+        })
+        .collect()
 }
 
-fn parse_type_variants(value: &Value) -> Vec<CrateTypeVariant> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let name = entry
-                    .get("name")?
-                    .as_str()?
-                    .to_string();
-                let fields = entry
-                    .get("fields")
-                    .map(parse_type_fields)
-                    .unwrap_or_default();
-                Some(CrateTypeVariant { name, fields })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_string_list(value: &SqlJson<Vec<String>>) -> Vec<String> {
+    value.0.clone()
 }
 
-fn parse_string_list(value: &Value) -> Vec<String> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(Value::as_str)
-            .map(ToString::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_generic_param_rendered(value: &SqlJson<Vec<GenericParamEntry>>) -> Vec<String> {
+    value
+        .0
+        .iter()
+        .map(|entry| entry.rendered().to_string())
+        .collect()
 }
 
-fn parse_generic_param_rendered(value: &Value) -> Vec<String> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .get("rendered")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn parse_assoc_types(value: &Value) -> Vec<CrateTraitAssociatedType> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let name = entry
-                    .get("name")
-                    .and_then(Value::as_str)?
-                    .to_string();
-                let bounds = entry
-                    .get("bounds")
-                    .map(parse_string_list)
-                    .unwrap_or_default();
-                let default = entry
-                    .get("default")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                Some(CrateTraitAssociatedType { name, bounds, default })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_assoc_types(
+    value: &SqlJson<Vec<TraitAssociatedTypeEntry>>,
+) -> Vec<CrateTraitAssociatedType> {
+    value
+        .0
+        .iter()
+        .map(|entry| CrateTraitAssociatedType {
+            name: entry.name.clone(),
+            bounds: entry.bounds.clone(),
+            default: entry.default.clone(),
+        })
+        .collect()
 }
 
 fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
@@ -230,24 +177,15 @@ fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
     }
 }
 
-fn parse_impl_methods(value: &Value) -> Vec<CrateImplMethod> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let name = entry
-                    .get("name")?
-                    .as_str()?
-                    .to_string();
-                let signature = entry
-                    .get("signature")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                Some(CrateImplMethod { name, signature })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_impl_methods(value: &SqlJson<Vec<ImplMethodEntry>>) -> Vec<CrateImplMethod> {
+    value
+        .0
+        .iter()
+        .map(|entry| CrateImplMethod {
+            name: entry.name.clone(),
+            signature: entry.signature.clone(),
+        })
+        .collect()
 }
 
 fn extract_generic_argument(value: &str) -> Option<String> {

@@ -2,12 +2,15 @@ use std::collections::HashMap;
 
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use sqlx::types::Json as SqlJson;
 
+use crate::db::models::{
+    CrateCoreRow, CrateImplLookupRow, CrateTraitLookupRow, CrateVersionSelectionRow,
+    GenericParamEntry, ImplMethodEntry, TraitAssociatedTypeEntry,
+};
 use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateImplLookupRow, CrateImplMethod,
-    CrateTraitAssociatedType, CrateTraitDefinition, CrateTraitLookupRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
+    ConfidenceAssessment, ConfidenceLevel, CrateImplMethod, CrateTraitAssociatedType,
+    CrateTraitDefinition, ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, trait_impls_limit};
@@ -63,74 +66,41 @@ pub struct CrateTraitImplRelation {
     pub index_source: String,
 }
 
-fn parse_impl_methods(value: &Value) -> Vec<CrateImplMethod> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let name = entry
-                    .get("name")?
-                    .as_str()?
-                    .to_string();
-                let signature = entry
-                    .get("signature")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                Some(CrateImplMethod { name, signature })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_impl_methods(value: &SqlJson<Vec<ImplMethodEntry>>) -> Vec<CrateImplMethod> {
+    value
+        .0
+        .iter()
+        .map(|entry| CrateImplMethod {
+            name: entry.name.clone(),
+            signature: entry.signature.clone(),
+        })
+        .collect()
 }
 
-fn parse_string_list(value: &Value) -> Vec<String> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(Value::as_str)
-            .map(ToString::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_string_list(value: &SqlJson<Vec<String>>) -> Vec<String> {
+    value.0.clone()
 }
 
-fn parse_generic_param_rendered(value: &Value) -> Vec<String> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .get("rendered")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_generic_param_rendered(value: &SqlJson<Vec<GenericParamEntry>>) -> Vec<String> {
+    value
+        .0
+        .iter()
+        .map(|entry| entry.rendered().to_string())
+        .collect()
 }
 
-fn parse_assoc_types(value: &Value) -> Vec<CrateTraitAssociatedType> {
-    match value {
-        Value::Array(entries) => entries
-            .iter()
-            .filter_map(|entry| {
-                let name = entry
-                    .get("name")
-                    .and_then(Value::as_str)?
-                    .to_string();
-                let bounds = entry
-                    .get("bounds")
-                    .map(parse_string_list)
-                    .unwrap_or_default();
-                let default = entry
-                    .get("default")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                Some(CrateTraitAssociatedType { name, bounds, default })
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
+fn parse_assoc_types(
+    value: &SqlJson<Vec<TraitAssociatedTypeEntry>>,
+) -> Vec<CrateTraitAssociatedType> {
+    value
+        .0
+        .iter()
+        .map(|entry| CrateTraitAssociatedType {
+            name: entry.name.clone(),
+            bounds: entry.bounds.clone(),
+            default: entry.default.clone(),
+        })
+        .collect()
 }
 
 fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
