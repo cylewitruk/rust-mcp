@@ -4,20 +4,19 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
-use sqlx::FromRow;
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Item, Type, Visibility};
 
+use crate::db::indexing::{
+    count_source_file_index_rows, fetch_local_cache_version_keys, fetch_source_file_id_optional,
+    prune_source_file_index_and_files, replace_source_file_index_rows,
+    upsert_source_file_if_sha_changed,
+};
+use crate::db::models::{
+    IndexedExtractionBatch, IndexedImplInsert, IndexedSymbolInsert, IndexedTypeInsert,
+};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, sync_page, sync_per_page};
-
-#[derive(Debug, FromRow)]
-struct CrateVersionKeyRow {
-    cache_dir_name: String,
-    crate_name: String,
-    version: String,
-    crate_version_id: i64,
-}
 
 #[derive(Debug)]
 struct IndexedSourceFile {
@@ -26,47 +25,6 @@ struct IndexedSourceFile {
     file_size: i64,
     language: Option<String>,
     content: String,
-}
-
-#[derive(Debug)]
-struct ExtractedSymbol {
-    name: String,
-    kind: String,
-    signature: Option<String>,
-    visibility: Option<String>,
-    start_line: i32,
-    end_line: i32,
-}
-
-#[derive(Debug)]
-struct ExtractedType {
-    type_name: String,
-    kind: String,
-    visibility: Option<String>,
-    generic_params: Value,
-    fields: Value,
-    variants: Value,
-    start_line: i32,
-    end_line: i32,
-}
-
-#[derive(Debug)]
-struct ExtractedImpl {
-    type_name: String,
-    type_name_display: Option<String>,
-    trait_name: Option<String>,
-    trait_name_display: Option<String>,
-    impl_kind: String,
-    methods: Value,
-    start_line: i32,
-    end_line: i32,
-}
-
-#[derive(Debug)]
-struct RustExtraction {
-    symbols: Vec<ExtractedSymbol>,
-    types: Vec<ExtractedType>,
-    impls: Vec<ExtractedImpl>,
 }
 
 #[derive(Debug)]
@@ -284,7 +242,7 @@ fn line_for_method_name(content: &str, method_name: &str) -> i32 {
     line_for_symbol_name(content, &needle)
 }
 
-fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
+fn extract_rust_symbols(content: &str) -> Result<IndexedExtractionBatch, String> {
     let file = syn::parse_file(content).map_err(|e| format!("rust parser error: {e}"))?;
     let mut symbols = Vec::new();
     let mut types = Vec::new();
@@ -300,7 +258,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "function".to_string(),
                     signature,
@@ -310,6 +268,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Struct(structure) => {
@@ -320,7 +279,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name: type_name.clone(),
                     kind: "struct".to_string(),
                     signature,
@@ -330,6 +289,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 let fields = structure
@@ -343,7 +303,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     })
                     .collect::<Vec<_>>();
 
-                types.push(ExtractedType {
+                types.push(IndexedTypeInsert {
                     type_name: type_name.clone(),
                     kind: "struct".to_string(),
                     visibility: match structure.vis {
@@ -355,10 +315,11 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     variants: json!([]),
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 for (trait_name, trait_name_display) in derive_traits(&structure.attrs) {
-                    impls.push(ExtractedImpl {
+                    impls.push(IndexedImplInsert {
                         type_name: type_name.clone(),
                         type_name_display: Some(type_name.clone()),
                         trait_name: Some(trait_name),
@@ -367,6 +328,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                         methods: json!([]),
                         start_line,
                         end_line: start_line,
+                        ..Default::default()
                     });
                 }
             }
@@ -378,7 +340,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name: type_name.clone(),
                     kind: "enum".to_string(),
                     signature,
@@ -388,6 +350,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 let variants = enumeration
@@ -412,7 +375,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     })
                     .collect::<Vec<_>>();
 
-                types.push(ExtractedType {
+                types.push(IndexedTypeInsert {
                     type_name: type_name.clone(),
                     kind: "enum".to_string(),
                     visibility: match enumeration.vis {
@@ -424,10 +387,11 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     variants: json!(variants),
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 for (trait_name, trait_name_display) in derive_traits(&enumeration.attrs) {
-                    impls.push(ExtractedImpl {
+                    impls.push(IndexedImplInsert {
                         type_name: type_name.clone(),
                         type_name_display: Some(type_name.clone()),
                         trait_name: Some(trait_name),
@@ -436,6 +400,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                         methods: json!([]),
                         start_line,
                         end_line: start_line,
+                        ..Default::default()
                     });
                 }
             }
@@ -447,7 +412,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name: type_name.clone(),
                     kind: "union".to_string(),
                     signature,
@@ -457,6 +422,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 let fields = union_item
@@ -471,7 +437,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     })
                     .collect::<Vec<_>>();
 
-                types.push(ExtractedType {
+                types.push(IndexedTypeInsert {
                     type_name: type_name.clone(),
                     kind: "union".to_string(),
                     visibility: match union_item.vis {
@@ -483,10 +449,11 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     variants: json!([]),
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
 
                 for (trait_name, trait_name_display) in derive_traits(&union_item.attrs) {
-                    impls.push(ExtractedImpl {
+                    impls.push(IndexedImplInsert {
                         type_name: type_name.clone(),
                         type_name_display: Some(type_name.clone()),
                         trait_name: Some(trait_name),
@@ -495,6 +462,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                         methods: json!([]),
                         start_line,
                         end_line: start_line,
+                        ..Default::default()
                     });
                 }
             }
@@ -506,7 +474,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "trait".to_string(),
                     signature,
@@ -516,6 +484,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Type(type_alias) => {
@@ -526,7 +495,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "type_alias".to_string(),
                     signature,
@@ -536,6 +505,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Const(const_item) => {
@@ -546,7 +516,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "const".to_string(),
                     signature,
@@ -556,6 +526,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Static(static_item) => {
@@ -566,7 +537,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "static".to_string(),
                     signature,
@@ -576,6 +547,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Mod(module_item) => {
@@ -586,7 +558,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .nth((start_line.saturating_sub(1)) as usize)
                     .and_then(normalize_symbol_signature);
 
-                symbols.push(ExtractedSymbol {
+                symbols.push(IndexedSymbolInsert {
                     name,
                     kind: "module".to_string(),
                     signature,
@@ -596,6 +568,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     },
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             Item::Impl(impl_item) => {
@@ -650,7 +623,7 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     .min()
                     .unwrap_or_else(|| line_for_symbol_name(content, &type_name));
 
-                impls.push(ExtractedImpl {
+                impls.push(IndexedImplInsert {
                     type_name,
                     type_name_display,
                     trait_name,
@@ -659,13 +632,19 @@ fn extract_rust_symbols(content: &str) -> Result<RustExtraction, String> {
                     methods: json!(method_entries),
                     start_line,
                     end_line: start_line,
+                    ..Default::default()
                 });
             }
             _ => {}
         }
     }
 
-    Ok(RustExtraction { symbols, types, impls })
+    Ok(IndexedExtractionBatch {
+        symbols,
+        types,
+        impls,
+        traits: Vec::new(),
+    })
 }
 
 impl McpServer {
@@ -700,20 +679,10 @@ impl McpServer {
             });
         }
 
-        let version_rows = sqlx::query_as::<_, CrateVersionKeyRow>(
-            "SELECT
-                (c.name || '-' || cv.version) AS cache_dir_name,
-                c.name AS crate_name,
-                cv.version,
-                cv.id AS crate_version_id
-             FROM crate_versions cv
-             JOIN crates c ON c.id = cv.crate_id
-             WHERE ($1::TEXT IS NULL OR c.name = $1)",
-        )
-        .bind(requested_crate_name.as_deref())
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("local cache refresh failed to load crate versions: {e}"))?;
+        let version_rows =
+            fetch_local_cache_version_keys(&self.state.db, requested_crate_name.as_deref())
+                .await
+                .map_err(|e| format!("local cache refresh failed to load crate versions: {e}"))?;
 
         let version_map = version_rows
             .into_iter()
@@ -797,45 +766,28 @@ impl McpServer {
                 seen_paths.push(file.relative_path.clone());
                 outcome.scanned_files += 1;
 
-                let affected = sqlx::query(
-                    "INSERT INTO source_files (
-                        crate_version_id, path, sha256, file_size, language, content, indexed_at
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, NOW()
-                     )
-                     ON CONFLICT (crate_version_id, path) DO UPDATE
-                     SET sha256 = EXCLUDED.sha256,
-                         file_size = EXCLUDED.file_size,
-                         language = EXCLUDED.language,
-                         content = EXCLUDED.content,
-                         indexed_at = NOW()
-                     WHERE source_files.sha256 IS DISTINCT FROM EXCLUDED.sha256",
+                let affected = upsert_source_file_if_sha_changed(
+                    &self.state.db,
+                    entry.crate_version_id,
+                    &file.relative_path,
+                    &file.sha256,
+                    file.file_size,
+                    file.language.as_deref(),
+                    &file.content,
                 )
-                .bind(entry.crate_version_id)
-                .bind(&file.relative_path)
-                .bind(&file.sha256)
-                .bind(file.file_size)
-                .bind(file.language.as_deref())
-                .bind(&file.content)
-                .execute(&self.state.db)
                 .await
                 .map_err(|e| {
                     format!(
                         "failed to upsert source file {} for {}@{}: {e}",
                         file.relative_path, entry.crate_name, entry.version
                     )
-                })?
-                .rows_affected();
+                })?;
 
-                let source_file_id = sqlx::query_scalar::<_, i64>(
-                    "SELECT id
-                     FROM source_files
-                     WHERE crate_version_id = $1 AND path = $2
-                     LIMIT 1",
+                let source_file_id = fetch_source_file_id_optional(
+                    &self.state.db,
+                    entry.crate_version_id,
+                    &file.relative_path,
                 )
-                .bind(entry.crate_version_id)
-                .bind(&file.relative_path)
-                .fetch_optional(&self.state.db)
                 .await
                 .map_err(|e| {
                     format!(
@@ -849,57 +801,17 @@ impl McpServer {
                         continue;
                     };
 
-                    let existing_symbol_count = sqlx::query_scalar::<_, i64>(
-                        "SELECT (
-                            (SELECT COUNT(*)::BIGINT FROM symbols WHERE source_file_id = $1)
-                            + (SELECT COUNT(*)::BIGINT FROM crate_types WHERE source_file_id = $1)
-                            + (SELECT COUNT(*)::BIGINT FROM crate_impls WHERE source_file_id = $1)
-                         )::BIGINT",
-                    )
-                    .bind(source_file_id)
-                    .fetch_one(&self.state.db)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to count symbols for {} in {}@{}: {e}",
-                            file.relative_path, entry.crate_name, entry.version
-                        )
-                    })?;
+                    let existing_symbol_count =
+                        count_source_file_index_rows(&self.state.db, source_file_id)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to count symbols for {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                )
+                            })?;
 
                     if affected > 0 || existing_symbol_count == 0 {
-                        sqlx::query("DELETE FROM symbols WHERE source_file_id = $1")
-                            .bind(source_file_id)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to clear symbols for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-
-                        sqlx::query("DELETE FROM crate_types WHERE source_file_id = $1")
-                            .bind(source_file_id)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to clear crate types for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-
-                        sqlx::query("DELETE FROM crate_impls WHERE source_file_id = $1")
-                            .bind(source_file_id)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to clear crate impls for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-
                         let extracted = extract_rust_symbols(&file.content).map_err(|e| {
                             format!(
                                 "failed to parse rust symbols in {} for {}@{}: {e}",
@@ -907,270 +819,38 @@ impl McpServer {
                             )
                         })?;
 
-                        for symbol in extracted.symbols {
-                            sqlx::query(
-                                "INSERT INTO symbols (
-                                    crate_version_id,
-                                    source_file_id,
-                                    name,
-                                    kind,
-                                    signature,
-                                    visibility,
-                                    start_line,
-                                    end_line,
-                                    index_source,
-                                    indexed_at
-                                 ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, 'syn', NOW()
-                                 )",
+                        replace_source_file_index_rows(
+                            &self.state.db,
+                            entry.crate_version_id,
+                            source_file_id,
+                            "syn",
+                            &extracted,
+                        )
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "failed to replace indexed rows for {} in {}@{}: {e}",
+                                file.relative_path, entry.crate_name, entry.version
                             )
-                            .bind(entry.crate_version_id)
-                            .bind(source_file_id)
-                            .bind(symbol.name)
-                            .bind(symbol.kind)
-                            .bind(symbol.signature)
-                            .bind(symbol.visibility)
-                            .bind(symbol.start_line)
-                            .bind(symbol.end_line)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to insert symbol for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-                        }
-
-                        for extracted_type in extracted.types {
-                            sqlx::query(
-                                "INSERT INTO crate_types (
-                                    crate_version_id,
-                                    source_file_id,
-                                    type_name,
-                                    kind,
-                                    visibility,
-                                    generic_params,
-                                    fields,
-                                    variants,
-                                    start_line,
-                                    end_line,
-                                    index_source,
-                                    indexed_at
-                                 ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'syn', NOW()
-                                 )",
-                            )
-                            .bind(entry.crate_version_id)
-                            .bind(source_file_id)
-                            .bind(extracted_type.type_name)
-                            .bind(extracted_type.kind)
-                            .bind(extracted_type.visibility)
-                            .bind(extracted_type.generic_params)
-                            .bind(extracted_type.fields)
-                            .bind(extracted_type.variants)
-                            .bind(extracted_type.start_line)
-                            .bind(extracted_type.end_line)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to insert crate type for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-                        }
-
-                        for extracted_impl in extracted.impls {
-                            sqlx::query(
-                                "INSERT INTO crate_impls (
-                                    crate_version_id,
-                                    source_file_id,
-                                    type_name,
-                                    type_name_display,
-                                    trait_name,
-                                    trait_name_display,
-                                    impl_kind,
-                                    methods,
-                                    start_line,
-                                    end_line,
-                                    index_source,
-                                    indexed_at
-                                 ) VALUES (
-                                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'syn', NOW()
-                                 )",
-                            )
-                            .bind(entry.crate_version_id)
-                            .bind(source_file_id)
-                            .bind(extracted_impl.type_name)
-                            .bind(extracted_impl.type_name_display)
-                            .bind(extracted_impl.trait_name)
-                            .bind(extracted_impl.trait_name_display)
-                            .bind(extracted_impl.impl_kind)
-                            .bind(extracted_impl.methods)
-                            .bind(extracted_impl.start_line)
-                            .bind(extracted_impl.end_line)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to insert crate impl for {} in {}@{}: {e}",
-                                    file.relative_path, entry.crate_name, entry.version
-                                )
-                            })?;
-                        }
+                        })?;
                     }
                 }
 
                 outcome.upserted_files += affected as usize;
             }
 
-            let deleted = if seen_paths.is_empty() {
-                sqlx::query(
-                    "DELETE FROM symbols
-                     WHERE crate_version_id = $1
-                       AND source_file_id IN (
-                         SELECT id FROM source_files WHERE crate_version_id = $1
-                       )",
+            let deleted = prune_source_file_index_and_files(
+                &self.state.db,
+                entry.crate_version_id,
+                &seen_paths,
+            )
+            .await
+            .map_err(|e| {
+                format!(
+                    "failed to prune stale source/index rows for {}@{}: {e}",
+                    entry.crate_name, entry.version
                 )
-                .bind(entry.crate_version_id)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune symbols for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query(
-                    "DELETE FROM crate_types
-                                         WHERE crate_version_id = $1
-                                             AND source_file_id IN (
-                                                 SELECT id FROM source_files WHERE \
-                     crate_version_id = $1
-                                             )",
-                )
-                .bind(entry.crate_version_id)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune crate types for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query(
-                    "DELETE FROM crate_impls
-                                         WHERE crate_version_id = $1
-                                             AND source_file_id IN (
-                                                 SELECT id FROM source_files WHERE \
-                     crate_version_id = $1
-                                             )",
-                )
-                .bind(entry.crate_version_id)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune crate impls for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query("DELETE FROM source_files WHERE crate_version_id = $1")
-                    .bind(entry.crate_version_id)
-                    .execute(&self.state.db)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to prune source files for {}@{}: {e}",
-                            entry.crate_name, entry.version
-                        )
-                    })?
-                    .rows_affected()
-            } else {
-                sqlx::query(
-                    "DELETE FROM symbols
-                     WHERE crate_version_id = $1
-                       AND source_file_id IN (
-                         SELECT id
-                         FROM source_files
-                         WHERE crate_version_id = $1
-                           AND NOT (path = ANY($2::TEXT[]))
-                       )",
-                )
-                .bind(entry.crate_version_id)
-                .bind(&seen_paths)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune stale symbols for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query(
-                    "DELETE FROM crate_types
-                                         WHERE crate_version_id = $1
-                                             AND source_file_id IN (
-                                                 SELECT id
-                                                 FROM source_files
-                                                 WHERE crate_version_id = $1
-                                                     AND NOT (path = ANY($2::TEXT[]))
-                                             )",
-                )
-                .bind(entry.crate_version_id)
-                .bind(&seen_paths)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune stale crate types for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query(
-                    "DELETE FROM crate_impls
-                                         WHERE crate_version_id = $1
-                                             AND source_file_id IN (
-                                                 SELECT id
-                                                 FROM source_files
-                                                 WHERE crate_version_id = $1
-                                                     AND NOT (path = ANY($2::TEXT[]))
-                                             )",
-                )
-                .bind(entry.crate_version_id)
-                .bind(&seen_paths)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune stale crate impls for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?;
-
-                sqlx::query(
-                    "DELETE FROM source_files
-                     WHERE crate_version_id = $1
-                       AND NOT (path = ANY($2::TEXT[]))",
-                )
-                .bind(entry.crate_version_id)
-                .bind(&seen_paths)
-                .execute(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to prune stale source files for {}@{}: {e}",
-                        entry.crate_name, entry.version
-                    )
-                })?
-                .rows_affected()
-            };
+            })?;
 
             outcome.deleted_files += deleted as usize;
             outcome.scanned_versions += 1;

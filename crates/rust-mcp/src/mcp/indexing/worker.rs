@@ -1,23 +1,16 @@
 use metrics::gauge;
 use serde::Deserialize;
-use serde_json::Value;
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
+use crate::db::indexing::{
+    claim_next_refresh_job, fetch_refresh_job_gauge_counts, mark_crate_refresh_error,
+    mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
+};
 use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{sync_page, sync_per_page};
 use crate::state::AppState;
-
-#[derive(Debug, sqlx::FromRow)]
-struct RefreshJobRow {
-    id: i64,
-    crate_name: String,
-    scope: String,
-    include_dependencies: bool,
-    payload: Value,
-    attempts: i32,
-}
 
 #[derive(Debug, Default, Deserialize)]
 struct RefreshJobPayload {
@@ -73,43 +66,13 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
 
     loop {
         // Update refresh job gauges for Prometheus on each iteration.
-        if let Ok(counts) = sqlx::query_as::<_, (i64, i64, i64)>(
-            "SELECT
-                COUNT(*) FILTER (WHERE status = 'pending')::BIGINT,
-                COUNT(*) FILTER (WHERE status = 'running')::BIGINT,
-                COUNT(*) FILTER (WHERE status = 'failed')::BIGINT
-             FROM refresh_jobs",
-        )
-        .fetch_one(&state.db)
-        .await
-        {
-            gauge!("rust_mcp_refresh_jobs_pending").set(counts.0 as f64);
-            gauge!("rust_mcp_refresh_jobs_running").set(counts.1 as f64);
-            gauge!("rust_mcp_refresh_jobs_failed").set(counts.2 as f64);
+        if let Ok(counts) = fetch_refresh_job_gauge_counts(&state.db).await {
+            gauge!("rust_mcp_refresh_jobs_pending").set(counts.pending_jobs as f64);
+            gauge!("rust_mcp_refresh_jobs_running").set(counts.running_jobs as f64);
+            gauge!("rust_mcp_refresh_jobs_failed").set(counts.failed_jobs as f64);
         }
 
-        let next_job = sqlx::query_as::<_, RefreshJobRow>(
-            "WITH next_job AS (
-                 SELECT id
-                 FROM refresh_jobs
-                                 WHERE status = 'pending'
-                                     AND requested_at <= NOW()
-                                 ORDER BY priority ASC, attempts ASC, requested_at ASC, id ASC
-                 FOR UPDATE SKIP LOCKED
-                 LIMIT 1
-             )
-             UPDATE refresh_jobs r
-             SET status = 'running',
-                 started_at = NOW(),
-                 finished_at = NULL,
-                 attempts = r.attempts + 1,
-                 last_error = NULL
-             FROM next_job
-             WHERE r.id = next_job.id
-             RETURNING r.id, r.crate_name, r.scope, r.include_dependencies, r.payload, r.attempts",
-        )
-        .fetch_optional(&state.db)
-        .await;
+        let next_job = claim_next_refresh_job(&state.db).await;
 
         let Some(job) = (match next_job {
             Ok(value) => value,
@@ -189,17 +152,7 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
 
         match result {
             Ok(()) => {
-                if let Err(error) = sqlx::query(
-                    "UPDATE refresh_jobs
-                     SET status = 'finished',
-                         finished_at = NOW(),
-                         last_error = NULL
-                     WHERE id = $1",
-                )
-                .bind(job.id)
-                .execute(&state.db)
-                .await
-                {
+                if let Err(error) = mark_refresh_job_finished(&state.db, job.id).await {
                     error!(job_id = job.id, %error, "failed to mark refresh job finished");
                 }
             }
@@ -207,35 +160,20 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 let terminal = job.attempts >= MAX_ATTEMPTS;
                 let retry_delay_seconds = jittered_retry_delay_seconds(job.id, job.attempts);
 
-                if let Err(error) = sqlx::query(
-                    "UPDATE refresh_jobs
-                     SET status = CASE WHEN $1 THEN 'failed' ELSE 'pending' END,
-                         requested_at = CASE WHEN $1 THEN requested_at ELSE NOW() + ($2 * INTERVAL \
-                     '1 second') END,
-                         finished_at = CASE WHEN $1 THEN NOW() ELSE NULL END,
-                         last_error = $3
-                     WHERE id = $4",
+                if let Err(error) = mark_refresh_job_failed_or_requeued(
+                    &state.db,
+                    job.id,
+                    terminal,
+                    retry_delay_seconds,
+                    &error_message,
                 )
-                .bind(terminal)
-                .bind(retry_delay_seconds)
-                .bind(&error_message)
-                .bind(job.id)
-                .execute(&state.db)
                 .await
                 {
                     error!(job_id = job.id, %error, "failed to persist refresh job failure");
                 }
 
-                if let Err(error) = sqlx::query(
-                    "UPDATE crates
-                     SET last_refresh_error = $1,
-                         updated_at = NOW()
-                     WHERE name = $2",
-                )
-                .bind(&error_message)
-                .bind(&job.crate_name)
-                .execute(&state.db)
-                .await
+                if let Err(error) =
+                    mark_crate_refresh_error(&state.db, &job.crate_name, &error_message).await
                 {
                     error!(job_id = job.id, %error, "failed to persist crate refresh error");
                 }

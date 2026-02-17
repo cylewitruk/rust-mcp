@@ -6,22 +6,16 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::db::indexing::{
+    clear_osv_advisory_matches, clear_rustsec_db_advisory_matches, fetch_security_crates_page,
+    fetch_security_versions_for_crate, insert_crate_level_advisory_match,
+    upsert_version_advisory_match,
+};
+use crate::db::models::{CrateLevelAdvisoryMatchInsert, VersionAdvisoryMatchInsert};
 use crate::integration::osv::{
     OsvAffected, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
 };
 use crate::mcp::server::McpServer;
-
-#[derive(Debug, sqlx::FromRow)]
-struct SecurityCrateRow {
-    id: i64,
-    name: String,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct SecurityVersionRow {
-    id: i64,
-    version: String,
-}
 
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct SecuritySyncOutcome {
@@ -281,31 +275,18 @@ impl McpServer {
         limit: u32,
         offset: u32,
     ) -> Result<SecuritySyncOutcome, String> {
-        let crate_rows = sqlx::query_as::<_, SecurityCrateRow>(
-            "SELECT id, name
-             FROM crates
-             ORDER BY updated_at DESC NULLS LAST, id DESC
-             LIMIT $1 OFFSET $2",
-        )
-        .bind(i64::from(limit))
-        .bind(i64::from(offset))
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
+        let crate_rows =
+            fetch_security_crates_page(&self.state.db, i64::from(limit), i64::from(offset))
+                .await
+                .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
 
         let mut outcome = SecuritySyncOutcome::default();
         let osv_client = OsvDevClient::new(&self.state);
 
         for krate in crate_rows {
-            let version_rows = sqlx::query_as::<_, SecurityVersionRow>(
-                "SELECT id, version
-                 FROM crate_versions
-                 WHERE crate_id = $1",
-            )
-            .bind(krate.id)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
+            let version_rows = fetch_security_versions_for_crate(&self.state.db, krate.id)
+                .await
+                .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
 
             let version_map = version_rows
                 .iter()
@@ -328,14 +309,9 @@ impl McpServer {
                 .touched_crates
                 .push(krate.name.clone());
 
-            sqlx::query(
-                "DELETE FROM advisory_matches
-                 WHERE crate_id = $1 AND source IN ('osv', 'rustsec_osv')",
-            )
-            .bind(krate.id)
-            .execute(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to clear OSV advisories for {}: {e}", krate.name))?;
+            clear_osv_advisory_matches(&self.state.db, krate.id)
+                .await
+                .map_err(|e| format!("failed to clear OSV advisories for {}: {e}", krate.name))?;
 
             for vuln in osv.vulns {
                 let (advisory_id, advisory_source) = advisory_identity(&vuln);
@@ -361,70 +337,49 @@ impl McpServer {
                             .copied()
                         {
                             matched_any = true;
-                            sqlx::query(
-                                "INSERT INTO advisory_matches (
-                                    crate_id, version_id, advisory_id, severity, title, url,
-                                                affected_range, fixed_versions, source, created_at
-                                 ) VALUES (
-                                                $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
-                                 )
-                                 ON CONFLICT (crate_id, version_id, advisory_id)
-                                 DO UPDATE SET
-                                    severity = EXCLUDED.severity,
-                                    title = EXCLUDED.title,
-                                    url = EXCLUDED.url,
-                                    affected_range = EXCLUDED.affected_range,
-                                    fixed_versions = EXCLUDED.fixed_versions,
-                                    source = EXCLUDED.source,
-                                    created_at = NOW()",
-                            )
-                            .bind(krate.id)
-                            .bind(version_id)
-                            .bind(&advisory_id)
-                            .bind(severity.as_deref())
-                            .bind(&title)
-                            .bind(url.as_deref())
-                            .bind(&affected_range)
-                            .bind(fixed_versions_json.clone())
-                            .bind(&advisory_source)
-                            .execute(&self.state.db)
-                            .await
-                            .map_err(|e| {
-                                format!(
-                                    "failed to upsert advisory {} for {}@{}: {e}",
-                                    vuln.id, krate.name, version
-                                )
-                            })?;
+                            let insert = VersionAdvisoryMatchInsert {
+                                crate_id: krate.id,
+                                version_id,
+                                advisory_id: &advisory_id,
+                                severity: severity.as_deref(),
+                                title: &title,
+                                url: url.as_deref(),
+                                affected_range: &affected_range,
+                                fixed_versions: &fixed_versions_json,
+                                source: &advisory_source,
+                            };
+                            upsert_version_advisory_match(&self.state.db, &insert)
+                                .await
+                                .map_err(|e| {
+                                    format!(
+                                        "failed to upsert advisory {} for {}@{}: {e}",
+                                        vuln.id, krate.name, version
+                                    )
+                                })?;
                             outcome.advisories_written += 1;
                         }
                     }
                 }
 
                 if !matched_any {
-                    sqlx::query(
-                        "INSERT INTO advisory_matches (
-                            crate_id, version_id, advisory_id, severity, title, url,
-                            affected_range, fixed_versions, source, created_at
-                         ) VALUES (
-                                     $1, NULL, $2, $3, $4, $5, $6, $7, $8, NOW()
-                         )",
-                    )
-                    .bind(krate.id)
-                    .bind(&advisory_id)
-                    .bind(severity.as_deref())
-                    .bind(&title)
-                    .bind(url.as_deref())
-                    .bind(&affected_range)
-                    .bind(fixed_versions_json)
-                    .bind(&advisory_source)
-                    .execute(&self.state.db)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to insert crate-level advisory {} for {}: {e}",
-                            vuln.id, krate.name
-                        )
-                    })?;
+                    let insert = CrateLevelAdvisoryMatchInsert {
+                        crate_id: krate.id,
+                        advisory_id: &advisory_id,
+                        severity: severity.as_deref(),
+                        title: &title,
+                        url: url.as_deref(),
+                        affected_range: &affected_range,
+                        fixed_versions: &fixed_versions_json,
+                        source: &advisory_source,
+                    };
+                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "failed to insert crate-level advisory {} for {}: {e}",
+                                vuln.id, krate.name
+                            )
+                        })?;
                     outcome.advisories_written += 1;
                 }
             }
@@ -447,17 +402,10 @@ impl McpServer {
             return Ok(SecuritySyncOutcome::default());
         };
 
-        let crate_rows = sqlx::query_as::<_, SecurityCrateRow>(
-            "SELECT id, name
-             FROM crates
-             ORDER BY updated_at DESC NULLS LAST, id DESC
-             LIMIT $1 OFFSET $2",
-        )
-        .bind(i64::from(limit))
-        .bind(i64::from(offset))
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("failed to fetch crates for RustSec DB sync: {e}"))?;
+        let crate_rows =
+            fetch_security_crates_page(&self.state.db, i64::from(limit), i64::from(offset))
+                .await
+                .map_err(|e| format!("failed to fetch crates for RustSec DB sync: {e}"))?;
 
         let mut outcome = SecuritySyncOutcome::default();
 
@@ -469,24 +417,15 @@ impl McpServer {
                 continue;
             }
 
-            let version_rows = sqlx::query_as::<_, SecurityVersionRow>(
-                "SELECT id, version
-                 FROM crate_versions
-                 WHERE crate_id = $1",
-            )
-            .bind(krate.id)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
+            let version_rows = fetch_security_versions_for_crate(&self.state.db, krate.id)
+                .await
+                .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
 
-            sqlx::query(
-                "DELETE FROM advisory_matches
-                 WHERE crate_id = $1 AND source = 'rustsec_db'",
-            )
-            .bind(krate.id)
-            .execute(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to clear RustSec advisories for {}: {e}", krate.name))?;
+            clear_rustsec_db_advisory_matches(&self.state.db, krate.id)
+                .await
+                .map_err(|e| {
+                    format!("failed to clear RustSec advisories for {}: {e}", krate.name)
+                })?;
 
             let advisory_files = advisory_markdown_files(&crate_advisories_dir);
             if advisory_files.is_empty() {
@@ -654,6 +593,7 @@ impl McpServer {
 
                 let patched_reqs = parse_version_reqs(&parsed.versions.patched);
                 let unaffected_reqs = parse_version_reqs(&parsed.versions.unaffected);
+                let fixed_versions_json = json!(parsed.versions.patched);
 
                 let mut matched_any = false;
                 for version_row in &version_rows {
@@ -668,66 +608,47 @@ impl McpServer {
                     }
 
                     matched_any = true;
-                    sqlx::query(
-                        "INSERT INTO advisory_matches (
-                            crate_id, version_id, advisory_id, severity, title, url,
-                            affected_range, fixed_versions, source, created_at
-                         ) VALUES (
-                                     $1, $2, $3, $4, $5, $6, $7, $8, 'rustsec_db', NOW()
-                         )
-                         ON CONFLICT (crate_id, version_id, advisory_id)
-                         DO UPDATE SET
-                            severity = EXCLUDED.severity,
-                            title = EXCLUDED.title,
-                            url = EXCLUDED.url,
-                            affected_range = EXCLUDED.affected_range,
-                            fixed_versions = EXCLUDED.fixed_versions,
-                            source = EXCLUDED.source,
-                            created_at = NOW()",
-                    )
-                    .bind(krate.id)
-                    .bind(version_row.id)
-                    .bind(&advisory_id)
-                    .bind(severity.as_deref())
-                    .bind(&title)
-                    .bind(url.as_deref())
-                    .bind(&affected_range)
-                    .bind(json!(parsed.versions.patched))
-                    .execute(&self.state.db)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to upsert RustSec advisory {} for {}@{}: {e}",
-                            advisory_id, krate.name, version_row.version
-                        )
-                    })?;
+                    let insert = VersionAdvisoryMatchInsert {
+                        crate_id: krate.id,
+                        version_id: version_row.id,
+                        advisory_id: &advisory_id,
+                        severity: severity.as_deref(),
+                        title: &title,
+                        url: url.as_deref(),
+                        affected_range: &affected_range,
+                        fixed_versions: &fixed_versions_json,
+                        source: "rustsec_db",
+                    };
+                    upsert_version_advisory_match(&self.state.db, &insert)
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "failed to upsert RustSec advisory {} for {}@{}: {e}",
+                                advisory_id, krate.name, version_row.version
+                            )
+                        })?;
                     outcome.advisories_written += 1;
                 }
 
                 if !matched_any {
-                    sqlx::query(
-                        "INSERT INTO advisory_matches (
-                            crate_id, version_id, advisory_id, severity, title, url,
-                            affected_range, fixed_versions, source, created_at
-                         ) VALUES (
-                                     $1, NULL, $2, $3, $4, $5, $6, $7, 'rustsec_db', NOW()
-                         )",
-                    )
-                    .bind(krate.id)
-                    .bind(&advisory_id)
-                    .bind(severity.as_deref())
-                    .bind(&title)
-                    .bind(url.as_deref())
-                    .bind(&affected_range)
-                    .bind(json!(parsed.versions.patched))
-                    .execute(&self.state.db)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to insert crate-level RustSec advisory {} for {}: {e}",
-                            advisory_id, krate.name
-                        )
-                    })?;
+                    let insert = CrateLevelAdvisoryMatchInsert {
+                        crate_id: krate.id,
+                        advisory_id: &advisory_id,
+                        severity: severity.as_deref(),
+                        title: &title,
+                        url: url.as_deref(),
+                        affected_range: &affected_range,
+                        fixed_versions: &fixed_versions_json,
+                        source: "rustsec_db",
+                    };
+                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "failed to insert crate-level RustSec advisory {} for {}: {e}",
+                                advisory_id, krate.name
+                            )
+                        })?;
                     outcome.advisories_written += 1;
                 }
             }

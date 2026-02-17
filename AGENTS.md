@@ -102,10 +102,12 @@ crates/rust-mcp/
 Common commands:
 
 ```sh
-just fmt
-just lint
-just test
-just e2e-test
+just build          # builds the project
+just fmt            # formats code using the project-specific rustfmt rules
+just lint           # run `cargo clippy` with the correct arguments
+just fix            # attempt to fix clippy lints automatically + run `fmt`
+just test           # runs lib + integration tests (from `tests/integration`)
+just test-e2e       # runs e2e integration tests (from `tests/e2e`)
 ```
 
 Use targeted runs while iterating:

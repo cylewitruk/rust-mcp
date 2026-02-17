@@ -21,7 +21,7 @@ fix:
 test:
   cargo --locked llvm-cov nextest --lcov --output-path ./target/lcov.info --no-fail-fast --all-targets --features integration-tests
 
-e2e-test:
+test-e2e:
   cargo --locked nextest run -p rust-mcp --features e2e-tests --test e2e_http
 
 run:

@@ -13,6 +13,14 @@ use semver::Version;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
+use crate::db::indexing::{
+    fetch_rustdoc_sync_candidates, fetch_source_file_id_required, replace_crate_version_index_rows,
+    upsert_source_file_unconditional,
+};
+use crate::db::models::{
+    IndexedExtractionBatch, IndexedImplInsert, IndexedSymbolInsert, IndexedTraitInsert,
+    IndexedTypeInsert, RustdocSyncCandidateRow,
+};
 use crate::integration::docs_rs::{
     DocsRsClient, decode_docs_rs_rustdoc_payload, docs_rs_rustdoc_synthetic_path,
 };
@@ -44,89 +52,6 @@ struct RustdocCandidate {
     path: PathBuf,
     crate_name: String,
     crate_version: Option<String>,
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct RustdocSyncCandidateRow {
-    crate_name: String,
-    version: String,
-    crate_version_id: i64,
-}
-
-#[derive(Debug)]
-struct ExtractedSymbol {
-    name: String,
-    kind: String,
-    visibility: Option<String>,
-    signature: Option<String>,
-    start_line: i32,
-    end_line: i32,
-    rustdoc_item_id: i32,
-    canonical_path: Option<String>,
-    definition_path: Option<String>,
-    deprecated_since: Option<String>,
-    deprecated_note: Option<String>,
-}
-
-#[derive(Debug)]
-struct ExtractedType {
-    type_name: String,
-    kind: String,
-    visibility: Option<String>,
-    generic_params: serde_json::Value,
-    fields: serde_json::Value,
-    variants: serde_json::Value,
-    start_line: i32,
-    end_line: i32,
-    rustdoc_item_id: i32,
-    canonical_path: Option<String>,
-    definition_path: Option<String>,
-    deprecated_since: Option<String>,
-    deprecated_note: Option<String>,
-    is_non_exhaustive: bool,
-    auto_traits: serde_json::Value,
-    where_clauses: serde_json::Value,
-}
-
-#[derive(Debug)]
-struct ExtractedImpl {
-    type_name: String,
-    type_name_display: Option<String>,
-    trait_name: Option<String>,
-    trait_name_display: Option<String>,
-    impl_kind: String,
-    methods: serde_json::Value,
-    start_line: i32,
-    end_line: i32,
-    rustdoc_item_id: i32,
-    is_blanket: bool,
-    is_synthetic: bool,
-    is_negative: bool,
-    blanket_type: Option<String>,
-    generics: serde_json::Value,
-    where_clauses: serde_json::Value,
-}
-
-#[derive(Debug)]
-struct ExtractedTrait {
-    trait_name: String,
-    is_auto: bool,
-    is_unsafe: bool,
-    is_dyn_compatible: bool,
-    supertraits: serde_json::Value,
-    required_methods: serde_json::Value,
-    provided_methods: serde_json::Value,
-    associated_types: serde_json::Value,
-    generics: serde_json::Value,
-    rustdoc_item_id: i32,
-}
-
-#[derive(Debug)]
-struct RustdocExtraction {
-    symbols: Vec<ExtractedSymbol>,
-    types: Vec<ExtractedType>,
-    impls: Vec<ExtractedImpl>,
-    traits: Vec<ExtractedTrait>,
 }
 
 // ============================================================
@@ -778,7 +703,7 @@ fn collect_auto_traits(impl_ids: &[Id], krate: &RustdocCrate) -> serde_json::Val
 fn extract_symbols(
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> Vec<ExtractedSymbol> {
+) -> Vec<IndexedSymbolInsert> {
     let mut symbols = Vec::new();
 
     for (id, item) in &krate.index {
@@ -798,14 +723,14 @@ fn extract_symbols(
 
         let (start_line, end_line) = extract_span(&item.span);
 
-        symbols.push(ExtractedSymbol {
+        symbols.push(IndexedSymbolInsert {
             name: trimmed.to_string(),
             kind: kind.to_string(),
             visibility: visibility_string(&item.visibility),
             signature: build_signature(item, krate),
             start_line,
             end_line,
-            rustdoc_item_id: id.0 as i32,
+            rustdoc_item_id: Some(id.0 as i32),
             canonical_path: canonical_paths
                 .get(id)
                 .cloned()
@@ -832,7 +757,7 @@ fn extract_symbols(
 fn extract_types(
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> Vec<ExtractedType> {
+) -> Vec<IndexedTypeInsert> {
     let mut types = Vec::new();
 
     for (id, item) in &krate.index {
@@ -858,7 +783,7 @@ fn extract_struct(
     st: &Struct,
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> ExtractedType {
+) -> IndexedTypeInsert {
     let name = item
         .name
         .clone()
@@ -871,7 +796,7 @@ fn extract_struct(
         StructKind::Unit => json!([]),
     };
 
-    ExtractedType {
+    IndexedTypeInsert {
         type_name: name,
         kind: "struct".to_string(),
         visibility: visibility_string(&item.visibility),
@@ -880,7 +805,7 @@ fn extract_struct(
         variants: json!([]),
         start_line,
         end_line,
-        rustdoc_item_id: id.0 as i32,
+        rustdoc_item_id: Some(id.0 as i32),
         canonical_path: canonical_paths
             .get(id)
             .cloned()
@@ -906,7 +831,7 @@ fn extract_enum(
     en: &Enum,
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> ExtractedType {
+) -> IndexedTypeInsert {
     let name = item
         .name
         .clone()
@@ -943,7 +868,7 @@ fn extract_enum(
         })
         .collect();
 
-    ExtractedType {
+    IndexedTypeInsert {
         type_name: name,
         kind: "enum".to_string(),
         visibility: visibility_string(&item.visibility),
@@ -952,7 +877,7 @@ fn extract_enum(
         variants: json!(variants),
         start_line,
         end_line,
-        rustdoc_item_id: id.0 as i32,
+        rustdoc_item_id: Some(id.0 as i32),
         canonical_path: canonical_paths
             .get(id)
             .cloned()
@@ -978,14 +903,14 @@ fn extract_union(
     un: &Union,
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> ExtractedType {
+) -> IndexedTypeInsert {
     let name = item
         .name
         .clone()
         .unwrap_or_default();
     let (start_line, end_line) = extract_span(&item.span);
 
-    ExtractedType {
+    IndexedTypeInsert {
         type_name: name,
         kind: "union".to_string(),
         visibility: visibility_string(&item.visibility),
@@ -994,7 +919,7 @@ fn extract_union(
         variants: json!([]),
         start_line,
         end_line,
-        rustdoc_item_id: id.0 as i32,
+        rustdoc_item_id: Some(id.0 as i32),
         canonical_path: canonical_paths
             .get(id)
             .cloned()
@@ -1020,14 +945,14 @@ fn extract_type_alias(
     ta: &TypeAlias,
     krate: &RustdocCrate,
     canonical_paths: &HashMap<Id, String>,
-) -> ExtractedType {
+) -> IndexedTypeInsert {
     let name = item
         .name
         .clone()
         .unwrap_or_default();
     let (start_line, end_line) = extract_span(&item.span);
 
-    ExtractedType {
+    IndexedTypeInsert {
         type_name: name,
         kind: "type_alias".to_string(),
         visibility: visibility_string(&item.visibility),
@@ -1036,7 +961,7 @@ fn extract_type_alias(
         variants: json!([]),
         start_line,
         end_line,
-        rustdoc_item_id: id.0 as i32,
+        rustdoc_item_id: Some(id.0 as i32),
         canonical_path: canonical_paths
             .get(id)
             .cloned()
@@ -1060,7 +985,7 @@ fn extract_type_alias(
 // Impl extraction
 // ============================================================
 
-fn extract_impls(krate: &RustdocCrate) -> Vec<ExtractedImpl> {
+fn extract_impls(krate: &RustdocCrate) -> Vec<IndexedImplInsert> {
     let mut impls = Vec::new();
 
     for (id, item) in &krate.index {
@@ -1093,7 +1018,7 @@ fn extract_impls(krate: &RustdocCrate) -> Vec<ExtractedImpl> {
             .as_ref()
             .map(|ty| render_type(ty, krate));
 
-        impls.push(ExtractedImpl {
+        impls.push(IndexedImplInsert {
             type_name,
             type_name_display,
             trait_name,
@@ -1102,7 +1027,7 @@ fn extract_impls(krate: &RustdocCrate) -> Vec<ExtractedImpl> {
             methods,
             start_line,
             end_line,
-            rustdoc_item_id: id.0 as i32,
+            rustdoc_item_id: Some(id.0 as i32),
             is_blanket: imp.blanket_impl.is_some(),
             is_synthetic: imp.is_synthetic,
             is_negative: imp.is_negative,
@@ -1184,7 +1109,7 @@ fn extract_impl_methods(item_ids: &[Id], krate: &RustdocCrate) -> serde_json::Va
 // Trait extraction
 // ============================================================
 
-fn extract_traits(krate: &RustdocCrate) -> Vec<ExtractedTrait> {
+fn extract_traits(krate: &RustdocCrate) -> Vec<IndexedTraitInsert> {
     let mut traits = Vec::new();
 
     for (id, item) in &krate.index {
@@ -1203,7 +1128,7 @@ fn extract_traits(krate: &RustdocCrate) -> Vec<ExtractedTrait> {
 
         let (required, provided, assoc_types) = partition_trait_items(&trait_def.items, krate);
 
-        traits.push(ExtractedTrait {
+        traits.push(IndexedTraitInsert {
             trait_name: name.clone(),
             is_auto: trait_def.is_auto,
             is_unsafe: trait_def.is_unsafe,
@@ -1213,7 +1138,7 @@ fn extract_traits(krate: &RustdocCrate) -> Vec<ExtractedTrait> {
             provided_methods: json!(provided),
             associated_types: json!(assoc_types),
             generics: serialize_generic_params(&trait_def.generics.params, krate),
-            rustdoc_item_id: id.0 as i32,
+            rustdoc_item_id: Some(id.0 as i32),
         });
     }
 
@@ -1286,9 +1211,9 @@ fn partition_trait_items(
 // Top-level extraction orchestrator
 // ============================================================
 
-fn extract_all(krate: &RustdocCrate) -> RustdocExtraction {
+fn extract_all(krate: &RustdocCrate) -> IndexedExtractionBatch {
     let canonical_paths = build_canonical_path_map(krate);
-    RustdocExtraction {
+    IndexedExtractionBatch {
         symbols: extract_symbols(krate, &canonical_paths),
         types: extract_types(krate, &canonical_paths),
         impls: extract_impls(krate),
@@ -1332,32 +1257,15 @@ impl McpServer {
         }
 
         let content_bytes = content.as_bytes();
-        sqlx::query(
-            "INSERT INTO source_files (
-                crate_version_id,
-                path,
-                sha256,
-                file_size,
-                language,
-                content,
-                indexed_at
-             ) VALUES (
-                $1, $2, $3, $4, $5, $6, NOW()
-             )
-             ON CONFLICT (crate_version_id, path) DO UPDATE
-             SET sha256 = EXCLUDED.sha256,
-                 file_size = EXCLUDED.file_size,
-                 language = EXCLUDED.language,
-                 content = EXCLUDED.content,
-                 indexed_at = NOW()",
+        upsert_source_file_unconditional(
+            &self.state.db,
+            candidate.crate_version_id,
+            source_path,
+            &file_sha256_hex(content_bytes),
+            content_bytes.len() as i64,
+            Some("rustdoc_json"),
+            content,
         )
-        .bind(candidate.crate_version_id)
-        .bind(source_path)
-        .bind(file_sha256_hex(content_bytes))
-        .bind(content_bytes.len() as i64)
-        .bind(Some("rustdoc_json"))
-        .bind(content)
-        .execute(&self.state.db)
         .await
         .map_err(|e| {
             format!(
@@ -1366,244 +1274,37 @@ impl McpServer {
             )
         })?;
 
-        let source_file_id = sqlx::query_scalar::<_, i64>(
-            "SELECT id
-             FROM source_files
-             WHERE crate_version_id = $1 AND path = $2
-             LIMIT 1",
-        )
-        .bind(candidate.crate_version_id)
-        .bind(source_path)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!(
-                "failed to lookup rustdoc source file id {} for {}@{}: {e}",
-                source_path, candidate.crate_name, candidate.version
-            )
-        })?;
+        let source_file_id =
+            fetch_source_file_id_required(&self.state.db, candidate.crate_version_id, source_path)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "failed to lookup rustdoc source file id {} for {}@{}: {e}",
+                        source_path, candidate.crate_name, candidate.version
+                    )
+                })?;
 
         let extraction = extract_all(&krate);
 
-        let mut tx = self
-            .state
-            .db
-            .begin()
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to begin transaction for rustdoc sync of {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
-
-        let err_ctx = |table: &str| {
+        let write_counts = replace_crate_version_index_rows(
+            &self.state.db,
+            candidate.crate_version_id,
+            source_file_id,
+            "rustdoc_json",
+            &extraction,
+        )
+        .await
+        .map_err(|e| {
             format!(
-                "failed to clear rustdoc {table} for {}@{}",
+                "failed to replace rustdoc extraction rows for {}@{}: {e}",
                 candidate.crate_name, candidate.version
             )
-        };
+        })?;
 
-        sqlx::query(
-            "DELETE FROM symbols
-             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-        )
-        .bind(candidate.crate_version_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("{}: {e}", err_ctx("symbols")))?;
-
-        sqlx::query(
-            "DELETE FROM crate_types
-             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-        )
-        .bind(candidate.crate_version_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("{}: {e}", err_ctx("crate_types")))?;
-
-        sqlx::query(
-            "DELETE FROM crate_impls
-             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-        )
-        .bind(candidate.crate_version_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("{}: {e}", err_ctx("crate_impls")))?;
-
-        sqlx::query(
-            "DELETE FROM crate_traits
-             WHERE crate_version_id = $1 AND index_source = 'rustdoc_json'",
-        )
-        .bind(candidate.crate_version_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("{}: {e}", err_ctx("crate_traits")))?;
-
-        for symbol in &extraction.symbols {
-            sqlx::query(
-                "INSERT INTO symbols (
-                    crate_version_id, source_file_id, name, kind, signature,
-                    visibility, start_line, end_line, index_source, indexed_at,
-                    rustdoc_item_id, canonical_path, definition_path,
-                    deprecated_since, deprecated_note
-                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, 'rustdoc_json', NOW(),
-                    $9, $10, $11, $12, $13
-                 )",
-            )
-            .bind(candidate.crate_version_id)
-            .bind(source_file_id)
-            .bind(&symbol.name)
-            .bind(&symbol.kind)
-            .bind(&symbol.signature)
-            .bind(&symbol.visibility)
-            .bind(symbol.start_line)
-            .bind(symbol.end_line)
-            .bind(symbol.rustdoc_item_id)
-            .bind(&symbol.canonical_path)
-            .bind(&symbol.definition_path)
-            .bind(&symbol.deprecated_since)
-            .bind(&symbol.deprecated_note)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to insert rustdoc symbol for {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
-            outcome.symbols_written += 1;
-        }
-
-        for extracted_type in &extraction.types {
-            sqlx::query(
-                "INSERT INTO crate_types (
-                    crate_version_id, source_file_id, type_name, kind, visibility,
-                    generic_params, fields, variants, start_line, end_line,
-                    index_source, indexed_at,
-                    rustdoc_item_id, canonical_path, definition_path,
-                    deprecated_since, deprecated_note, is_non_exhaustive,
-                    auto_traits, where_clauses
-                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    'rustdoc_json', NOW(),
-                    $11, $12, $13, $14, $15, $16, $17, $18
-                 )",
-            )
-            .bind(candidate.crate_version_id)
-            .bind(source_file_id)
-            .bind(&extracted_type.type_name)
-            .bind(&extracted_type.kind)
-            .bind(&extracted_type.visibility)
-            .bind(&extracted_type.generic_params)
-            .bind(&extracted_type.fields)
-            .bind(&extracted_type.variants)
-            .bind(extracted_type.start_line)
-            .bind(extracted_type.end_line)
-            .bind(extracted_type.rustdoc_item_id)
-            .bind(&extracted_type.canonical_path)
-            .bind(&extracted_type.definition_path)
-            .bind(&extracted_type.deprecated_since)
-            .bind(&extracted_type.deprecated_note)
-            .bind(extracted_type.is_non_exhaustive)
-            .bind(&extracted_type.auto_traits)
-            .bind(&extracted_type.where_clauses)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to insert rustdoc type for {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
-            outcome.types_written += 1;
-        }
-
-        for extracted_impl in &extraction.impls {
-            sqlx::query(
-                "INSERT INTO crate_impls (
-                    crate_version_id, source_file_id, type_name, type_name_display,
-                    trait_name, trait_name_display, impl_kind, methods,
-                    start_line, end_line, index_source, indexed_at,
-                    rustdoc_item_id, is_blanket, is_synthetic, is_negative,
-                    blanket_type, generics, where_clauses
-                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    'rustdoc_json', NOW(),
-                    $11, $12, $13, $14, $15, $16, $17
-                 )",
-            )
-            .bind(candidate.crate_version_id)
-            .bind(source_file_id)
-            .bind(&extracted_impl.type_name)
-            .bind(&extracted_impl.type_name_display)
-            .bind(&extracted_impl.trait_name)
-            .bind(&extracted_impl.trait_name_display)
-            .bind(&extracted_impl.impl_kind)
-            .bind(&extracted_impl.methods)
-            .bind(extracted_impl.start_line)
-            .bind(extracted_impl.end_line)
-            .bind(extracted_impl.rustdoc_item_id)
-            .bind(extracted_impl.is_blanket)
-            .bind(extracted_impl.is_synthetic)
-            .bind(extracted_impl.is_negative)
-            .bind(&extracted_impl.blanket_type)
-            .bind(&extracted_impl.generics)
-            .bind(&extracted_impl.where_clauses)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to insert rustdoc impl for {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
-            outcome.impls_written += 1;
-        }
-
-        for extracted_trait in &extraction.traits {
-            sqlx::query(
-                "INSERT INTO crate_traits (
-                    crate_version_id, trait_name, is_auto, is_unsafe,
-                    is_dyn_compatible, supertraits, required_methods,
-                    provided_methods, associated_types, generics,
-                    index_source, indexed_at, rustdoc_item_id
-                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    'rustdoc_json', NOW(), $11
-                 )",
-            )
-            .bind(candidate.crate_version_id)
-            .bind(&extracted_trait.trait_name)
-            .bind(extracted_trait.is_auto)
-            .bind(extracted_trait.is_unsafe)
-            .bind(extracted_trait.is_dyn_compatible)
-            .bind(&extracted_trait.supertraits)
-            .bind(&extracted_trait.required_methods)
-            .bind(&extracted_trait.provided_methods)
-            .bind(&extracted_trait.associated_types)
-            .bind(&extracted_trait.generics)
-            .bind(extracted_trait.rustdoc_item_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to insert rustdoc trait for {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
-            outcome.traits_written += 1;
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| {
-                format!(
-                    "failed to commit rustdoc sync transaction for {}@{}: {e}",
-                    candidate.crate_name, candidate.version
-                )
-            })?;
+        outcome.symbols_written += write_counts.symbols;
+        outcome.types_written += write_counts.types;
+        outcome.impls_written += write_counts.impls;
+        outcome.traits_written += write_counts.traits;
 
         outcome.synced_versions += 1;
         outcome
@@ -1628,21 +1329,12 @@ impl McpServer {
             .saturating_sub(1)
             .saturating_mul(per_page);
 
-        let candidates = sqlx::query_as::<_, RustdocSyncCandidateRow>(
-            "SELECT
-                c.name AS crate_name,
-                cv.version,
-                cv.id AS crate_version_id
-             FROM crate_versions cv
-             JOIN crates c ON c.id = cv.crate_id
-             WHERE ($1::TEXT IS NULL OR c.name = $1)
-             ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-             LIMIT $2 OFFSET $3",
+        let candidates = fetch_rustdoc_sync_candidates(
+            &self.state.db,
+            crate_filter.as_deref(),
+            i64::from(per_page),
+            i64::from(offset),
         )
-        .bind(crate_filter.as_deref())
-        .bind(i64::from(per_page))
-        .bind(i64::from(offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;
 
@@ -2179,7 +1871,7 @@ mod tests {
             .find(|t| t.type_name == "Foo")
             .unwrap();
         assert_eq!(foo_type.kind, "struct");
-        assert_eq!(foo_type.rustdoc_item_id, 1);
+        assert_eq!(foo_type.rustdoc_item_id, Some(1));
         // Check that fields are populated
         let fields = foo_type
             .fields
@@ -2231,7 +1923,7 @@ mod tests {
         assert!(!my_trait.is_auto);
         assert!(!my_trait.is_unsafe);
         assert!(my_trait.is_dyn_compatible);
-        assert_eq!(my_trait.rustdoc_item_id, 4);
+        assert_eq!(my_trait.rustdoc_item_id, Some(4));
         // Check required vs provided partitioning
         let required = my_trait
             .required_methods

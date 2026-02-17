@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::FromRow;
 use sqlx::types::Json;
 
@@ -43,6 +44,25 @@ pub struct SourceReadRow {
     /// Relative path of the source file in the crate.
     pub path: String,
     /// Full source file contents.
+    pub content: String,
+}
+
+/// Row for reading indexed docs pages for `docs.search`.
+#[derive(Debug, Clone, FromRow)]
+pub struct DocsSearchRow {
+    /// Canonical crate name owning the docs page.
+    pub crate_name: String,
+    /// Semver version selected for the docs page.
+    pub version: String,
+    /// Relative docs path.
+    pub path: String,
+    /// Optional HTML title extracted from the docs page.
+    pub title: Option<String>,
+    /// Optional canonical docs.rs source URL.
+    pub source_url: Option<String>,
+    /// Docs indexing timestamp as text.
+    pub indexed_at: String,
+    /// Normalized searchable page content.
     pub content: String,
 }
 
@@ -254,4 +274,345 @@ pub struct CrateTraitLookupRow {
     pub generics: Json<Vec<GenericParamEntry>>,
     /// Index provenance (`rustdoc_json`, `local_cache`, etc.).
     pub index_source: String,
+}
+
+/// Crate/version key row used to map cargo registry cache directories.
+#[derive(Debug, Clone, FromRow)]
+pub struct LocalCacheVersionKeyRow {
+    /// `<crate>-<version>` directory name in the cargo registry cache.
+    pub cache_dir_name: String,
+    /// Canonical crate name.
+    pub crate_name: String,
+    /// Semver version string.
+    pub version: String,
+    /// Primary key of the crate version row.
+    pub crate_version_id: i64,
+}
+
+/// Crate/version row used when selecting rustdoc JSON sync candidates.
+#[derive(Debug, Clone, FromRow)]
+pub struct RustdocSyncCandidateRow {
+    /// Canonical crate name.
+    pub crate_name: String,
+    /// Semver version string.
+    pub version: String,
+    /// Primary key of the crate version row.
+    pub crate_version_id: i64,
+}
+
+/// Aggregated coverage counters for `index.status`.
+#[derive(Debug, Clone, FromRow)]
+pub struct IndexCoverageCountsRow {
+    /// Total crates stored in the index.
+    pub crates: i64,
+    /// Total crate version rows stored in the index.
+    pub crate_versions: i64,
+    /// Total dependency edges stored in the index.
+    pub dependency_edges: i64,
+    /// Total advisory matches stored in the index.
+    pub advisory_matches: i64,
+    /// Total source files stored in the index.
+    pub source_files: i64,
+    /// Total symbols stored in the index.
+    pub symbols: i64,
+    /// Total docs pages stored in the index.
+    pub docs_pages: i64,
+}
+
+/// Aggregated refresh queue counters for `index.status`.
+#[derive(Debug, Clone, FromRow)]
+pub struct IndexQueueCountsRow {
+    /// Pending jobs ready to run now.
+    pub pending_jobs: i64,
+    /// Pending jobs scheduled for the future.
+    pub delayed_jobs: i64,
+    /// Pending jobs that are retries.
+    pub retrying_jobs: i64,
+    /// Jobs currently marked as running.
+    pub running_jobs: i64,
+    /// Jobs currently marked as failed.
+    pub failed_jobs: i64,
+}
+
+/// Retry-attempt distribution for refresh jobs.
+#[derive(Debug, Clone, FromRow)]
+pub struct RefreshJobRetryDistributionRow {
+    /// In-flight jobs with attempt count 1.
+    pub inflight_attempt_1: i64,
+    /// In-flight jobs with attempt count 2.
+    pub inflight_attempt_2: i64,
+    /// In-flight jobs with attempt count >= 3.
+    pub inflight_attempt_3_plus: i64,
+    /// Failed jobs with attempt count 1.
+    pub failed_attempt_1: i64,
+    /// Failed jobs with attempt count 2.
+    pub failed_attempt_2: i64,
+    /// Failed jobs with attempt count >= 3.
+    pub failed_attempt_3_plus: i64,
+}
+
+/// Failure counts grouped by refresh scope.
+#[derive(Debug, Clone, FromRow)]
+pub struct IndexFailureByScopeRow {
+    /// Refresh scope key (`crate`, `all`, `security`, etc.).
+    pub scope: String,
+    /// Number of failed jobs for this scope.
+    pub failed_jobs: i64,
+}
+
+/// Freshness timestamps used by `index.status`.
+#[derive(Debug, Clone, FromRow)]
+pub struct IndexFreshnessRow {
+    /// Last crate metadata update time.
+    pub crates_updated_at: Option<String>,
+    /// Last source indexing time.
+    pub source_indexed_at: Option<String>,
+    /// Last symbol indexing time.
+    pub symbols_indexed_at: Option<String>,
+    /// Last docs page indexing time.
+    pub docs_indexed_at: Option<String>,
+    /// Last advisory match write time.
+    pub advisories_updated_at: Option<String>,
+}
+
+/// Operational telemetry window aggregates for `index.status`.
+#[derive(Debug, Clone, FromRow)]
+pub struct IndexOperationalMetricsRow {
+    /// Number of tool invocations in the metrics window.
+    pub query_count: i64,
+    /// Mean invocation latency in milliseconds.
+    pub average_latency_ms: Option<f64>,
+    /// Fraction of failed invocations in the metrics window.
+    pub error_rate: Option<f64>,
+    /// Fraction of cache-hit query-cache lookups.
+    pub cache_hit_rate: Option<f64>,
+    /// Estimated staleness in seconds across indexed datasets.
+    pub index_lag_seconds: Option<i64>,
+}
+
+/// Refresh-job queue gauge counters.
+#[derive(Debug, Clone, FromRow)]
+pub struct RefreshJobGaugeCountsRow {
+    /// Pending refresh jobs.
+    pub pending_jobs: i64,
+    /// Running refresh jobs.
+    pub running_jobs: i64,
+    /// Failed refresh jobs.
+    pub failed_jobs: i64,
+}
+
+/// Row returned when claiming the next refresh job.
+#[derive(Debug, Clone, FromRow)]
+pub struct RefreshJobQueueRow {
+    /// Refresh job primary key.
+    pub id: i64,
+    /// Crate name associated with the job.
+    pub crate_name: String,
+    /// Scope key for the refresh operation.
+    pub scope: String,
+    /// Whether dependency sync should be included.
+    pub include_dependencies: bool,
+    /// Serialized payload attached to the job.
+    pub payload: Value,
+    /// Attempt number after claim increment.
+    pub attempts: i32,
+}
+
+/// Crate row used by security indexing sweeps.
+#[derive(Debug, Clone, FromRow)]
+pub struct SecurityCrateRow {
+    /// Crate primary key.
+    pub id: i64,
+    /// Canonical crate name.
+    pub name: String,
+}
+
+/// Crate version row used by security indexing sweeps.
+#[derive(Debug, Clone, FromRow)]
+pub struct SecurityVersionRow {
+    /// Crate version primary key.
+    pub id: i64,
+    /// Semver version string.
+    pub version: String,
+}
+
+/// Insert DTO for upserting a version-specific advisory match.
+#[derive(Debug, Clone, Copy)]
+pub struct VersionAdvisoryMatchInsert<'a> {
+    /// Crate primary key.
+    pub crate_id: i64,
+    /// Crate version primary key.
+    pub version_id: i64,
+    /// Advisory identifier.
+    pub advisory_id: &'a str,
+    /// Optional normalized severity label.
+    pub severity: Option<&'a str>,
+    /// Advisory title/summary text.
+    pub title: &'a str,
+    /// Optional canonical advisory URL.
+    pub url: Option<&'a str>,
+    /// Rendered affected version-range summary.
+    pub affected_range: &'a str,
+    /// JSON array of fixed/patched versions.
+    pub fixed_versions: &'a Value,
+    /// Advisory source label.
+    pub source: &'a str,
+}
+
+/// Insert DTO for writing a crate-level advisory match.
+#[derive(Debug, Clone, Copy)]
+pub struct CrateLevelAdvisoryMatchInsert<'a> {
+    /// Crate primary key.
+    pub crate_id: i64,
+    /// Advisory identifier.
+    pub advisory_id: &'a str,
+    /// Optional normalized severity label.
+    pub severity: Option<&'a str>,
+    /// Advisory title/summary text.
+    pub title: &'a str,
+    /// Optional canonical advisory URL.
+    pub url: Option<&'a str>,
+    /// Rendered affected version-range summary.
+    pub affected_range: &'a str,
+    /// JSON array of fixed/patched versions.
+    pub fixed_versions: &'a Value,
+    /// Advisory source label.
+    pub source: &'a str,
+}
+
+/// Insert DTO for a symbol extracted from source or rustdoc metadata.
+#[derive(Debug, Clone, Default)]
+pub struct IndexedSymbolInsert {
+    /// Symbol identifier as shown to users.
+    pub name: String,
+    /// Symbol kind (`function`, `struct`, `trait`, etc.).
+    pub kind: String,
+    /// Optional rendered visibility marker.
+    pub visibility: Option<String>,
+    /// Optional rendered declaration/signature.
+    pub signature: Option<String>,
+    /// 1-based source start line.
+    pub start_line: i32,
+    /// 1-based source end line.
+    pub end_line: i32,
+    /// Optional rustdoc item id when source is rustdoc JSON.
+    pub rustdoc_item_id: Option<i32>,
+    /// Optional canonical import path.
+    pub canonical_path: Option<String>,
+    /// Optional original definition path.
+    pub definition_path: Option<String>,
+    /// Optional deprecation version marker.
+    pub deprecated_since: Option<String>,
+    /// Optional deprecation note text.
+    pub deprecated_note: Option<String>,
+}
+
+/// Insert DTO for a type definition extracted from source or rustdoc metadata.
+#[derive(Debug, Clone, Default)]
+pub struct IndexedTypeInsert {
+    /// Type name as indexed.
+    pub type_name: String,
+    /// Type kind (`struct`, `enum`, `union`, `type_alias`, etc.).
+    pub kind: String,
+    /// Optional rendered visibility marker.
+    pub visibility: Option<String>,
+    /// Generic parameter payload.
+    pub generic_params: Value,
+    /// Field payload.
+    pub fields: Value,
+    /// Variant payload.
+    pub variants: Value,
+    /// 1-based source start line.
+    pub start_line: i32,
+    /// 1-based source end line.
+    pub end_line: i32,
+    /// Optional rustdoc item id when source is rustdoc JSON.
+    pub rustdoc_item_id: Option<i32>,
+    /// Optional canonical import path.
+    pub canonical_path: Option<String>,
+    /// Optional original definition path.
+    pub definition_path: Option<String>,
+    /// Optional deprecation version marker.
+    pub deprecated_since: Option<String>,
+    /// Optional deprecation note text.
+    pub deprecated_note: Option<String>,
+    /// Whether the type is marked non-exhaustive.
+    pub is_non_exhaustive: bool,
+    /// Auto-trait payload.
+    pub auto_traits: Value,
+    /// Where-clause payload.
+    pub where_clauses: Value,
+}
+
+/// Insert DTO for an impl block extracted from source or rustdoc metadata.
+#[derive(Debug, Clone, Default)]
+pub struct IndexedImplInsert {
+    /// Terminal type name the impl applies to.
+    pub type_name: String,
+    /// Optional rendered display for the implemented type.
+    pub type_name_display: Option<String>,
+    /// Optional trait name for trait impls.
+    pub trait_name: Option<String>,
+    /// Optional rendered trait display.
+    pub trait_name_display: Option<String>,
+    /// Impl kind (`inherent`, `trait`, `derive`, etc.).
+    pub impl_kind: String,
+    /// Method payload for the impl.
+    pub methods: Value,
+    /// 1-based source start line.
+    pub start_line: i32,
+    /// 1-based source end line.
+    pub end_line: i32,
+    /// Optional rustdoc item id when source is rustdoc JSON.
+    pub rustdoc_item_id: Option<i32>,
+    /// Whether this impl is blanket.
+    pub is_blanket: bool,
+    /// Whether this impl is synthetic.
+    pub is_synthetic: bool,
+    /// Whether this impl is negative.
+    pub is_negative: bool,
+    /// Optional blanket target type rendering.
+    pub blanket_type: Option<String>,
+    /// Generic parameter payload for the impl.
+    pub generics: Value,
+    /// Where-clause payload for the impl.
+    pub where_clauses: Value,
+}
+
+/// Insert DTO for a trait definition extracted from source or rustdoc metadata.
+#[derive(Debug, Clone, Default)]
+pub struct IndexedTraitInsert {
+    /// Trait name.
+    pub trait_name: String,
+    /// Whether the trait is auto.
+    pub is_auto: bool,
+    /// Whether the trait is unsafe.
+    pub is_unsafe: bool,
+    /// Whether the trait is dyn-compatible.
+    pub is_dyn_compatible: bool,
+    /// Supertrait payload.
+    pub supertraits: Value,
+    /// Required method payload.
+    pub required_methods: Value,
+    /// Provided method payload.
+    pub provided_methods: Value,
+    /// Associated type payload.
+    pub associated_types: Value,
+    /// Generic parameter payload.
+    pub generics: Value,
+    /// Optional rustdoc item id when source is rustdoc JSON.
+    pub rustdoc_item_id: Option<i32>,
+}
+
+/// Unified extraction batch DTO used by indexers before DB inserts.
+#[derive(Debug, Clone, Default)]
+pub struct IndexedExtractionBatch {
+    /// Extracted symbol inserts.
+    pub symbols: Vec<IndexedSymbolInsert>,
+    /// Extracted type inserts.
+    pub types: Vec<IndexedTypeInsert>,
+    /// Extracted impl inserts.
+    pub impls: Vec<IndexedImplInsert>,
+    /// Extracted trait inserts.
+    pub traits: Vec<IndexedTraitInsert>,
 }

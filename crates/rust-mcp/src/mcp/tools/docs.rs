@@ -2,8 +2,8 @@ use std::collections::{HashSet, VecDeque};
 
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Postgres, QueryBuilder};
 
+use crate::db::{indexing, tools};
 use crate::integration::docs_rs::{DocsRsClient, discover_docs_paths, extract_title, strip_html};
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
@@ -54,24 +54,6 @@ pub struct DocsSearchHit {
     pub snippet: String,
 }
 
-#[derive(Debug, FromRow)]
-pub(crate) struct DocsSearchRow {
-    pub(crate) crate_name: String,
-    pub(crate) version: String,
-    pub(crate) path: String,
-    pub(crate) title: Option<String>,
-    pub(crate) source_url: Option<String>,
-    pub(crate) indexed_at: String,
-    pub(crate) content: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct DocsSyncCandidateRow {
-    pub(crate) crate_name: String,
-    pub(crate) version: String,
-    pub(crate) crate_version_id: i64,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct DocsRefreshOutcome {
     pub(crate) versions_processed: usize,
@@ -118,21 +100,12 @@ impl McpServer {
         let per_page = sync_per_page(per_page);
         let offset = (page.saturating_sub(1)) * per_page;
 
-        let candidates = sqlx::query_as::<_, DocsSyncCandidateRow>(
-            "SELECT
-                c.name AS crate_name,
-                cv.version,
-                cv.id AS crate_version_id
-             FROM crate_versions cv
-             JOIN crates c ON c.id = cv.crate_id
-             WHERE ($1::TEXT IS NULL OR c.name = $1)
-             ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-             LIMIT $2 OFFSET $3",
+        let candidates = indexing::fetch_rustdoc_sync_candidates(
+            &self.state.db,
+            crate_filter.as_deref(),
+            i64::from(per_page),
+            i64::from(offset),
         )
-        .bind(crate_filter.as_deref())
-        .bind(i64::from(per_page))
-        .bind(i64::from(offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;
 
@@ -172,40 +145,21 @@ impl McpServer {
                 let content = strip_html(&html);
                 let source_url = docs_rs.url(&path);
 
-                let rows_affected = sqlx::query(
-                    "INSERT INTO docs_pages (
-                        crate_version_id,
-                        path,
-                        title,
-                        content,
-                        source_url,
-                        indexed_at
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, NOW()
-                     )
-                     ON CONFLICT (crate_version_id, path) DO UPDATE
-                     SET title = EXCLUDED.title,
-                         content = EXCLUDED.content,
-                         source_url = EXCLUDED.source_url,
-                         indexed_at = NOW()
-                     WHERE docs_pages.title IS DISTINCT FROM EXCLUDED.title
-                        OR docs_pages.content IS DISTINCT FROM EXCLUDED.content
-                        OR docs_pages.source_url IS DISTINCT FROM EXCLUDED.source_url",
+                let rows_affected = tools::upsert_docs_page_if_changed(
+                    &self.state.db,
+                    candidate.crate_version_id,
+                    &path,
+                    title.as_deref(),
+                    &content,
+                    Some(source_url.as_str()),
                 )
-                .bind(candidate.crate_version_id)
-                .bind(&path)
-                .bind(title)
-                .bind(content)
-                .bind(source_url)
-                .execute(&self.state.db)
                 .await
                 .map_err(|e| {
                     format!(
                         "failed to upsert docs page {} for {}@{}: {e}",
                         path, candidate.crate_name, candidate.version
                     )
-                })?
-                .rows_affected();
+                })?;
 
                 if rows_affected > 0 {
                     written_any = true;
@@ -268,60 +222,16 @@ impl McpServer {
             return Ok(Json(cached_response));
         }
 
-        let mut qb = QueryBuilder::<Postgres>::new(
-            "SELECT
-                c.name AS crate_name,
-                cv.version,
-                dp.path,
-                dp.title,
-                dp.source_url,
-                dp.indexed_at::TEXT AS indexed_at,
-                dp.content
-             FROM docs_pages dp
-             JOIN crate_versions cv ON cv.id = dp.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id ",
-        );
-
-        let mut has_where = false;
-        if let Some(ref crate_filter) = crate_name {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("c.name = ");
-            qb.push_bind(crate_filter);
-            qb.push(' ');
-        }
-        if let Some(ref version_filter) = version {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("cv.version = ");
-            qb.push_bind(version_filter);
-            qb.push(' ');
-        }
-        if let Some(ref path_filter) = path_prefix {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("dp.path ILIKE ");
-            qb.push_bind(format!("{path_filter}%"));
-            qb.push(' ');
-        }
-
-        qb.push(if has_where { "AND " } else { "WHERE " });
-        qb.push("(dp.content ILIKE ");
-        qb.push_bind(format!("%{query}%"));
-        qb.push(" OR COALESCE(dp.title, '') ILIKE ");
-        qb.push_bind(format!("%{query}%"));
-        qb.push(" OR dp.path ILIKE ");
-        qb.push_bind(format!("%{query}%"));
-        qb.push(") ");
-
-        qb.push("ORDER BY dp.indexed_at DESC, c.name ASC, dp.path ASC LIMIT ");
-        qb.push_bind(i64::from(limit));
-
-        let rows = qb
-            .build_query_as::<DocsSearchRow>()
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("docs.search query failed: {e}"))?;
+        let rows = tools::search_docs_pages(
+            &self.state.db,
+            crate_name.as_deref(),
+            version.as_deref(),
+            path_prefix.as_deref(),
+            &query,
+            i64::from(limit),
+        )
+        .await
+        .map_err(|e| format!("docs.search query failed: {e}"))?;
 
         let hits = rows
             .into_iter()

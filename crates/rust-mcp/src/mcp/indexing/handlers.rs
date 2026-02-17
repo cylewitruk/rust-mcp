@@ -1,10 +1,13 @@
-use std::collections::HashMap;
-
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{FromRow, Postgres, Transaction};
 
+use crate::db::indexing::{
+    enqueue_or_get_refresh_job_id, fetch_index_coverage_counts, fetch_index_failures_by_scope,
+    fetch_index_freshness, fetch_index_operational_metrics_24h, fetch_index_queue_counts,
+    fetch_recent_refresh_job_errors, fetch_refresh_eta_stats, fetch_refresh_job_retry_distribution,
+    persist_crate_sync,
+};
 use crate::integration::crates_io::{
     CratesIoClient, CratesIoCrateDetailResponse, CratesIoSearchResponse,
 };
@@ -171,7 +174,7 @@ pub struct IndexRetryDistribution {
     pub failed_attempt_3_plus: i64,
 }
 
-#[derive(Debug, Serialize, schemars::JsonSchema, FromRow)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct IndexFailureByScope {
     pub scope: String,
     pub failed_jobs: i64,
@@ -186,16 +189,6 @@ fn now_epoch_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default()
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct RetryDistributionRow {
-    inflight_attempt_1: i64,
-    inflight_attempt_2: i64,
-    inflight_attempt_3_plus: i64,
-    failed_attempt_1: i64,
-    failed_attempt_2: i64,
-    failed_attempt_3_plus: i64,
 }
 
 impl McpServer {
@@ -223,21 +216,6 @@ impl McpServer {
                     .first()
                     .map(|v| v.num.clone())
             })
-    }
-
-    async fn ensure_crate_stub(
-        tx: &mut Transaction<'_, Postgres>,
-        crate_name: &str,
-    ) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar::<_, i64>(
-            "INSERT INTO crates (name, categories, keywords, created_at, updated_at)
-             VALUES ($1, '{}'::TEXT[], '{}'::TEXT[], NOW(), NOW())
-             ON CONFLICT (name) DO UPDATE SET updated_at = NOW()
-             RETURNING id",
-        )
-        .bind(crate_name)
-        .fetch_one(&mut **tx)
-        .await
     }
 
     pub(crate) async fn sync_single_crate(
@@ -298,270 +276,21 @@ impl McpServer {
                 .collect(),
         );
 
-        let mut tx = self
-            .state
-            .db
-            .begin()
-            .await
-            .map_err(|e| format!("failed to begin transaction for {crate_name}: {e}"))?;
-
-        let crate_id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO crates (
-                     name, description, repository_url, docs_url, homepage_url, categories, \
-             keywords,
-                     last_checked_at, next_check_at, ttl_hint_seconds, ttl_reason, \
-             last_refresh_error,
-                     created_at, updated_at
-             ) VALUES (
-                     $1, $2, $3, $4, $5, $6, $7,
-                     NOW(), NOW() + INTERVAL '1 day', 86400, 'sync_write', NULL,
-                     NOW(), NOW()
-             )
-             ON CONFLICT (name) DO UPDATE SET
-                description = EXCLUDED.description,
-                repository_url = EXCLUDED.repository_url,
-                docs_url = EXCLUDED.docs_url,
-                homepage_url = EXCLUDED.homepage_url,
-                categories = EXCLUDED.categories,
-                keywords = EXCLUDED.keywords,
-                     last_checked_at = NOW(),
-                     next_check_at = NOW() + INTERVAL '1 day',
-                     ttl_hint_seconds = 86400,
-                     ttl_reason = 'sync_write',
-                     last_refresh_error = NULL,
-                updated_at = NOW()
-             RETURNING id",
+        let persisted = persist_crate_sync(
+            &self.state.db,
+            &detail,
+            selected_version.as_deref(),
+            readme.as_deref(),
+            dependencies.as_deref(),
+            &categories,
+            &keywords,
         )
-        .bind(&detail.krate.name)
-        .bind(
-            detail
-                .krate
-                .description
-                .as_deref(),
-        )
-        .bind(
-            detail
-                .krate
-                .repository
-                .as_deref(),
-        )
-        .bind(
-            detail
-                .krate
-                .documentation
-                .as_deref(),
-        )
-        .bind(
-            detail
-                .krate
-                .homepage
-                .as_deref(),
-        )
-        .bind(&categories)
-        .bind(&keywords)
-        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| format!("failed to upsert crate {crate_name}: {e}"))?;
-
-        let mut version_ids = HashMap::new();
-        for version in &detail.versions {
-            let published_at = version
-                .created_at
-                .clone()
-                .or(version.updated_at.clone());
-            let version_id = sqlx::query_scalar::<_, i64>(
-                "INSERT INTO crate_versions (
-                    crate_id, version, published_at, yanked, total_downloads, rust_version, \
-                 checksum, license_expression, created_at, updated_at
-                 ) VALUES (
-                          $1, $2, $3::timestamptz, $4, $5, $6, $7, $8, NOW(), NOW()
-                 )
-                 ON CONFLICT (crate_id, version) DO UPDATE SET
-                    published_at = COALESCE(EXCLUDED.published_at, crate_versions.published_at),
-                    yanked = EXCLUDED.yanked,
-                    total_downloads = EXCLUDED.total_downloads,
-                    rust_version = COALESCE(EXCLUDED.rust_version, crate_versions.rust_version),
-                    checksum = COALESCE(EXCLUDED.checksum, crate_versions.checksum),
-                          license_expression = COALESCE(
-                                EXCLUDED.license_expression,
-                                crate_versions.license_expression
-                          ),
-                    updated_at = NOW()
-                 RETURNING id",
-            )
-            .bind(crate_id)
-            .bind(&version.num)
-            .bind(published_at)
-            .bind(version.yanked)
-            .bind(
-                version
-                    .downloads
-                    .unwrap_or_default(),
-            )
-            .bind(
-                version
-                    .rust_version
-                    .as_deref(),
-            )
-            .bind(version.checksum.as_deref())
-            .bind(version.license.as_deref())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| {
-                format!("failed to upsert version {} for {crate_name}: {e}", version.num)
-            })?;
-
-            sqlx::query("DELETE FROM crate_version_features WHERE crate_version_id = $1")
-                .bind(version_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to clear feature flags for {}@{}: {e}",
-                        detail.krate.name, version.num
-                    )
-                })?;
-
-            for (feature_name, enables) in &version.features {
-                if feature_name.trim().is_empty() {
-                    continue;
-                }
-
-                let enables_json = Value::Array(
-                    enables
-                        .iter()
-                        .map(|value| Value::String(value.trim().to_string()))
-                        .filter(|value| {
-                            value
-                                .as_str()
-                                .map(|text| !text.is_empty())
-                                .unwrap_or(false)
-                        })
-                        .collect::<Vec<_>>(),
-                );
-
-                sqlx::query(
-                    "INSERT INTO crate_version_features (
-                        crate_version_id,
-                        feature_name,
-                        enables,
-                        created_at,
-                        updated_at
-                     ) VALUES (
-                        $1, $2, $3, NOW(), NOW()
-                     )",
-                )
-                .bind(version_id)
-                .bind(feature_name.trim())
-                .bind(enables_json)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to persist feature '{}' for {}@{}: {e}",
-                        feature_name, detail.krate.name, version.num
-                    )
-                })?;
-            }
-
-            version_ids.insert(version.num.clone(), version_id);
-        }
-
-        let mut dependencies_synced = 0_usize;
-        if let Some(selected_version_name) = selected_version.as_deref()
-            && let Some(selected_version_id) = version_ids
-                .get(selected_version_name)
-                .copied()
-        {
-            if let Some(readme_text) = readme {
-                sqlx::query(
-                    "UPDATE crate_versions SET readme = $1, updated_at = NOW() WHERE id = $2",
-                )
-                .bind(readme_text)
-                .bind(selected_version_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to store readme for {}@{}: {e}",
-                        detail.krate.name, selected_version_name
-                    )
-                })?;
-            }
-
-            if let Some(dependencies) = dependencies {
-                sqlx::query("DELETE FROM dependency_edges WHERE from_version_id = $1")
-                    .bind(selected_version_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to clear dependencies for {}@{}: {e}",
-                            detail.krate.name, selected_version_name
-                        )
-                    })?;
-
-                for dependency in dependencies {
-                    let dependency_name = dependency.crate_id.trim();
-                    if dependency_name.is_empty() {
-                        continue;
-                    }
-
-                    let to_crate_id = Self::ensure_crate_stub(&mut tx, dependency_name)
-                        .await
-                        .map_err(|e| {
-                            format!(
-                                "failed to ensure dependency crate {} for {}@{}: {e}",
-                                dependency_name, detail.krate.name, selected_version_name
-                            )
-                        })?;
-
-                    let features = Value::Array(
-                        dependency
-                            .features
-                            .into_iter()
-                            .map(Value::String)
-                            .collect::<Vec<_>>(),
-                    );
-                    let dependency_kind = dependency
-                        .kind
-                        .unwrap_or_else(|| "normal".to_string());
-
-                    sqlx::query(
-                        "INSERT INTO dependency_edges (
-                            from_version_id, to_crate_id, requirement, dependency_kind, optional, \
-                         features, created_at
-                         ) VALUES (
-                            $1, $2, $3, $4, $5, $6, NOW()
-                         )",
-                    )
-                    .bind(selected_version_id)
-                    .bind(to_crate_id)
-                    .bind(dependency.req)
-                    .bind(dependency_kind)
-                    .bind(dependency.optional)
-                    .bind(features)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| {
-                        format!(
-                            "failed to insert dependency edge for {}@{}: {e}",
-                            detail.krate.name, selected_version_name
-                        )
-                    })?;
-
-                    dependencies_synced += 1;
-                }
-            }
-        }
-
-        tx.commit()
-            .await
-            .map_err(|e| format!("failed to commit sync for {crate_name}: {e}"))?;
+        .map_err(|e| format!("failed to persist sync for {crate_name}: {e}"))?;
 
         Ok(SyncCrateOutcome {
-            versions_synced: detail.versions.len(),
-            dependencies_synced,
+            versions_synced: persisted.versions_synced,
+            dependencies_synced: persisted.dependencies_synced,
             selected_version,
         })
     }
@@ -574,36 +303,14 @@ impl McpServer {
         include_dependencies: bool,
         payload: Value,
     ) -> Result<String, String> {
-        if let Some(existing_id) = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT id
-             FROM refresh_jobs
-             WHERE crate_name = $1 AND scope = $2 AND status IN ('pending', 'running')
-             ORDER BY id ASC
-             LIMIT 1",
+        let job_id = enqueue_or_get_refresh_job_id(
+            &self.state.db,
+            crate_name,
+            scope,
+            priority,
+            include_dependencies,
+            payload,
         )
-        .bind(crate_name)
-        .bind(scope)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("failed to query existing refresh job for {crate_name}: {e}"))?
-        {
-            return Ok(format!("refresh-job-{existing_id}"));
-        }
-
-        let job_id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO refresh_jobs (
-                crate_name, scope, priority, status, include_dependencies, payload, requested_at
-             ) VALUES (
-                $1, $2, $3, 'pending', $4, $5, NOW()
-             )
-             RETURNING id",
-        )
-        .bind(crate_name)
-        .bind(scope)
-        .bind(priority)
-        .bind(include_dependencies)
-        .bind(payload)
-        .fetch_one(&self.state.db)
         .await
         .map_err(|e| format!("failed to enqueue refresh job for {crate_name}: {e}"))?;
 
@@ -697,234 +404,65 @@ impl McpServer {
         &self,
         _request: IndexStatusRequest,
     ) -> Result<Json<IndexStatusResponse>, String> {
-        let crates = sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM crates")
-            .fetch_one(&self.state.db)
+        let coverage = fetch_index_coverage_counts(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to count crates: {e}"))?;
-        let crate_versions =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM crate_versions")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to count crate_versions: {e}"))?;
-        let dependency_edges =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM dependency_edges")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to count dependency_edges: {e}"))?;
-        let advisory_matches =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM advisory_matches")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to count advisory_matches: {e}"))?;
-        let source_files =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM source_files")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to count source_files: {e}"))?;
-        let symbols = sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM symbols")
-            .fetch_one(&self.state.db)
+            .map_err(|e| format!("index.status failed to load coverage: {e}"))?;
+        let queue = fetch_index_queue_counts(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to count symbols: {e}"))?;
-        let docs_pages = sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::BIGINT FROM docs_pages")
-            .fetch_one(&self.state.db)
+            .map_err(|e| format!("index.status failed to load queue counters: {e}"))?;
+        let retry_distribution = fetch_refresh_job_retry_distribution(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to count docs_pages: {e}"))?;
-
-        let pending_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at \
-             <= NOW()",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to count pending jobs: {e}"))?;
-        let delayed_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND requested_at \
-             > NOW()",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to count pending jobs: {e}"))?;
-        let retrying_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'pending' AND attempts > 0",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to count retrying jobs: {e}"))?;
-        let running_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'running'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to count running jobs: {e}"))?;
-        let failed_jobs = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT FROM refresh_jobs WHERE status = 'failed'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to count failed jobs: {e}"))?;
-
-        let retry_distribution = sqlx::query_as::<_, RetryDistributionRow>(
-            "SELECT
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 1)::BIGINT \
-             AS inflight_attempt_1,
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts = 2)::BIGINT \
-             AS inflight_attempt_2,
-                COUNT(*) FILTER (WHERE status IN ('pending', 'running') AND attempts >= 3)::BIGINT \
-             AS inflight_attempt_3_plus,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 1)::BIGINT AS \
-             failed_attempt_1,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts = 2)::BIGINT AS \
-             failed_attempt_2,
-                COUNT(*) FILTER (WHERE status = 'failed' AND attempts >= 3)::BIGINT AS \
-             failed_attempt_3_plus
-             FROM refresh_jobs",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute retry distribution: {e}"))?;
-
-        let failures_by_scope = sqlx::query_as::<_, IndexFailureByScope>(
-            "SELECT
-                scope,
-                COUNT(*)::BIGINT AS failed_jobs
-             FROM refresh_jobs
-             WHERE status = 'failed'
-             GROUP BY scope
-             ORDER BY failed_jobs DESC, scope ASC",
-        )
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute failure-by-scope: {e}"))?;
-
-        let last_errors = sqlx::query_scalar::<_, String>(
-            "SELECT last_error
-             FROM refresh_jobs
-             WHERE last_error IS NOT NULL AND last_error <> ''
-             ORDER BY finished_at DESC NULLS LAST, id DESC
-             LIMIT 10",
-        )
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to fetch job errors: {e}"))?;
-
-        let crates_updated_at =
-            sqlx::query_scalar::<_, Option<String>>("SELECT MAX(updated_at)::TEXT FROM crates")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to read crates freshness: {e}"))?;
-        let source_indexed_at = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT MAX(indexed_at)::TEXT FROM source_files",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to read source freshness: {e}"))?;
-        let symbols_indexed_at =
-            sqlx::query_scalar::<_, Option<String>>("SELECT MAX(indexed_at)::TEXT FROM symbols")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to read symbol freshness: {e}"))?;
-        let docs_indexed_at =
-            sqlx::query_scalar::<_, Option<String>>("SELECT MAX(indexed_at)::TEXT FROM docs_pages")
-                .fetch_one(&self.state.db)
-                .await
-                .map_err(|e| format!("index.status failed to read docs freshness: {e}"))?;
-        let advisories_updated_at = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT MAX(created_at)::TEXT FROM advisory_matches",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to read advisory freshness: {e}"))?;
-
-        let query_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT
-             FROM tool_invocations
-             WHERE created_at >= NOW() - INTERVAL '24 hours'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute query_count: {e}"))?;
-
-        let average_latency_ms = sqlx::query_scalar::<_, Option<f64>>(
-            "SELECT AVG(latency_ms)::DOUBLE PRECISION
-             FROM tool_invocations
-             WHERE created_at >= NOW() - INTERVAL '24 hours'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute average latency: {e}"))?;
-
-        let error_rate = sqlx::query_scalar::<_, Option<f64>>(
-            "SELECT
-                CASE WHEN COUNT(*) = 0 THEN NULL
-                     ELSE (COUNT(*) FILTER (WHERE success = FALSE))::DOUBLE PRECISION / COUNT(*)
-                END
-             FROM tool_invocations
-             WHERE created_at >= NOW() - INTERVAL '24 hours'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute error_rate: {e}"))?;
-
-        let cache_hit_rate = sqlx::query_scalar::<_, Option<f64>>(
-            "SELECT
-                CASE WHEN COUNT(*) = 0 THEN NULL
-                     ELSE (COUNT(*) FILTER (WHERE hit = TRUE))::DOUBLE PRECISION / COUNT(*)
-                END
-             FROM query_cache_events
-             WHERE created_at >= NOW() - INTERVAL '24 hours'",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute cache_hit_rate: {e}"))?;
-
-        let index_lag_seconds = sqlx::query_scalar::<_, Option<i64>>(
-            "WITH latest AS (
-                 SELECT GREATEST(
-                     COALESCE((SELECT MAX(updated_at) FROM crates), TO_TIMESTAMP(0)),
-                     COALESCE((SELECT MAX(indexed_at) FROM source_files), TO_TIMESTAMP(0)),
-                     COALESCE((SELECT MAX(indexed_at) FROM symbols), TO_TIMESTAMP(0)),
-                     COALESCE((SELECT MAX(indexed_at) FROM docs_pages), TO_TIMESTAMP(0)),
-                     COALESCE((SELECT MAX(created_at) FROM advisory_matches), TO_TIMESTAMP(0))
-                 ) AS latest_ts
-             )
-             SELECT EXTRACT(EPOCH FROM (NOW() - latest_ts))::BIGINT
-             FROM latest",
-        )
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.status failed to compute index_lag_seconds: {e}"))?;
+            .map_err(|e| format!("index.status failed to compute retry distribution: {e}"))?;
+        let failures_by_scope = fetch_index_failures_by_scope(&self.state.db)
+            .await
+            .map_err(|e| format!("index.status failed to compute failure-by-scope: {e}"))?
+            .into_iter()
+            .map(|row| IndexFailureByScope {
+                scope: row.scope,
+                failed_jobs: row.failed_jobs,
+            })
+            .collect::<Vec<_>>();
+        let last_errors = fetch_recent_refresh_job_errors(&self.state.db, 10)
+            .await
+            .map_err(|e| format!("index.status failed to fetch job errors: {e}"))?;
+        let freshness = fetch_index_freshness(&self.state.db)
+            .await
+            .map_err(|e| format!("index.status failed to load freshness: {e}"))?;
+        let operational = fetch_index_operational_metrics_24h(&self.state.db)
+            .await
+            .map_err(|e| format!("index.status failed to load operational metrics: {e}"))?;
 
         Ok(Json(IndexStatusResponse {
             freshness: IndexFreshness {
-                crates_updated_at,
-                source_indexed_at,
-                symbols_indexed_at,
-                docs_indexed_at,
-                advisories_updated_at,
+                crates_updated_at: freshness.crates_updated_at,
+                source_indexed_at: freshness.source_indexed_at,
+                symbols_indexed_at: freshness.symbols_indexed_at,
+                docs_indexed_at: freshness.docs_indexed_at,
+                advisories_updated_at: freshness.advisories_updated_at,
             },
             coverage: IndexCoverage {
-                crates,
-                crate_versions,
-                dependency_edges,
-                advisory_matches,
-                source_files,
-                symbols,
-                docs_pages,
+                crates: coverage.crates,
+                crate_versions: coverage.crate_versions,
+                dependency_edges: coverage.dependency_edges,
+                advisory_matches: coverage.advisory_matches,
+                source_files: coverage.source_files,
+                symbols: coverage.symbols,
+                docs_pages: coverage.docs_pages,
             },
             operational_metrics: IndexOperationalMetrics {
                 window: "24h".to_string(),
-                query_count,
-                average_latency_ms,
-                error_rate,
-                cache_hit_rate,
-                index_lag_seconds,
+                query_count: operational.query_count,
+                average_latency_ms: operational.average_latency_ms,
+                error_rate: operational.error_rate,
+                cache_hit_rate: operational.cache_hit_rate,
+                index_lag_seconds: operational.index_lag_seconds,
             },
             queue: IndexQueue {
-                pending_jobs,
-                delayed_jobs,
-                retrying_jobs,
-                running_jobs,
-                failed_jobs,
+                pending_jobs: queue.pending_jobs,
+                delayed_jobs: queue.delayed_jobs,
+                retrying_jobs: queue.retrying_jobs,
+                running_jobs: queue.running_jobs,
+                failed_jobs: queue.failed_jobs,
             },
             retry_distribution: IndexRetryDistribution {
                 inflight_attempt_1: retry_distribution.inflight_attempt_1,
@@ -953,21 +491,9 @@ impl McpServer {
             IndexRefreshScope::RustdocJson => "rustdoc_json",
         };
 
-        let (sample_count, average_seconds) = sqlx::query_as::<_, (i64, Option<f64>)>(
-            "SELECT
-                COUNT(*)::BIGINT,
-                AVG(EXTRACT(EPOCH FROM (finished_at - started_at)))::DOUBLE PRECISION
-             FROM refresh_jobs
-             WHERE scope = $1
-               AND status = 'finished'
-               AND started_at IS NOT NULL
-               AND finished_at IS NOT NULL
-               AND finished_at >= NOW() - INTERVAL '30 days'",
-        )
-        .bind(scope_key)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("index.refresh ETA estimate failed for scope {scope_key}: {e}"))?;
+        let (sample_count, average_seconds) = fetch_refresh_eta_stats(&self.state.db, scope_key)
+            .await
+            .map_err(|e| format!("index.refresh ETA estimate failed for scope {scope_key}: {e}"))?;
 
         if sample_count < 3 {
             return Ok(None);

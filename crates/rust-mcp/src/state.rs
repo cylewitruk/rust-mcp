@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::config::Config;
+use crate::db::tools;
 
 /// Shared application state used by HTTP and MCP handlers.
 #[derive(Debug, Clone)]
@@ -135,9 +136,6 @@ impl AppState {
 
     /// Executes a lightweight readiness check against the database.
     pub async fn readiness_check(&self) -> Result<(), sqlx::Error> {
-        sqlx::query_scalar::<_, i64>("SELECT 1::BIGINT")
-            .fetch_one(&self.db)
-            .await?;
-        Ok(())
+        tools::run_readiness_probe(&self.db).await
     }
 }
