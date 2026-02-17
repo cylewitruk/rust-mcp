@@ -5,8 +5,7 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner as _;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt as _};
 
-const DEFAULT_POSTGRES_IMAGE_TAG: &str = "18-alpine";
-const POSTGRES_IMAGE_TAG_ENV: &str = "RUST_MCP_TEST_POSTGRES_TAG";
+use crate::env;
 
 /// Running Postgres test container plus its connection URL.
 #[derive(Debug)]
@@ -18,10 +17,8 @@ pub struct PostgresTestContainer {
 impl PostgresTestContainer {
     /// Starts a Postgres test container and returns its connection details.
     pub async fn start() -> Result<Self> {
-        let image_tag = std::env::var(POSTGRES_IMAGE_TAG_ENV)
-            .ok()
-            .filter(|tag| !tag.trim().is_empty())
-            .unwrap_or_else(|| DEFAULT_POSTGRES_IMAGE_TAG.to_string());
+        let image_tag = env::optional_env_non_empty(env::vars::RUST_MCP_TEST_POSTGRES_TAG)
+            .unwrap_or_else(|| env::defaults::POSTGRES_IMAGE_TAG.to_string());
 
         let container = Postgres::default()
             .with_user("postgres")

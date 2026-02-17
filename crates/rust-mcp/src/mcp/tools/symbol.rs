@@ -1,8 +1,8 @@
 use base64::Engine as _;
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Postgres, QueryBuilder};
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, symbol_search_limit, sync_page};
@@ -63,22 +63,6 @@ pub struct SymbolSearchHit {
     pub end_line: i32,
     pub index_source: String,
     pub indexed_at: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct SymbolSearchRow {
-    pub(crate) _symbol_id: i64,
-    pub(crate) crate_name: String,
-    pub(crate) version: String,
-    pub(crate) source_path: String,
-    pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) signature: Option<String>,
-    pub(crate) visibility: Option<String>,
-    pub(crate) start_line: i32,
-    pub(crate) end_line: i32,
-    pub(crate) index_source: String,
-    pub(crate) indexed_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -178,191 +162,28 @@ impl McpServer {
             ((page - 1) * requested_limit, requested_limit, page)
         };
 
-        let mut count_qb = QueryBuilder::<Postgres>::new(if collapse_by_canonical {
-            "SELECT COUNT(DISTINCT (c.name, sf.path, s.name, s.kind))::BIGINT
-             FROM symbols s
-             JOIN crate_versions cv ON cv.id = s.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id
-             JOIN source_files sf ON sf.id = s.source_file_id "
-        } else {
-            "SELECT COUNT(*)::BIGINT
-             FROM symbols s
-             JOIN crate_versions cv ON cv.id = s.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id
-             JOIN source_files sf ON sf.id = s.source_file_id "
-        });
+        let filters = tools::SymbolSearchFilters {
+            query: &query,
+            crate_name: crate_name.as_deref(),
+            version: version.as_deref(),
+            kind: kind.as_deref(),
+            include_all_versions,
+            collapse_by_canonical,
+        };
 
-        let mut has_where = false;
-        if let Some(ref crate_filter) = crate_name {
-            count_qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            count_qb.push("c.name = ");
-            count_qb.push_bind(crate_filter);
-            count_qb.push(' ');
-        }
-
-        if let Some(ref version_filter) = version {
-            count_qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            count_qb.push("cv.version = ");
-            count_qb.push_bind(version_filter);
-            count_qb.push(' ');
-        }
-
-        if let Some(ref kind_filter) = kind {
-            count_qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            count_qb.push("s.kind = ");
-            count_qb.push_bind(kind_filter);
-            count_qb.push(' ');
-        }
-
-        count_qb.push(if has_where { "AND " } else { "WHERE " });
-        has_where = true;
-        count_qb.push("s.name ILIKE ");
-        count_qb.push_bind(format!("%{query}%"));
-        count_qb.push(' ');
-
-        if version.is_none() && !include_all_versions {
-            count_qb.push(if has_where { "AND " } else { "WHERE " });
-            count_qb.push(
-                "cv.id = (
-                    SELECT cv2.id
-                    FROM crate_versions cv2
-                    WHERE cv2.crate_id = c.id
-                    ORDER BY cv2.published_at DESC NULLS LAST, cv2.id DESC
-                    LIMIT 1
-                 ) ",
-            );
-        }
-
-        let total_count = count_qb
-            .build_query_scalar::<i64>()
-            .fetch_one(&self.state.db)
+        let total_count = tools::count_symbol_search_hits(&self.state.db, &filters)
             .await
             .map_err(|e| format!("symbol.search count query failed: {e}"))?
             .max(0) as usize;
 
-        let mut qb = QueryBuilder::<Postgres>::new(if collapse_by_canonical {
-            "SELECT DISTINCT ON (c.name, sf.path, s.name, s.kind)
-                s.id AS _symbol_id,
-                c.name AS crate_name,
-                cv.version,
-                sf.path AS source_path,
-                s.name,
-                s.kind,
-                s.signature,
-                s.visibility,
-                s.start_line,
-                s.end_line,
-                s.index_source,
-                s.indexed_at::TEXT AS indexed_at
-             FROM symbols s
-             JOIN crate_versions cv ON cv.id = s.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id
-             JOIN source_files sf ON sf.id = s.source_file_id "
-        } else {
-            "SELECT
-                s.id AS _symbol_id,
-                c.name AS crate_name,
-                cv.version,
-                sf.path AS source_path,
-                s.name,
-                s.kind,
-                s.signature,
-                s.visibility,
-                s.start_line,
-                s.end_line,
-                s.index_source,
-                s.indexed_at::TEXT AS indexed_at
-             FROM symbols s
-             JOIN crate_versions cv ON cv.id = s.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id
-             JOIN source_files sf ON sf.id = s.source_file_id "
-        });
-
-        let mut has_where = false;
-        if let Some(ref crate_filter) = crate_name {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("c.name = ");
-            qb.push_bind(crate_filter);
-            qb.push(' ');
-        }
-
-        if let Some(ref version_filter) = version {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("cv.version = ");
-            qb.push_bind(version_filter);
-            qb.push(' ');
-        }
-
-        if let Some(ref kind_filter) = kind {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("s.kind = ");
-            qb.push_bind(kind_filter);
-            qb.push(' ');
-        }
-
-        qb.push(if has_where { "AND " } else { "WHERE " });
-        has_where = true;
-        qb.push("s.name ILIKE ");
-        qb.push_bind(format!("%{query}%"));
-        qb.push(' ');
-
-        if version.is_none() && !include_all_versions {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            qb.push(
-                "cv.id = (
-                    SELECT cv2.id
-                    FROM crate_versions cv2
-                    WHERE cv2.crate_id = c.id
-                    ORDER BY cv2.published_at DESC NULLS LAST, cv2.id DESC
-                    LIMIT 1
-                 ) ",
-            );
-        }
-
-        if collapse_by_canonical {
-            qb.push(
-                "ORDER BY
-                c.name ASC,
-                sf.path ASC,
-                s.name ASC,
-                s.kind ASC,
-                cv.published_at DESC NULLS LAST,
-                cv.id DESC,
-                s.start_line ASC,
-                s.end_line ASC,
-                s.id ASC
-             LIMIT ",
-            );
-        } else {
-            qb.push(
-                "ORDER BY
-                c.name ASC,
-                cv.published_at DESC NULLS LAST,
-                cv.id DESC,
-                s.name ASC,
-                s.kind ASC,
-                sf.path ASC,
-                s.start_line ASC,
-                s.end_line ASC,
-                s.id ASC
-             LIMIT ",
-            );
-        }
-        qb.push_bind(i64::from(limit));
-        qb.push(" OFFSET ");
-        qb.push_bind(i64::from(offset));
-
-        let rows = qb
-            .build_query_as::<SymbolSearchRow>()
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("symbol.search query failed: {e}"))?;
+        let rows = tools::search_symbol_hits(
+            &self.state.db,
+            &filters,
+            i64::from(limit),
+            i64::from(offset),
+        )
+        .await
+        .map_err(|e| format!("symbol.search query failed: {e}"))?;
 
         let hits = rows
             .into_iter()
@@ -454,59 +275,128 @@ impl McpServer {
 
 #[cfg(test)]
 mod tests {
-    use std::env;
-    use std::net::SocketAddr;
-    use std::path::PathBuf;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use sqlx::PgPool;
     use sqlx::postgres::PgPoolOptions;
 
     use super::*;
-    use crate::config::{Config, LogFormat, TransportMode};
+    use crate::config::Config;
+    use crate::db::indexing;
+    use crate::db::models::{IndexedExtractionBatch, IndexedSymbolInsert};
+    use crate::integration::crates_io::{
+        CratesIoCrateDetailResponse, CratesIoCrateRecord, CratesIoVersionRecord,
+    };
     use crate::state::AppState;
 
-    fn test_config(database_url: String) -> Config {
-        Config {
-            mcp_transport: TransportMode::Http,
-            http_bind: "127.0.0.1:43173"
-                .parse::<SocketAddr>()
-                .expect("valid socket address"),
-            mcp_sse_keep_alive_secs: 15,
-            mcp_sse_retry_ms: 3000,
-            database_url,
-            crates_io_base_url: "https://crates.io".to_string(),
-            crates_io_user_agent: "rust-mcp/test".to_string(),
-            crates_io_timeout_secs: 5,
-            crates_io_min_interval_ms: 1,
-            docs_rs_base_url: "https://docs.rs".to_string(),
-            docs_rs_min_interval_ms: 1,
-            osv_min_interval_ms: 1,
-            database_min_connections: 1,
-            database_max_connections: 2,
-            max_concurrent_requests: 16,
-            auto_migrate: false,
-            cargo_registry_dir: PathBuf::from("/tmp"),
-            data_dir: PathBuf::from("/tmp"),
-            rustsec_db_dir: None,
-            rustdoc_json_dir: None,
-            prometheus_bind: "127.0.0.1:9090"
-                .parse::<SocketAddr>()
-                .expect("valid socket address"),
-            rust_log: "warn".to_string(),
-            log_format: LogFormat::Pretty,
+    async fn seed_symbol_collapse_fixture(pool: &PgPool, crate_name: &str) -> i64 {
+        let detail = CratesIoCrateDetailResponse {
+            krate: CratesIoCrateRecord {
+                name: crate_name.to_string(),
+                description: Some("symbol collapse test".to_string()),
+                repository: None,
+                documentation: None,
+                homepage: None,
+                max_version: Some("2.0.0".to_string()),
+            },
+            versions: vec![
+                CratesIoVersionRecord {
+                    num: "1.0.0".to_string(),
+                    created_at: Some("2024-01-01T00:00:00Z".to_string()),
+                    updated_at: None,
+                    yanked: false,
+                    downloads: Some(10),
+                    checksum: Some("checksum-v1".to_string()),
+                    rust_version: None,
+                    license: None,
+                    features: BTreeMap::new(),
+                },
+                CratesIoVersionRecord {
+                    num: "2.0.0".to_string(),
+                    created_at: Some("2025-01-01T00:00:00Z".to_string()),
+                    updated_at: None,
+                    yanked: false,
+                    downloads: Some(20),
+                    checksum: Some("checksum-v2".to_string()),
+                    rust_version: None,
+                    license: None,
+                    features: BTreeMap::new(),
+                },
+            ],
+            keywords: vec![],
+            categories: vec![],
+        };
+
+        let categories = Vec::<String>::new();
+        let keywords = Vec::<String>::new();
+        indexing::persist_crate_sync(pool, &detail, None, None, None, &categories, &keywords)
+            .await
+            .expect("persist crate fixture");
+
+        let crate_row = tools::fetch_crate_core_by_name(pool, crate_name)
+            .await
+            .expect("load crate fixture")
+            .expect("crate fixture exists");
+
+        for (version, sha) in [("1.0.0", "sha-v1"), ("2.0.0", "sha-v2")] {
+            let version_row = tools::fetch_crate_version_by_name(pool, crate_row.id, version)
+                .await
+                .expect("load fixture version")
+                .expect("fixture version exists");
+
+            indexing::upsert_source_file_unconditional(
+                pool,
+                version_row.id,
+                "src/lib.rs",
+                sha,
+                10,
+                Some("Rust"),
+                "pub trait Serializer {}",
+            )
+            .await
+            .expect("upsert fixture source");
+
+            let source_file_id =
+                indexing::fetch_source_file_id_required(pool, version_row.id, "src/lib.rs")
+                    .await
+                    .expect("load fixture source id");
+
+            let extraction = IndexedExtractionBatch {
+                symbols: vec![IndexedSymbolInsert {
+                    name: "Serializer".to_string(),
+                    kind: "trait".to_string(),
+                    visibility: Some("public".to_string()),
+                    signature: Some("trait Serializer".to_string()),
+                    start_line: 1,
+                    end_line: 1,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+
+            indexing::replace_source_file_index_rows(
+                pool,
+                version_row.id,
+                source_file_id,
+                "local_cache",
+                &extraction,
+            )
+            .await
+            .expect("index fixture symbol");
         }
+
+        crate_row.id
     }
 
     #[tokio::test]
     async fn symbol_search_collapse_by_canonical_deduplicates_versions() {
-        let Some(database_url) = env::var("DATABASE_URL").ok() else {
-            return;
-        };
+        let config = Config::load_from_env();
 
         let pool = match PgPoolOptions::new()
             .max_connections(2)
-            .connect(&database_url)
+            .connect(&config.database_url)
             .await
         {
             Ok(pool) => pool,
@@ -526,82 +416,8 @@ mod tests {
             .expect("system time after unix epoch")
             .as_nanos();
         let crate_name = format!("symbol_collapse_test_{stamp}");
+        let crate_id = seed_symbol_collapse_fixture(&pool, &crate_name).await;
 
-        let crate_id: i64 = sqlx::query_scalar(
-            "INSERT INTO crates (name, description, updated_at)
-             VALUES ($1, $2, NOW())
-             RETURNING id",
-        )
-        .bind(&crate_name)
-        .bind("symbol collapse test")
-        .fetch_one(&pool)
-        .await
-        .expect("insert test crate");
-
-        let version1_id: i64 = sqlx::query_scalar(
-            "INSERT INTO crate_versions (crate_id, version, published_at, yanked)
-             VALUES ($1, '1.0.0', NOW() - INTERVAL '10 day', false)
-             RETURNING id",
-        )
-        .bind(crate_id)
-        .fetch_one(&pool)
-        .await
-        .expect("insert test version 1");
-
-        let version2_id: i64 = sqlx::query_scalar(
-            "INSERT INTO crate_versions (crate_id, version, published_at, yanked)
-             VALUES ($1, '2.0.0', NOW() - INTERVAL '1 day', false)
-             RETURNING id",
-        )
-        .bind(crate_id)
-        .fetch_one(&pool)
-        .await
-        .expect("insert test version 2");
-
-        let source_v1_id: i64 = sqlx::query_scalar(
-            "INSERT INTO source_files (
-                 crate_version_id, path, sha256, file_size, language, content
-             ) VALUES (
-                 $1, 'src/lib.rs', 'sha-v1', 10, 'Rust', 'pub trait Serializer {}'
-             )
-             RETURNING id",
-        )
-        .bind(version1_id)
-        .fetch_one(&pool)
-        .await
-        .expect("insert source for v1");
-
-        let source_v2_id: i64 = sqlx::query_scalar(
-            "INSERT INTO source_files (
-                 crate_version_id, path, sha256, file_size, language, content
-             ) VALUES (
-                 $1, 'src/lib.rs', 'sha-v2', 10, 'Rust', 'pub trait Serializer {}'
-             )
-             RETURNING id",
-        )
-        .bind(version2_id)
-        .fetch_one(&pool)
-        .await
-        .expect("insert source for v2");
-
-        for (version_id, source_id) in [(version1_id, source_v1_id), (version2_id, source_v2_id)] {
-            sqlx::query(
-                "INSERT INTO symbols (
-                     crate_version_id, source_file_id, name, kind, signature, visibility,
-                     start_line, end_line, index_source
-                 ) VALUES (
-                     $1, $2, 'Serializer', 'trait', 'trait Serializer', 'public', 1, 1,
-                     'local_cache'
-                 )",
-            )
-            .bind(version_id)
-            .bind(source_id)
-            .execute(&pool)
-            .await
-            .expect("insert symbol row");
-        }
-
-        let config = test_config(database_url);
         let state = AppState {
             outbound_rate_limiters: Arc::new(crate::state::OutboundRateLimiters::new(&config)),
             config,

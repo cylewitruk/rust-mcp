@@ -1,12 +1,8 @@
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
-};
+use crate::db::tools;
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     dependents_limit, normalize_optional, normalize_required, readme_limit, truncate_optional_text,
@@ -93,43 +89,6 @@ pub struct CrateIntelAdvisory {
     pub source: String,
 }
 
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateVersionHistoryRow {
-    pub(crate) version: String,
-    pub(crate) rust_version: Option<String>,
-    pub(crate) published_at: Option<String>,
-    pub(crate) yanked: bool,
-    pub(crate) total_downloads: i64,
-    pub(crate) has_advisory: bool,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateDependencyRow {
-    pub(crate) dependency_name: String,
-    pub(crate) requirement: String,
-    pub(crate) dependency_kind: String,
-    pub(crate) optional: bool,
-    pub(crate) features: Value,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateDependentRow {
-    pub(crate) crate_name: String,
-    pub(crate) latest_version: Option<String>,
-    pub(crate) total_downloads: i64,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateAdvisoryRow {
-    pub(crate) advisory_id: String,
-    pub(crate) title: String,
-    pub(crate) severity: Option<String>,
-    pub(crate) url: Option<String>,
-    pub(crate) affected_range: String,
-    pub(crate) fixed_versions: Value,
-    pub(crate) source: String,
-}
-
 impl McpServer {
     pub(crate) async fn handle_crate_intel(
         &self,
@@ -141,50 +100,22 @@ impl McpServer {
         let dependents_limit = dependents_limit(request.dependents_limit);
         let readme_max_chars = readme_limit(request.readme_max_chars);
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
+        let crate_row = tools::fetch_crate_core_by_name(&self.state.db, &crate_name)
+            .await
+            .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
+            .ok_or_else(|| {
+                format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
+            })?;
 
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
+        let latest_version = tools::fetch_latest_crate_version(&self.state.db, crate_row.id)
+            .await
+            .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
+            .ok_or_else(|| {
+                format!(
+                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                    crate_row.name
+                )
+            })?;
 
         let freshness_outcome = self
             .ensure_freshness_for_interaction(
@@ -195,28 +126,15 @@ impl McpServer {
             .await?;
 
         let latest_version = if freshness_outcome.freshness_check_result == "changed" {
-            sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
-            .ok_or_else(|| {
-                format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                    crate_row.name
-                )
-            })?
+            tools::fetch_latest_crate_version(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                        crate_row.name
+                    )
+                })?
         } else {
             latest_version
         };
@@ -227,24 +145,15 @@ impl McpServer {
             .clone();
 
         let selected_version = if let Some(version) = requested_version.clone() {
-            let selected = sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
-            })?;
+            let selected =
+                tools::fetch_crate_version_by_name(&self.state.db, crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed for {}@{}: {e}",
+                            crate_row.name, version
+                        )
+                    })?;
 
             if let Some(selected) = selected {
                 selected
@@ -257,162 +166,73 @@ impl McpServer {
                     refresh_job_id = Some(job_id);
                 }
 
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        id,
-                        version,
-                        rust_version,
-                        published_at::TEXT AS published_at,
-                        readme
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, crate_row.name
-                    )
-                })?
+                tools::fetch_crate_version_by_name(&self.state.db, crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed after backfill for {}@{}: {e}",
+                            crate_row.name, version
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "version '{}' for crate '{}' is not indexed locally (refresh \
+                             attempted)",
+                            version, crate_row.name
+                        )
+                    })?
             }
         } else {
             latest_version.clone()
         };
 
-        let total_downloads = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(SUM(total_downloads), 0)::BIGINT
-             FROM crate_versions
-             WHERE crate_id = $1",
-        )
-        .bind(crate_row.id)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("download aggregation failed for {}: {e}", crate_row.name))?;
+        let total_downloads = tools::fetch_crate_total_downloads(&self.state.db, crate_row.id)
+            .await
+            .map_err(|e| format!("download aggregation failed for {}: {e}", crate_row.name))?;
 
-        let last_updated_at = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT MAX(published_at)::TEXT
-             FROM crate_versions
-             WHERE crate_id = $1",
-        )
-        .bind(crate_row.id)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("last-updated lookup failed for {}: {e}", crate_row.name))?
-        .or(crate_row.updated_at.clone());
+        let last_updated_at = tools::fetch_crate_last_published_at(&self.state.db, crate_row.id)
+            .await
+            .map_err(|e| format!("last-updated lookup failed for {}: {e}", crate_row.name))?
+            .or(crate_row.updated_at.clone());
 
-        let version_history_rows = sqlx::query_as::<_, CrateVersionHistoryRow>(
-            "SELECT
-                cv.version,
-                cv.rust_version,
-                cv.published_at::TEXT AS published_at,
-                cv.yanked,
-                cv.total_downloads,
-                EXISTS(
-                    SELECT 1
-                    FROM advisory_matches am
-                    WHERE am.version_id = cv.id
-                ) AS has_advisory
-             FROM crate_versions cv
-             WHERE cv.crate_id = $1
-             ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-             LIMIT $2",
+        let version_history_rows = tools::fetch_crate_version_history(
+            &self.state.db,
+            crate_row.id,
+            i64::from(versions_limit),
         )
-        .bind(crate_row.id)
-        .bind(i64::from(versions_limit))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("version history query failed for {}: {e}", crate_row.name))?;
 
-        let dependency_rows = sqlx::query_as::<_, CrateDependencyRow>(
-            "SELECT
-                c.name AS dependency_name,
-                d.requirement,
-                d.dependency_kind,
-                d.optional,
-                d.features
-             FROM dependency_edges d
-             JOIN crates c ON c.id = d.to_crate_id
-             WHERE d.from_version_id = $1
-             ORDER BY c.name ASC",
-        )
-        .bind(selected_version.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!(
-                "dependency query failed for {}@{}: {e}",
-                crate_row.name, selected_version.version
-            )
-        })?;
+        let dependency_rows =
+            tools::fetch_crate_dependencies_for_version(&self.state.db, selected_version.id)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "dependency query failed for {}@{}: {e}",
+                        crate_row.name, selected_version.version
+                    )
+                })?;
 
-        let dependent_crate_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(COUNT(DISTINCT cv_from.crate_id), 0)::BIGINT
-             FROM dependency_edges d
-             JOIN crate_versions cv_from ON cv_from.id = d.from_version_id
-             WHERE d.to_crate_id = $1",
-        )
-        .bind(crate_row.id)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| format!("dependent crate count query failed for {}: {e}", crate_row.name))?;
+        let dependent_crate_count =
+            tools::fetch_dependent_crate_count(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| {
+                    format!("dependent crate count query failed for {}: {e}", crate_row.name)
+                })?;
 
-        let dependent_rows = sqlx::query_as::<_, CrateDependentRow>(
-            "WITH dependent_crates AS (
-                 SELECT DISTINCT cv_from.crate_id
-                 FROM dependency_edges d
-                 JOIN crate_versions cv_from ON cv_from.id = d.from_version_id
-                 WHERE d.to_crate_id = $1
-             )
-             SELECT
-                 c.name AS crate_name,
-                 lv.version AS latest_version,
-                 COALESCE(lv.total_downloads, 0)::BIGINT AS total_downloads
-             FROM dependent_crates dc
-             JOIN crates c ON c.id = dc.crate_id
-             LEFT JOIN LATERAL (
-                 SELECT
-                     cv.version,
-                     cv.total_downloads
-                 FROM crate_versions cv
-                 WHERE cv.crate_id = c.id
-                 ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                 LIMIT 1
-             ) lv ON true
-             ORDER BY total_downloads DESC, c.name ASC
-             LIMIT $2",
+        let dependent_rows = tools::fetch_dependent_crates(
+            &self.state.db,
+            crate_row.id,
+            i64::from(dependents_limit),
         )
-        .bind(crate_row.id)
-        .bind(i64::from(dependents_limit))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("dependent crate query failed for {}: {e}", crate_row.name))?;
 
-        let advisory_rows = sqlx::query_as::<_, CrateAdvisoryRow>(
-            "SELECT
-                advisory_id,
-                title,
-                severity,
-                url,
-                affected_range,
-                fixed_versions,
-                source
-             FROM advisory_matches
-             WHERE crate_id = $1 AND (version_id = $2 OR version_id IS NULL)
-             ORDER BY advisory_id ASC",
+        let advisory_rows = tools::fetch_crate_advisories_for_version(
+            &self.state.db,
+            crate_row.id,
+            selected_version.id,
         )
-        .bind(crate_row.id)
-        .bind(selected_version.id)
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("advisory query failed for {}: {e}", crate_row.name))?;
 

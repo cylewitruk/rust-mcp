@@ -1,11 +1,8 @@
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource, SourceReadRow,
-};
+use crate::db::tools;
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
 
@@ -56,28 +53,6 @@ pub struct SourceContextTypeContext {
     pub type_name: String,
     pub kind: String,
     pub source_line: i32,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct SourceContextLineLookupRow {
-    pub(crate) start_line: i32,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct SourceContextImplLookupRow {
-    pub(crate) type_name: String,
-    pub(crate) type_name_display: Option<String>,
-    pub(crate) trait_name: Option<String>,
-    pub(crate) trait_name_display: Option<String>,
-    pub(crate) impl_kind: String,
-    pub(crate) start_line: i32,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct SourceContextTypeLookupRow {
-    pub(crate) type_name: String,
-    pub(crate) kind: String,
-    pub(crate) start_line: i32,
 }
 
 fn module_path_from_source_path(crate_name: &str, path: &str) -> String {
@@ -167,50 +142,22 @@ impl McpServer {
         let requested_version = normalize_optional(request.version);
         let symbol_name = normalize_optional(request.symbol_name);
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
+        let crate_row = tools::fetch_crate_core_by_name(&self.state.db, &crate_name)
+            .await
+            .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
+            .ok_or_else(|| {
+                format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
+            })?;
 
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
+        let latest_version = tools::fetch_latest_crate_version(&self.state.db, crate_row.id)
+            .await
+            .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
+            .ok_or_else(|| {
+                format!(
+                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                    crate_row.name
+                )
+            })?;
 
         let freshness_outcome = self
             .ensure_freshness_for_interaction(
@@ -221,28 +168,15 @@ impl McpServer {
             .await?;
 
         let latest_version = if freshness_outcome.freshness_check_result == "changed" {
-            sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
-            .ok_or_else(|| {
-                format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                    crate_row.name
-                )
-            })?
+            tools::fetch_latest_crate_version(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                        crate_row.name
+                    )
+                })?
         } else {
             latest_version
         };
@@ -253,24 +187,15 @@ impl McpServer {
             .clone();
 
         let selected_version = if let Some(version) = requested_version {
-            let selected = sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
-            })?;
+            let selected =
+                tools::fetch_crate_version_by_name(&self.state.db, crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed for {}@{}: {e}",
+                            crate_row.name, version
+                        )
+                    })?;
 
             if let Some(selected) = selected {
                 selected
@@ -283,54 +208,32 @@ impl McpServer {
                     refresh_job_id = Some(job_id);
                 }
 
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        id,
-                        version,
-                        rust_version,
-                        published_at::TEXT AS published_at,
-                        readme
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, crate_row.name
-                    )
-                })?
+                tools::fetch_crate_version_by_name(&self.state.db, crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed after backfill for {}@{}: {e}",
+                            crate_row.name, version
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "version '{}' for crate '{}' is not indexed locally (refresh \
+                             attempted)",
+                            version, crate_row.name
+                        )
+                    })?
             }
         } else {
             latest_version.clone()
         };
 
-        let row = sqlx::query_as::<_, SourceReadRow>(
-            "SELECT
-                c.name AS crate_name,
-                cv.version,
-                sf.path,
-                sf.content
-             FROM source_files sf
-             JOIN crate_versions cv ON cv.id = sf.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id
-             WHERE c.name = $1 AND cv.id = $2 AND sf.path = $3
-             LIMIT 1",
+        let row = tools::fetch_source_read_for_crate_version_path(
+            &self.state.db,
+            &crate_row.name,
+            selected_version.id,
+            &path,
         )
-        .bind(&crate_row.name)
-        .bind(selected_version.id)
-        .bind(&path)
-        .fetch_optional(&self.state.db)
         .await
         .map_err(|e| {
             format!(
@@ -354,20 +257,12 @@ impl McpServer {
         let resolved_line = if let Some(line) = request.line {
             line.clamp(1, total_lines)
         } else if let Some(ref symbol) = symbol_name {
-            let symbol_line = sqlx::query_as::<_, SourceContextLineLookupRow>(
-                "SELECT s.start_line
-                 FROM symbols s
-                 JOIN source_files sf ON sf.id = s.source_file_id
-                 WHERE s.crate_version_id = $1
-                   AND sf.path = $2
-                   AND s.name = $3
-                 ORDER BY s.start_line ASC
-                 LIMIT 1",
+            let symbol_line = tools::fetch_symbol_start_line_for_context(
+                &self.state.db,
+                selected_version.id,
+                &path,
+                symbol,
             )
-            .bind(selected_version.id)
-            .bind(&path)
-            .bind(symbol)
-            .fetch_optional(&self.state.db)
             .await
             .map_err(|e| {
                 format!(
@@ -392,26 +287,12 @@ impl McpServer {
         let imports_in_scope = collect_imports_in_scope(&row.content, resolved_line);
         let module_path = module_path_from_source_path(&crate_row.name, &path);
 
-        let containing_impl = sqlx::query_as::<_, SourceContextImplLookupRow>(
-            "SELECT
-                ci.type_name,
-                ci.type_name_display,
-                ci.trait_name,
-                ci.trait_name_display,
-                ci.impl_kind,
-                ci.start_line
-             FROM crate_impls ci
-             JOIN source_files sf ON sf.id = ci.source_file_id
-             WHERE ci.crate_version_id = $1
-               AND sf.path = $2
-               AND ci.start_line <= $3
-             ORDER BY ci.start_line DESC
-             LIMIT 1",
+        let containing_impl = tools::fetch_containing_impl_for_context(
+            &self.state.db,
+            selected_version.id,
+            &path,
+            resolved_line as i32,
         )
-        .bind(selected_version.id)
-        .bind(&path)
-        .bind(resolved_line as i32)
-        .fetch_optional(&self.state.db)
         .await
         .map_err(|e| format!("source.context impl lookup failed: {e}"))?
         .filter(|row| ((resolved_line as i32) - row.start_line).abs() <= 200)
@@ -424,22 +305,13 @@ impl McpServer {
             source_line: row.start_line,
         });
 
-        let surrounding_type_rows = sqlx::query_as::<_, SourceContextTypeLookupRow>(
-            "SELECT
-                ct.type_name,
-                ct.kind,
-                ct.start_line
-             FROM crate_types ct
-             JOIN source_files sf ON sf.id = ct.source_file_id
-             WHERE ct.crate_version_id = $1
-               AND sf.path = $2
-             ORDER BY ABS(ct.start_line - $3), ct.start_line ASC
-             LIMIT 5",
+        let surrounding_type_rows = tools::fetch_surrounding_types_for_context(
+            &self.state.db,
+            selected_version.id,
+            &path,
+            resolved_line as i32,
+            5,
         )
-        .bind(selected_version.id)
-        .bind(&path)
-        .bind(resolved_line as i32)
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("source.context type lookup failed: {e}"))?;
 

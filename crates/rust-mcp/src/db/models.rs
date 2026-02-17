@@ -104,6 +104,132 @@ pub struct CrateVersionSelectionRow {
     pub readme: Option<String>,
 }
 
+/// Version timeline row used by `crate.intel`.
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateVersionHistoryRow {
+    /// Semver version string.
+    pub version: String,
+    /// Optional declared Rust version.
+    pub rust_version: Option<String>,
+    /// Publish timestamp for this version.
+    pub published_at: Option<String>,
+    /// Whether this version is yanked.
+    pub yanked: bool,
+    /// Download count for this version.
+    pub total_downloads: i64,
+    /// Whether at least one advisory matches this version.
+    pub has_advisory: bool,
+}
+
+/// Dependency edge row used by `crate.intel`.
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateDependencyRow {
+    /// Canonical dependency crate name.
+    pub dependency_name: String,
+    /// Semver requirement string.
+    pub requirement: String,
+    /// Dependency kind (`normal`, `dev`, `build`, etc.).
+    pub dependency_kind: String,
+    /// Whether the dependency is optional.
+    pub optional: bool,
+    /// JSON array of enabled dependency features.
+    pub features: Value,
+}
+
+/// Dependent crate row used by `crate.intel`.
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateDependentRow {
+    /// Canonical dependent crate name.
+    pub crate_name: String,
+    /// Latest known version of the dependent crate.
+    pub latest_version: Option<String>,
+    /// Download count of the latest dependent version.
+    pub total_downloads: i64,
+}
+
+/// Advisory row used by `crate.intel`.
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateAdvisoryRow {
+    /// Advisory identifier.
+    pub advisory_id: String,
+    /// Advisory title.
+    pub title: String,
+    /// Optional normalized severity label.
+    pub severity: Option<String>,
+    /// Optional canonical advisory URL.
+    pub url: Option<String>,
+    /// Rendered affected range summary.
+    pub affected_range: String,
+    /// JSON array of fixed/patched versions.
+    pub fixed_versions: Value,
+    /// Advisory source key.
+    pub source: String,
+}
+
+/// Symbol line lookup row used by `source.context`.
+#[derive(Debug, Clone, FromRow)]
+pub struct SourceContextLineLookupRow {
+    /// 1-based start line of the matched symbol.
+    pub start_line: i32,
+}
+
+/// Impl context lookup row used by `source.context`.
+#[derive(Debug, Clone, FromRow)]
+pub struct SourceContextImplLookupRow {
+    /// Implemented type name.
+    pub type_name: String,
+    /// Optional rendered implemented type path.
+    pub type_name_display: Option<String>,
+    /// Optional trait name for trait impls.
+    pub trait_name: Option<String>,
+    /// Optional rendered trait display path/signature.
+    pub trait_name_display: Option<String>,
+    /// Impl kind (`inherent`, `trait`, `derive`, etc.).
+    pub impl_kind: String,
+    /// 1-based start line for the impl block.
+    pub start_line: i32,
+}
+
+/// Type context lookup row used by `source.context`.
+#[derive(Debug, Clone, FromRow)]
+pub struct SourceContextTypeLookupRow {
+    /// Type name.
+    pub type_name: String,
+    /// Type kind (`struct`, `enum`, `trait`, etc.).
+    pub kind: String,
+    /// 1-based start line for the type definition.
+    pub start_line: i32,
+}
+
+/// Symbol search row used by `symbol.search`.
+#[derive(Debug, Clone, FromRow)]
+pub struct SymbolSearchRow {
+    /// Symbol row primary key.
+    pub _symbol_id: i64,
+    /// Canonical crate name owning the symbol.
+    pub crate_name: String,
+    /// Semver version selected for the symbol row.
+    pub version: String,
+    /// Relative source path for the symbol.
+    pub source_path: String,
+    /// Symbol name.
+    pub name: String,
+    /// Symbol kind (`function`, `struct`, `trait`, etc.).
+    pub kind: String,
+    /// Optional rendered declaration/signature.
+    pub signature: Option<String>,
+    /// Optional rendered visibility marker.
+    pub visibility: Option<String>,
+    /// 1-based source start line.
+    pub start_line: i32,
+    /// 1-based source end line.
+    pub end_line: i32,
+    /// Index provenance (`rustdoc_json`, `local_cache`, etc.).
+    pub index_source: String,
+    /// Symbol indexing timestamp as text.
+    pub indexed_at: String,
+}
+
 /// JSON entry for generic parameter metadata.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]

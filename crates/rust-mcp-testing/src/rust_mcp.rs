@@ -16,6 +16,8 @@ use testcontainers_modules::testcontainers::{
 use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
+use crate::env;
+
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
 const DEFAULT_IMAGE_TAG: &str = "test";
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -154,12 +156,12 @@ impl RustMcpTestContainer {
             // Support containers reaching host-bound test fixtures via
             // `host.docker.internal`.
             .with_host("host.docker.internal", Host::HostGateway)
-            .with_env_var("OUTBOUND_FIREWALL", "false")
-            .with_env_var("MCP_HTTP_BIND", "0.0.0.0:43173")
-            .with_env_var("PROMETHEUS_BIND", "0.0.0.0:9090")
+            .with_env_var(env::vars::OUTBOUND_FIREWALL, env::defaults::OUTBOUND_FIREWALL_DISABLED)
+            .with_env_var(env::vars::MCP_HTTP_BIND, env::defaults::MCP_HTTP_BIND)
+            .with_env_var(env::vars::PROMETHEUS_BIND, env::defaults::PROMETHEUS_BIND)
             // The runtime container runs Postgres over unix socket only.
-            .with_env_var("DATABASE_URL", "postgres://postgres@%2Frun%2Fpostgresql/rust_mcp")
-            .with_env_var("RUST_LOG", "warn");
+            .with_env_var(env::vars::DATABASE_URL, env::defaults::DATABASE_URL)
+            .with_env_var(env::vars::RUST_LOG, env::defaults::RUST_LOG);
 
         for (key, value) in extra_env_vars {
             container_request = container_request.with_env_var(key, value);
