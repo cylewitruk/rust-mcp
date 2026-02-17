@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use rust_mcp::config::{Config, LogFormat, TransportMode};
+use rust_mcp::config::{Config, LogFormat};
 use rust_mcp::http;
 use rust_mcp::state::AppState;
 use rust_mcp_testing::fixtures::{MinimalCrateGraphFixture, seed_minimal_crate_graph};
@@ -13,7 +13,6 @@ use serde_json::Value;
 
 pub(crate) fn test_config(database_url: String) -> Config {
     Config {
-        mcp_transport: TransportMode::Http,
         http_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
         mcp_sse_keep_alive_secs: 15,
         mcp_sse_retry_ms: 3000,

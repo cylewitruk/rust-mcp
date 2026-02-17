@@ -5,7 +5,6 @@ use clap::{Parser, ValueEnum};
 
 /// Canonical environment variable names used by server config.
 pub(crate) mod env_vars {
-    pub(crate) const MCP_TRANSPORT: &str = "MCP_TRANSPORT";
     pub(crate) const MCP_HTTP_BIND: &str = "MCP_HTTP_BIND";
     pub(crate) const MCP_SSE_KEEP_ALIVE_SECS: &str = "MCP_SSE_KEEP_ALIVE_SECS";
     pub(crate) const MCP_SSE_RETRY_MS: &str = "MCP_SSE_RETRY_MS";
@@ -47,10 +46,6 @@ pub fn optional_env_non_empty(name: &str) -> Option<String> {
     about = "Local-first Rust dependency intelligence MCP server"
 )]
 pub struct Config {
-    /// MCP transport mode to use for serving clients.
-    #[arg(long, env = env_vars::MCP_TRANSPORT, value_enum, default_value_t = TransportMode::Http)]
-    pub mcp_transport: TransportMode,
-
     /// HTTP bind address for health/readiness and streamable MCP endpoints.
     #[arg(long, env = env_vars::MCP_HTTP_BIND, default_value = "127.0.0.1:43173")]
     pub http_bind: SocketAddr,
@@ -169,15 +164,6 @@ impl Config {
     pub fn load_from_env() -> Self {
         Self::parse_from(["rust-mcp"])
     }
-}
-
-/// MCP transport mode.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
-pub enum TransportMode {
-    /// Serve MCP over streamable HTTP.
-    Http,
-    /// Use stdio transport.
-    Stdio,
 }
 
 /// Log output formatting mode.

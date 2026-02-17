@@ -55,7 +55,7 @@ pub async fn run() -> Result<()> {
         .await
         .with_context(|| format!("failed to bind HTTP listener on {}", config.http_bind))?;
 
-    info!(bind = %config.http_bind, transport = ?config.mcp_transport, "starting server");
+    info!(bind = %config.http_bind, "starting server");
 
     tokio::spawn(mcp::run_refresh_worker(state.clone()));
     tokio::spawn(mcp::run_startup_rustdoc_json_refresh(state.clone()));

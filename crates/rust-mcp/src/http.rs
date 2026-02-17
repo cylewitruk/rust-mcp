@@ -6,9 +6,8 @@ use axum::{Json, Router};
 use serde::Serialize;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::trace::TraceLayer;
-use tracing::warn;
 
-use crate::config::{Config, TransportMode};
+use crate::config::Config;
 use crate::error::ApiResult;
 use crate::mcp;
 use crate::state::AppState;
@@ -16,10 +15,6 @@ use crate::state::AppState;
 /// Builds the HTTP router with health/readiness endpoints and MCP transport
 /// mounting.
 pub fn router(state: AppState, config: Config) -> Router {
-    if matches!(config.mcp_transport, TransportMode::Stdio) {
-        warn!("MCP_TRANSPORT=stdio set; HTTP endpoints stay available for health/readiness checks");
-    }
-
     let mcp_service = mcp::streamable_http_service(state.clone(), &config);
 
     Router::new()

@@ -16,7 +16,9 @@ The previously planned milestone set through M13 is complete, including:
 
 ## P0: Correctness and Protocol Completeness
 
-- [ ] Implement true stdio transport mode or remove `stdio` from runtime config until implemented.
+- [x] Remove `stdio` from core runtime config until a dedicated adapter exists.
+  - `rust-mcp` is now explicitly HTTP-only (Streamable HTTP).
+  - `MCP_TRANSPORT` and `TransportMode` were removed from runtime config.
 - [x] Add stricter MCP protocol conformance checks around session lifecycle edge cases (invalid ordering, missing/expired session headers, malformed request behavior).
   - Added e2e checks for missing session headers after successful initialize/initialized flow (`tools/list`, `tools/call`).
   - Added e2e checks for malformed JSON request bodies and invalid JSON-RPC request shapes.
@@ -58,6 +60,7 @@ The previously planned milestone set through M13 is complete, including:
 
 - [ ] Evaluate optional rust-analyzer-assisted enrichment for workspace-local, position-aware context where rustdoc/syn are insufficient.
 - [ ] Consider new tools for deprecations and feature-gated API surfacing after rustdoc data quality goals are met.
+- [ ] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running `rust-mcp` HTTP instance.
 
 ## Out of Scope (For Now)
 

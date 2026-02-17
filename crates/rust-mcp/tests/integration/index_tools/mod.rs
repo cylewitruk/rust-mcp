@@ -14,7 +14,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use rust_mcp::config::{Config, LogFormat, TransportMode};
+use rust_mcp::config::{Config, LogFormat};
 use rust_mcp::http;
 use rust_mcp::mcp::{run_refresh_worker_for_tests, run_startup_rustdoc_json_refresh_for_tests};
 use rust_mcp::state::AppState;
@@ -40,7 +40,6 @@ fn test_config(
     rustdoc_json_dir: Option<PathBuf>,
 ) -> Config {
     Config {
-        mcp_transport: TransportMode::Http,
         http_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
         mcp_sse_keep_alive_secs: 15,
         mcp_sse_retry_ms: 3000,

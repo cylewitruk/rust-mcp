@@ -120,7 +120,7 @@ cargo --locked nextest run -p rust-mcp --features e2e-tests --test e2e_http <fil
 
 ## Operational Notes
 
-- `MCP_TRANSPORT` has `http|stdio` enum values, but current serving remains HTTP-based.
+- Core runtime is HTTP-only; stdio support should live in a separate adapter binary.
 - Refresh worker and startup rustdoc sync are spawned from `app.rs`.
 - Docker entrypoint boots embedded PostgreSQL and can apply outbound host allowlisting.
 

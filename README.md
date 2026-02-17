@@ -9,7 +9,7 @@ Local-first Rust dependency intelligence MCP server.
 - background refresh workers
 - Prometheus metrics export
 
-The primary transport today is MCP Streamable HTTP.
+`rust-mcp` is HTTP-only and serves MCP via Streamable HTTP.
 
 ## Current Status
 
@@ -158,6 +158,12 @@ Important environment variables:
 - `RUSTDOC_JSON_DIR` (optional pre-generated rustdoc JSON files)
 - `SCHEMA_EXPORT_DIR` (optional startup export of tool schema artifacts)
 
+## Transport
+
+- Supported in this binary: Streamable HTTP at `/mcp`
+- Not implemented in this binary: stdio transport
+- If a client only supports stdio process launch, run a separate stdio-to-HTTP proxy binary against this server instance.
+
 ## Development
 
 Useful local commands:
@@ -173,7 +179,6 @@ just down
 
 ## Known Limitations
 
-- `MCP_TRANSPORT=stdio` is defined in config, but serving currently remains HTTP-based.
 - Rustdoc indexing is currently based on local files from `RUSTDOC_JSON_DIR` when configured (container-side rustdoc generation is roadmap work).
 
 ## Roadmap

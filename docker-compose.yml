@@ -18,7 +18,6 @@ services:
       CRATES_IO_BASE_URL: ${CRATES_IO_BASE_URL:-https://crates.io}
       CRATES_IO_USER_AGENT: "${CRATES_IO_USER_AGENT:-rust-mcp/0.1.0 (local dev machine)}"
       CRATES_IO_TIMEOUT_SECS: ${CRATES_IO_TIMEOUT_SECS:-20}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       CARGO_REGISTRY_DIR: /cargo/registry
       MCP_DATA_DIR: /var/lib/rust-mcp
