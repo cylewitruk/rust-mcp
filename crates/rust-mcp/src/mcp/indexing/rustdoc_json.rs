@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::Write as _;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use flate2::read::GzDecoder;
 use rustdoc_types::{
     Attribute, Crate as RustdocCrate, Enum, FunctionPointer, FunctionSignature, GenericArg,
     GenericArgs, GenericBound, GenericParamDef, GenericParamDefKind, Id, Impl, Item, ItemEnum,
@@ -15,7 +13,9 @@ use semver::Version;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
-use crate::integration::docs_rs::DocsRsClient;
+use crate::integration::docs_rs::{
+    DocsRsClient, decode_docs_rs_rustdoc_payload, docs_rs_rustdoc_synthetic_path,
+};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_required, sync_page, sync_per_page};
 
@@ -219,28 +219,6 @@ fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
         .unwrap_or_else(|| "unknown.json".to_string());
 
     format!("rustdoc-json/{relative}")
-}
-
-fn docs_rs_rustdoc_synthetic_path(crate_name: &str, version: &str) -> String {
-    format!("rustdoc-json/docs.rs/{crate_name}-{version}.json")
-}
-
-fn decode_docs_rs_rustdoc_payload(payload_bytes: Vec<u8>) -> Result<String, String> {
-    if let Ok(content) = String::from_utf8(payload_bytes.clone()) {
-        return Ok(content);
-    }
-
-    let mut decoder = GzDecoder::new(payload_bytes.as_slice());
-    let mut decoded_bytes = Vec::new();
-    if decoder
-        .read_to_end(&mut decoded_bytes)
-        .is_ok()
-    {
-        return String::from_utf8(decoded_bytes)
-            .map_err(|e| format!("decoded docs.rs rustdoc JSON payload was invalid UTF-8: {e}"));
-    }
-
-    Err("docs.rs rustdoc JSON payload was not valid UTF-8 or gzip".to_string())
 }
 
 // ============================================================
@@ -1838,11 +1816,8 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::io::Write as _;
     use std::path::PathBuf;
 
-    use flate2::Compression;
-    use flate2::write::GzEncoder;
     use rustdoc_types::{
         Abi, Deprecation, Function, FunctionHeader, FunctionSignature, Generics, Id, Impl, Item,
         ItemEnum, ItemKind, ItemSummary, Module, Path, Span, Struct, StructKind, Target, Trait,
@@ -1850,36 +1825,6 @@ mod tests {
     };
 
     use super::*;
-
-    #[test]
-    fn decode_docs_rs_payload_accepts_plain_utf8() {
-        let expected = "{\"hello\":\"world\"}".to_string();
-        let decoded =
-            decode_docs_rs_rustdoc_payload(expected.clone().into_bytes()).expect("decode failed");
-        assert_eq!(decoded, expected);
-    }
-
-    #[test]
-    fn decode_docs_rs_payload_accepts_gzip_utf8() {
-        let expected = "{\"hello\":\"world\"}".to_string();
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder
-            .write_all(expected.as_bytes())
-            .expect("failed to write gzip payload");
-        let payload = encoder
-            .finish()
-            .expect("failed to finish gzip payload");
-
-        let decoded = decode_docs_rs_rustdoc_payload(payload).expect("decode failed");
-        assert_eq!(decoded, expected);
-    }
-
-    #[test]
-    fn decode_docs_rs_payload_rejects_invalid_bytes() {
-        let error =
-            decode_docs_rs_rustdoc_payload(vec![0, 159, 146, 150]).expect_err("expected error");
-        assert!(error.contains("not valid UTF-8 or gzip"));
-    }
 
     // ---- Fixture builder helpers ----
 

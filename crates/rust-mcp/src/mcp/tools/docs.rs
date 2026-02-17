@@ -4,7 +4,7 @@ use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
-use crate::integration::docs_rs::DocsRsClient;
+use crate::integration::docs_rs::{DocsRsClient, discover_docs_paths, extract_title, strip_html};
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -103,211 +103,7 @@ fn docs_snippet(content: &str, query: &str) -> String {
         .collect()
 }
 
-fn extract_title(html: &str) -> Option<String> {
-    let lower = html.to_ascii_lowercase();
-    let start_tag = "<title>";
-    let end_tag = "</title>";
-
-    let start = lower.find(start_tag)? + start_tag.len();
-    let end = lower[start..].find(end_tag)? + start;
-    let title = html[start..end].trim();
-    if title.is_empty() {
-        None
-    } else {
-        Some(
-            title
-                .chars()
-                .take(300)
-                .collect(),
-        )
-    }
-}
-
-fn strip_html(html: &str) -> String {
-    let mut output = String::with_capacity(html.len().min(200_000));
-    let mut in_tag = false;
-
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => output.push(ch),
-            _ => {}
-        }
-    }
-
-    let normalized = output
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    normalized
-        .chars()
-        .take(1_000_000)
-        .collect()
-}
-
-fn extract_href_values(html: &str) -> Vec<String> {
-    let lower = html.to_ascii_lowercase();
-    let lower_bytes = lower.as_bytes();
-    let bytes = html.as_bytes();
-
-    let mut out = Vec::new();
-    let mut idx = 0_usize;
-    while idx + 6 < lower_bytes.len() {
-        let Some(found) = lower[idx..].find("href=") else {
-            break;
-        };
-        idx += found + 5;
-        if idx >= bytes.len() {
-            break;
-        }
-
-        let quote = bytes[idx] as char;
-        if quote != '"' && quote != '\'' {
-            idx += 1;
-            continue;
-        }
-
-        idx += 1;
-        let start = idx;
-        while idx < bytes.len() && (bytes[idx] as char) != quote {
-            idx += 1;
-        }
-        if idx <= bytes.len()
-            && let Ok(value) = std::str::from_utf8(&bytes[start..idx])
-        {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                out.push(trimmed.to_string());
-            }
-        }
-        idx = idx.saturating_add(1);
-    }
-
-    out
-}
-
-fn normalize_joined_path(path: &str) -> Option<String> {
-    let mut raw = path
-        .split('#')
-        .next()
-        .unwrap_or(path)
-        .split('?')
-        .next()
-        .unwrap_or(path)
-        .trim()
-        .to_string();
-
-    if raw.is_empty() {
-        return None;
-    }
-
-    let has_trailing_slash = raw.ends_with('/');
-    raw = raw
-        .trim_start_matches('/')
-        .to_string();
-
-    let mut parts: Vec<&str> = Vec::new();
-    for segment in raw.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(segment),
-        }
-    }
-
-    let mut normalized = parts.join("/");
-    if normalized.is_empty() {
-        return None;
-    }
-
-    if has_trailing_slash {
-        normalized.push('/');
-    }
-    Some(normalized)
-}
-
-fn resolve_docs_href(
-    docs_base_url: &str,
-    current_path: &str,
-    href: &str,
-    crate_prefix: &str,
-) -> Option<String> {
-    let raw = href.trim();
-    if raw.is_empty()
-        || raw.starts_with('#')
-        || raw.starts_with("javascript:")
-        || raw.starts_with("mailto:")
-        || raw.starts_with("tel:")
-        || raw.starts_with("//")
-    {
-        return None;
-    }
-
-    let candidate = if raw.starts_with("http://") || raw.starts_with("https://") {
-        let base = docs_base_url.trim_end_matches('/');
-        let suffix = raw.strip_prefix(base)?;
-        suffix
-            .trim_start_matches('/')
-            .to_string()
-    } else if raw.starts_with('/') {
-        raw.trim_start_matches('/')
-            .to_string()
-    } else {
-        let base_dir = if current_path.ends_with('/') {
-            current_path.to_string()
-        } else {
-            current_path
-                .rsplit_once('/')
-                .map(|(dir, _)| format!("{dir}/"))
-                .unwrap_or_default()
-        };
-        format!("{base_dir}{raw}")
-    };
-
-    let normalized = normalize_joined_path(&candidate)?;
-    if !normalized.starts_with(crate_prefix) {
-        return None;
-    }
-    if !(normalized.ends_with('/') || normalized.ends_with(".html")) {
-        return None;
-    }
-    Some(normalized)
-}
-
 impl McpServer {
-    fn discover_docs_paths(
-        &self,
-        current_path: &str,
-        html: &str,
-        crate_prefix: &str,
-    ) -> Vec<String> {
-        let docs_base_url = DocsRsClient::new(&self.state)
-            .base_url()
-            .to_string();
-
-        let mut unique = HashSet::new();
-        for href in extract_href_values(html) {
-            if let Some(path) = resolve_docs_href(&docs_base_url, current_path, &href, crate_prefix)
-            {
-                unique.insert(path);
-            }
-        }
-
-        let mut out = unique
-            .into_iter()
-            .collect::<Vec<_>>();
-        out.sort();
-        out
-    }
-
     pub(crate) async fn sync_docs_pages(
         &self,
         crate_name: Option<String>,
@@ -420,7 +216,9 @@ impl McpServer {
                     continue;
                 }
 
-                for discovered in self.discover_docs_paths(&path, &html, &crate_prefix) {
+                for discovered in
+                    discover_docs_paths(docs_rs.base_url(), &path, &html, &crate_prefix)
+                {
                     if seen.contains(&discovered) || pending.contains(&discovered) {
                         continue;
                     }
@@ -581,47 +379,5 @@ impl McpServer {
         .await?;
 
         Ok(Json(response))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolve_docs_href_keeps_in_crate_prefix() {
-        let base = "https://docs.rs";
-        let prefix = "serde/1.0.0/";
-
-        let relative = resolve_docs_href(
-            base,
-            "serde/1.0.0/serde/index.html",
-            "../serde/trait.Serializer.html",
-            prefix,
-        );
-        assert_eq!(relative.as_deref(), Some("serde/1.0.0/serde/trait.Serializer.html"));
-
-        let external = resolve_docs_href(
-            base,
-            "serde/1.0.0/serde/index.html",
-            "https://example.com/not-docs",
-            prefix,
-        );
-        assert!(external.is_none());
-
-        let outside_prefix = resolve_docs_href(
-            base,
-            "serde/1.0.0/serde/index.html",
-            "/tokio/1.0.0/tokio/index.html",
-            prefix,
-        );
-        assert!(outside_prefix.is_none());
-    }
-
-    #[test]
-    fn extract_href_values_reads_single_and_double_quotes() {
-        let html = r#"<a href="a/b.html">A</a><a href='c/d/'>B</a>"#;
-        let values = extract_href_values(html);
-        assert_eq!(values, vec!["a/b.html".to_string(), "c/d/".to_string()]);
     }
 }
