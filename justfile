@@ -22,7 +22,8 @@ test:
   cargo --locked llvm-cov nextest --lcov --output-path ./target/lcov.info --no-fail-fast --all-targets --features integration-tests
 
 test-e2e:
-  cargo --locked nextest run -p rust-mcp --test e2e_http --no-fail-fast --all-targets --features e2e-tests
+  docker build -t rust-mcp:test-e2e -f Dockerfile .
+  RUST_MCP_TEST_IMAGE_TAG=test-e2e cargo --locked nextest run -p rust-mcp --test e2e_http --no-fail-fast --features e2e-tests --test-threads 1
 
 run:
   cargo --locked run -p rust-mcp

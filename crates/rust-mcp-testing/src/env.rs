@@ -4,6 +4,8 @@
 pub mod vars {
     /// Optional Postgres image tag override for testcontainers.
     pub const RUST_MCP_TEST_POSTGRES_TAG: &str = "RUST_MCP_TEST_POSTGRES_TAG";
+    /// Optional rust-mcp image tag override for e2e test container builds.
+    pub const RUST_MCP_TEST_IMAGE_TAG: &str = "RUST_MCP_TEST_IMAGE_TAG";
     /// Runtime outbound firewall flag used by the rust-mcp container.
     pub const OUTBOUND_FIREWALL: &str = "OUTBOUND_FIREWALL";
     /// HTTP bind address for MCP endpoints.

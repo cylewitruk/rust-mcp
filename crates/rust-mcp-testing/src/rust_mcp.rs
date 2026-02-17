@@ -138,7 +138,8 @@ impl RustMcpTestContainer {
             .map(|(host_path, container_path)| (host_path.into(), container_path.into()))
             .collect::<Vec<(String, String)>>();
         let workspace_root = workspace_root()?;
-        let image_tag = default_image_tag(&workspace_root)?;
+        let image_tag = env::optional_env_non_empty(env::vars::RUST_MCP_TEST_IMAGE_TAG)
+            .unwrap_or(default_image_tag(&workspace_root)?);
         let image = GenericBuildableImage::new(DEFAULT_IMAGE_NAME, image_tag)
             .with_dockerfile(required_path(&workspace_root, "Dockerfile")?)
             .with_file(required_path(&workspace_root, "Cargo.toml")?, "Cargo.toml")

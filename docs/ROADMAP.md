@@ -17,8 +17,12 @@ The previously planned milestone set through M13 is complete, including:
 ## P0: Correctness and Protocol Completeness
 
 - [ ] Implement true stdio transport mode or remove `stdio` from runtime config until implemented.
-- [ ] Add stricter MCP protocol conformance checks around session lifecycle edge cases (invalid ordering, missing/expired session headers, malformed request behavior).
-- [ ] Expand e2e protocol assertions for non-happy-path JSON-RPC/MCP error envelopes and status mappings.
+- [x] Add stricter MCP protocol conformance checks around session lifecycle edge cases (invalid ordering, missing/expired session headers, malformed request behavior).
+  - Added e2e checks for missing session headers after successful initialize/initialized flow (`tools/list`, `tools/call`).
+  - Added e2e checks for malformed JSON request bodies and invalid JSON-RPC request shapes.
+- [x] Expand e2e protocol assertions for non-happy-path JSON-RPC/MCP error envelopes and status mappings.
+  - Added e2e matrix assertions for JSON-RPC error envelope shape (`jsonrpc`, `id`, `error.code`, `error.message`) on successful transport responses.
+  - Added stricter 400/401/422 status assertions for malformed and unauthorized protocol paths.
 - [ ] Add clear compatibility policy for supported MCP protocol versions (currently tests use `2025-11-25`).
 
 ## P1: Rustdoc Intelligence Quality

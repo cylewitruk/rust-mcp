@@ -14,6 +14,7 @@ use super::helpers::{
 };
 
 mod basics;
+mod conformance;
 mod errors;
 mod progress;
 mod session;
