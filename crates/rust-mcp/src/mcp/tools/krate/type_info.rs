@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -5,7 +7,8 @@ use sqlx::FromRow;
 
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateImplLookupRow, CrateImplMethod,
-    CrateVersionSelectionRow, ResponseFreshnessSource,
+    CrateTraitAssociatedType, CrateTraitDefinition, CrateTraitLookupRow, CrateVersionSelectionRow,
+    ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
@@ -30,6 +33,7 @@ pub struct CrateTypeInfoResponse {
     pub type_definition: Option<CrateTypeDefinition>,
     pub inherent_methods: Vec<CrateImplMethod>,
     pub trait_impls: Vec<CrateTraitImpl>,
+    pub trait_definitions: Vec<CrateTraitDefinition>,
     pub conversions: Vec<CrateTypeConversion>,
     pub freshness_check_performed: bool,
     pub freshness_check_result: String,
@@ -47,9 +51,16 @@ pub struct CrateTypeDefinition {
     pub type_name: String,
     pub kind: String,
     pub visibility: Option<String>,
+    pub canonical_path: Option<String>,
+    pub definition_path: Option<String>,
     pub generic_params: Vec<String>,
+    pub where_clauses: Vec<String>,
     pub fields: Vec<CrateTypeField>,
     pub variants: Vec<CrateTypeVariant>,
+    pub deprecated_since: Option<String>,
+    pub deprecated_note: Option<String>,
+    pub is_non_exhaustive: bool,
+    pub auto_traits: Vec<String>,
     pub source_path: String,
     pub start_line: i32,
     pub end_line: i32,
@@ -73,6 +84,12 @@ pub struct CrateTraitImpl {
     pub trait_name: Option<String>,
     pub trait_name_display: Option<String>,
     pub impl_kind: String,
+    pub blanket_impl: bool,
+    pub synthetic_impl: bool,
+    pub negative_impl: bool,
+    pub blanket_type: Option<String>,
+    pub generic_params: Vec<String>,
+    pub where_clauses: Vec<String>,
     pub methods: Vec<CrateImplMethod>,
     pub source_path: String,
     pub start_line: i32,
@@ -92,9 +109,16 @@ pub(crate) struct CrateTypeInfoRow {
     pub(crate) type_name: String,
     pub(crate) kind: String,
     pub(crate) visibility: Option<String>,
+    pub(crate) canonical_path: Option<String>,
+    pub(crate) definition_path: Option<String>,
     pub(crate) generic_params: Value,
+    pub(crate) where_clauses: Value,
     pub(crate) fields: Value,
     pub(crate) variants: Value,
+    pub(crate) deprecated_since: Option<String>,
+    pub(crate) deprecated_note: Option<String>,
+    pub(crate) is_non_exhaustive: bool,
+    pub(crate) auto_traits: Value,
     pub(crate) source_path: String,
     pub(crate) start_line: i32,
     pub(crate) end_line: i32,
@@ -149,6 +173,60 @@ fn parse_string_list(value: &Value) -> Vec<String> {
             .map(ToString::to_string)
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+fn parse_generic_param_rendered(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .get("rendered")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_assoc_types(value: &Value) -> Vec<CrateTraitAssociatedType> {
+    match value {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry
+                    .get("name")
+                    .and_then(Value::as_str)?
+                    .to_string();
+                let bounds = entry
+                    .get("bounds")
+                    .map(parse_string_list)
+                    .unwrap_or_default();
+                let default = entry
+                    .get("default")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+                Some(CrateTraitAssociatedType { name, bounds, default })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
+    CrateTraitDefinition {
+        trait_name: row.trait_name,
+        is_auto: row.is_auto,
+        is_unsafe: row.is_unsafe,
+        is_dyn_compatible: row.is_dyn_compatible,
+        supertraits: parse_string_list(&row.supertraits),
+        required_methods: parse_impl_methods(&row.required_methods),
+        provided_methods: parse_impl_methods(&row.provided_methods),
+        associated_types: parse_assoc_types(&row.associated_types),
+        generic_params: parse_generic_param_rendered(&row.generics),
+        index_source: row.index_source,
     }
 }
 
@@ -351,9 +429,16 @@ impl McpServer {
                 ct.type_name,
                 ct.kind,
                 ct.visibility,
+                ct.canonical_path,
+                ct.definition_path,
                 ct.generic_params,
+                ct.where_clauses,
                 ct.fields,
                 ct.variants,
+                ct.deprecated_since,
+                ct.deprecated_note,
+                ct.is_non_exhaustive,
+                ct.auto_traits,
                 sf.path AS source_path,
                 ct.start_line,
                 ct.end_line,
@@ -382,6 +467,12 @@ impl McpServer {
                 ci.trait_name_display,
                 ci.impl_kind,
                 ci.methods,
+                ci.is_blanket,
+                ci.is_synthetic,
+                ci.is_negative,
+                ci.blanket_type,
+                ci.generics,
+                ci.where_clauses,
                 sf.path AS source_path,
                 ci.start_line,
                 ci.end_line,
@@ -409,9 +500,16 @@ impl McpServer {
             type_name: row.type_name,
             kind: row.kind,
             visibility: row.visibility,
-            generic_params: parse_string_list(&row.generic_params),
+            canonical_path: row.canonical_path,
+            definition_path: row.definition_path,
+            generic_params: parse_generic_param_rendered(&row.generic_params),
+            where_clauses: parse_string_list(&row.where_clauses),
             fields: parse_type_fields(&row.fields),
             variants: parse_type_variants(&row.variants),
+            deprecated_since: row.deprecated_since,
+            deprecated_note: row.deprecated_note,
+            is_non_exhaustive: row.is_non_exhaustive,
+            auto_traits: parse_string_list(&row.auto_traits),
             source_path: row.source_path,
             start_line: row.start_line,
             end_line: row.end_line,
@@ -436,6 +534,12 @@ impl McpServer {
                     trait_name: row.trait_name.clone(),
                     trait_name_display: row.trait_name_display.clone(),
                     impl_kind: row.impl_kind.clone(),
+                    blanket_impl: row.is_blanket,
+                    synthetic_impl: row.is_synthetic,
+                    negative_impl: row.is_negative,
+                    blanket_type: row.blanket_type.clone(),
+                    generic_params: parse_generic_param_rendered(&row.generics),
+                    where_clauses: parse_string_list(&row.where_clauses),
                     methods: parse_impl_methods(&row.methods),
                     source_path: row.source_path.clone(),
                     start_line: row.start_line,
@@ -445,6 +549,60 @@ impl McpServer {
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
+        };
+
+        let trait_names = trait_impls
+            .iter()
+            .filter_map(|relation| relation.trait_name.as_deref())
+            .map(|trait_name| trait_name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+
+        let trait_definitions = if trait_names.is_empty() {
+            Vec::new()
+        } else {
+            let mut definitions_by_name = HashMap::<String, CrateTraitDefinition>::new();
+            let rows = sqlx::query_as::<_, CrateTraitLookupRow>(
+                "SELECT
+                    trait_name,
+                    is_auto,
+                    is_unsafe,
+                    is_dyn_compatible,
+                    supertraits,
+                    required_methods,
+                    provided_methods,
+                    associated_types,
+                    generics,
+                    index_source
+                 FROM crate_traits
+                 WHERE crate_version_id = $1
+                   AND LOWER(trait_name) = ANY($2::TEXT[])
+                 ORDER BY
+                    CASE WHEN index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
+                    trait_name ASC",
+            )
+            .bind(selected_version.id)
+            .bind(&trait_names)
+            .fetch_all(&self.state.db)
+            .await
+            .map_err(|e| format!("crate.type_info trait definition query failed: {e}"))?;
+
+            for row in rows {
+                definitions_by_name
+                    .entry(
+                        row.trait_name
+                            .to_ascii_lowercase(),
+                    )
+                    .or_insert_with(|| trait_definition_from_row(row));
+            }
+
+            let mut out = definitions_by_name
+                .into_values()
+                .collect::<Vec<_>>();
+            out.sort_by(|left, right| {
+                left.trait_name
+                    .cmp(&right.trait_name)
+            });
+            out
         };
 
         let conversions = impl_rows
@@ -516,6 +674,7 @@ impl McpServer {
             type_definition,
             inherent_methods,
             trait_impls,
+            trait_definitions,
             conversions,
             freshness_check_performed: freshness_outcome.freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),

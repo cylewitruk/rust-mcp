@@ -82,10 +82,33 @@ pub struct SourceReadResponse {
 }
 
 /// A method entry inside an impl block (shared by type_info / trait_impls).
-#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 pub struct CrateImplMethod {
     pub name: String,
     pub signature: Option<String>,
+}
+
+/// Associated type information declared by a trait definition.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct CrateTraitAssociatedType {
+    pub name: String,
+    pub bounds: Vec<String>,
+    pub default: Option<String>,
+}
+
+/// Trait definition metadata extracted from indexed sources.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct CrateTraitDefinition {
+    pub trait_name: String,
+    pub is_auto: bool,
+    pub is_unsafe: bool,
+    pub is_dyn_compatible: bool,
+    pub supertraits: Vec<String>,
+    pub required_methods: Vec<CrateImplMethod>,
+    pub provided_methods: Vec<CrateImplMethod>,
+    pub associated_types: Vec<CrateTraitAssociatedType>,
+    pub generic_params: Vec<String>,
+    pub index_source: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -152,8 +175,29 @@ pub(crate) struct CrateImplLookupRow {
     pub(crate) trait_name_display: Option<String>,
     pub(crate) impl_kind: String,
     pub(crate) methods: Value,
+    pub(crate) is_blanket: bool,
+    pub(crate) is_synthetic: bool,
+    pub(crate) is_negative: bool,
+    pub(crate) blanket_type: Option<String>,
+    pub(crate) generics: Value,
+    pub(crate) where_clauses: Value,
     pub(crate) source_path: String,
     pub(crate) start_line: i32,
     pub(crate) end_line: i32,
+    pub(crate) index_source: String,
+}
+
+/// Trait-definition lookup row used by type_info and trait_impls tools.
+#[derive(Debug, Clone, FromRow)]
+pub(crate) struct CrateTraitLookupRow {
+    pub(crate) trait_name: String,
+    pub(crate) is_auto: bool,
+    pub(crate) is_unsafe: bool,
+    pub(crate) is_dyn_compatible: bool,
+    pub(crate) supertraits: Value,
+    pub(crate) required_methods: Value,
+    pub(crate) provided_methods: Value,
+    pub(crate) associated_types: Value,
+    pub(crate) generics: Value,
     pub(crate) index_source: String,
 }

@@ -1,7 +1,7 @@
 //! Integration tests for `index.*` MCP tools.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::Write as _;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,7 +23,7 @@ use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 use rustdoc_types::{
     Abi, Crate as RustdocCrate, Function, FunctionHeader, FunctionSignature, Generics, Id, Item,
-    ItemEnum, ItemKind, ItemSummary, Module, Target, Type as RustdocType,
+    ItemEnum, ItemKind, ItemSummary, Module, Struct, StructKind, Target, Type as RustdocType, Use,
     Visibility as RustdocVisibility,
 };
 use serde_json::{Value, json};
@@ -211,7 +211,7 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             deprecation: None,
             inner: ItemEnum::Module(Module {
                 is_crate: true,
-                items: vec![Id(1)],
+                items: vec![Id(1), Id(10), Id(2)],
                 is_stripped: false,
             }),
         },
@@ -263,6 +263,94 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             crate_id: 0,
             path: vec![crate_name.to_string(), "parse".to_string()],
             kind: ItemKind::Function,
+        },
+    );
+
+    index.insert(
+        Id(10),
+        Item {
+            id: Id(10),
+            crate_id: 0,
+            name: Some("internal".to_string()),
+            span: None,
+            visibility: RustdocVisibility::Public,
+            docs: None,
+            links: HashMap::new(),
+            attrs: Vec::new(),
+            deprecation: None,
+            inner: ItemEnum::Module(Module {
+                is_crate: false,
+                items: vec![Id(11)],
+                is_stripped: false,
+            }),
+        },
+    );
+    paths.insert(
+        Id(10),
+        ItemSummary {
+            crate_id: 0,
+            path: vec![crate_name.to_string(), "internal".to_string()],
+            kind: ItemKind::Module,
+        },
+    );
+
+    index.insert(
+        Id(11),
+        Item {
+            id: Id(11),
+            crate_id: 0,
+            name: Some("Parser".to_string()),
+            span: None,
+            visibility: RustdocVisibility::Public,
+            docs: Some("Parser internals".to_string()),
+            links: HashMap::new(),
+            attrs: Vec::new(),
+            deprecation: None,
+            inner: ItemEnum::Struct(Struct {
+                kind: StructKind::Unit,
+                generics: Generics {
+                    params: vec![],
+                    where_predicates: vec![],
+                },
+                impls: vec![],
+            }),
+        },
+    );
+    paths.insert(
+        Id(11),
+        ItemSummary {
+            crate_id: 0,
+            path: vec![crate_name.to_string(), "internal".to_string(), "Parser".to_string()],
+            kind: ItemKind::Struct,
+        },
+    );
+
+    index.insert(
+        Id(2),
+        Item {
+            id: Id(2),
+            crate_id: 0,
+            name: Some("Parser".to_string()),
+            span: None,
+            visibility: RustdocVisibility::Public,
+            docs: None,
+            links: HashMap::new(),
+            attrs: Vec::new(),
+            deprecation: None,
+            inner: ItemEnum::Use(Use {
+                source: "crate::internal::Parser".to_string(),
+                name: "Parser".to_string(),
+                id: Some(Id(11)),
+                is_glob: false,
+            }),
+        },
+    );
+    paths.insert(
+        Id(2),
+        ItemSummary {
+            crate_id: 0,
+            path: vec![crate_name.to_string(), "Parser".to_string()],
+            kind: ItemKind::Use,
         },
     );
 

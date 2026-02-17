@@ -248,3 +248,93 @@ async fn crate_re_exports_and_derive_macros_parse_seeded_source_files() {
             })
     );
 }
+
+#[tokio::test]
+async fn crate_re_exports_prefers_rustdoc_canonical_paths_when_available() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let rustdoc_source_file_id = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "rustdoc-json/serde_json-1.0.145.json",
+        Some("rustdoc_json"),
+        "{\"mock\":\"rustdoc\"}",
+    )
+    .await
+    .expect("failed to seed rustdoc-json source file");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source,
+            rustdoc_item_id,
+            canonical_path,
+            definition_path
+         ) VALUES (
+            $1, $2, 'Parser', 'struct', 'struct Parser', 'public', 1, 1, 'rustdoc_json', 42, \
+         'serde_json::Parser', 'serde_json::internal::Parser'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(rustdoc_source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed rustdoc re-export symbol");
+
+    let re_exports_response = context
+        .mcp
+        .call_tool(
+            "crate.re_exports",
+            json!({
+                "crate_name": "serde_json",
+                "path_prefix": "serde_json::",
+                "limit": 10
+            }),
+        )
+        .await
+        .expect("crate.re_exports call failed");
+    let re_exports_payload = common::structured_content(&re_exports_response);
+    assert!(
+        re_exports_payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1
+    );
+
+    let re_export_entries = re_exports_payload
+        .get("re_exports")
+        .and_then(Value::as_array)
+        .expect("re_exports should be an array");
+    assert!(
+        re_export_entries
+            .iter()
+            .any(|entry| {
+                entry
+                    .get("canonical_path")
+                    .and_then(Value::as_str)
+                    == Some("serde_json::Parser")
+                    && entry
+                        .get("original_definition_path")
+                        .and_then(Value::as_str)
+                        == Some("serde_json::internal::Parser")
+            })
+    );
+}

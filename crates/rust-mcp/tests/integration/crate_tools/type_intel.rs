@@ -23,6 +23,12 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
             .get("type_definition")
             .is_some_and(Value::is_null)
     );
+    assert!(
+        type_info_payload
+            .get("trait_definitions")
+            .and_then(Value::as_array)
+            .is_some_and(|definitions| definitions.is_empty())
+    );
 
     let trait_impls_response = context
         .mcp
@@ -42,6 +48,12 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
             .get("count")
             .and_then(Value::as_u64),
         Some(0)
+    );
+    assert!(
+        trait_impls_payload
+            .get("trait_definitions")
+            .and_then(Value::as_array)
+            .is_some_and(|definitions| definitions.is_empty())
     );
 
     let error_types_response = context
@@ -141,6 +153,25 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             })
     );
 
+    let type_info_trait_definitions = type_info_payload
+        .get("trait_definitions")
+        .and_then(Value::as_array)
+        .expect("trait_definitions should be an array");
+    assert!(
+        type_info_trait_definitions
+            .iter()
+            .any(|definition| {
+                definition
+                    .get("trait_name")
+                    .and_then(Value::as_str)
+                    == Some("Display")
+                    && definition
+                        .get("is_dyn_compatible")
+                        .and_then(Value::as_bool)
+                        == Some(true)
+            })
+    );
+
     let trait_impls_response = context
         .mcp
         .call_tool(
@@ -160,6 +191,21 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             .and_then(Value::as_u64)
             .unwrap_or_default()
             >= 3
+    );
+
+    let trait_impls_definitions = trait_impls_payload
+        .get("trait_definitions")
+        .and_then(Value::as_array)
+        .expect("trait_definitions should be an array");
+    assert!(
+        trait_impls_definitions
+            .iter()
+            .any(|definition| {
+                definition
+                    .get("trait_name")
+                    .and_then(Value::as_str)
+                    == Some("Display")
+            })
     );
 
     let error_types_response = context

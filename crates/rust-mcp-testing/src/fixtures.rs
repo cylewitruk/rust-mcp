@@ -1,6 +1,10 @@
 //! Reusable database fixture helpers for rust-mcp integration tests.
 
-use anyhow::Result;
+use std::io::Cursor;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context as _, Result, bail};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use sqlx::PgPool;
@@ -12,6 +16,79 @@ pub struct SeededCrateVersion {
     pub crate_id: i64,
     /// Inserted crate version row identifier.
     pub version_id: i64,
+}
+
+/// Temporary directory containing one or more materialized rustdoc JSON files.
+#[derive(Debug)]
+pub struct RustdocFixtureDir {
+    path: PathBuf,
+}
+
+impl RustdocFixtureDir {
+    /// Returns the materialized fixture directory path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for RustdocFixtureDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Resolves a workspace-root rustdoc fixture path.
+pub fn workspace_rustdoc_fixture_path(file_name: &str) -> Result<PathBuf> {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture_path = workspace_root
+        .join("rustdoc-json")
+        .join(file_name);
+    if !fixture_path.exists() {
+        bail!("rustdoc fixture `{}` does not exist at {}", file_name, fixture_path.display());
+    }
+    Ok(fixture_path)
+}
+
+/// Decompresses a `.json.zst` rustdoc fixture into a temporary directory using
+/// the `<crate>-<version>.json` naming convention expected by the indexer.
+pub fn materialize_workspace_rustdoc_fixture_zst(
+    file_name: &str,
+    crate_name: &str,
+    version: &str,
+) -> Result<RustdocFixtureDir> {
+    let fixture_path = workspace_rustdoc_fixture_path(file_name)?;
+    materialize_rustdoc_fixture_zst(&fixture_path, crate_name, version)
+}
+
+/// Decompresses a `.json.zst` rustdoc fixture into a temporary directory using
+/// the `<crate>-<version>.json` naming convention expected by the indexer.
+pub fn materialize_rustdoc_fixture_zst(
+    fixture_path: &Path,
+    crate_name: &str,
+    version: &str,
+) -> Result<RustdocFixtureDir> {
+    let compressed = std::fs::read(fixture_path).with_context(|| {
+        format!("failed to read compressed rustdoc fixture {}", fixture_path.display())
+    })?;
+    let decoded = zstd::stream::decode_all(Cursor::new(compressed)).with_context(|| {
+        format!("failed to decompress zstd rustdoc fixture {}", fixture_path.display())
+    })?;
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("rust-mcp-rustdoc-zst-{nanos}"));
+    std::fs::create_dir_all(&dir).with_context(|| {
+        format!("failed to create materialized rustdoc fixture directory {}", dir.display())
+    })?;
+
+    let output_path = dir.join(format!("{crate_name}-{version}.json"));
+    std::fs::write(&output_path, decoded).with_context(|| {
+        format!("failed to write materialized rustdoc fixture {}", output_path.display())
+    })?;
+
+    Ok(RustdocFixtureDir { path: dir })
 }
 
 /// Inserts or updates a crate row with default metadata and returns the crate

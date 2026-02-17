@@ -156,6 +156,39 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
     .expect("failed to seed From impl row");
 
     sqlx::query(
+        "INSERT INTO crate_traits (
+            crate_version_id,
+            trait_name,
+            is_auto,
+            is_unsafe,
+            is_dyn_compatible,
+            supertraits,
+            required_methods,
+            provided_methods,
+            associated_types,
+            generics,
+            index_source
+         ) VALUES (
+            $1, 'Display', FALSE, FALSE, TRUE, $2::JSONB, $3::JSONB, $4::JSONB, $5::JSONB, \
+         $6::JSONB, 'fixture'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(json!([]))
+    .bind(json!([{"name":"fmt","signature":"fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result"}]))
+    .bind(json!([]))
+    .bind(json!([]))
+    .bind(json!([]))
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed crate_traits row");
+
+    sqlx::query(
         "INSERT INTO symbols (
             crate_version_id,
             source_file_id,

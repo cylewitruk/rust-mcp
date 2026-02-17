@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -488,6 +489,71 @@ fn resolve_definition_path(id: &Id, krate: &RustdocCrate) -> Option<String> {
         .map(|summary| summary.path.join("::"))
 }
 
+fn path_rank(path: &str) -> (usize, usize, &str) {
+    let segments = path
+        .split("::")
+        .filter(|segment| !segment.is_empty())
+        .count();
+    (segments, path.len(), path)
+}
+
+fn resolve_use_target_id(start: Id, krate: &RustdocCrate) -> Id {
+    let mut current = start;
+    let mut seen = HashSet::<Id>::new();
+
+    loop {
+        if !seen.insert(current) {
+            // Defensively break cycles in malformed data.
+            return current;
+        }
+
+        let Some(item) = krate.index.get(&current) else {
+            return current;
+        };
+        let ItemEnum::Use(use_item) = &item.inner else {
+            return current;
+        };
+        let Some(next_id) = use_item.id else {
+            return current;
+        };
+        current = next_id;
+    }
+}
+
+fn build_canonical_path_map(krate: &RustdocCrate) -> HashMap<Id, String> {
+    let mut canonical = krate
+        .paths
+        .iter()
+        .map(|(id, summary)| (*id, summary.path.join("::")))
+        .collect::<HashMap<Id, String>>();
+
+    for (use_id, item) in &krate.index {
+        let ItemEnum::Use(use_item) = &item.inner else {
+            continue;
+        };
+        if !matches!(item.visibility, RustdocVisibility::Public) || use_item.is_glob {
+            continue;
+        }
+
+        let Some(target_id) = use_item.id else {
+            continue;
+        };
+        let Some(alias_path) = canonical.get(use_id).cloned() else {
+            continue;
+        };
+
+        let resolved_target = resolve_use_target_id(target_id, krate);
+        let entry = canonical
+            .entry(resolved_target)
+            .or_insert_with(|| alias_path.clone());
+        if path_rank(&alias_path) < path_rank(entry.as_str()) {
+            *entry = alias_path;
+        }
+    }
+
+    canonical
+}
+
 fn extract_span(span: &Option<Span>) -> (i32, i32) {
     match span {
         Some(span) => {
@@ -731,7 +797,10 @@ fn collect_auto_traits(impl_ids: &[Id], krate: &RustdocCrate) -> serde_json::Val
 // Symbol extraction
 // ============================================================
 
-fn extract_symbols(krate: &RustdocCrate) -> Vec<ExtractedSymbol> {
+fn extract_symbols(
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> Vec<ExtractedSymbol> {
     let mut symbols = Vec::new();
 
     for (id, item) in &krate.index {
@@ -759,7 +828,10 @@ fn extract_symbols(krate: &RustdocCrate) -> Vec<ExtractedSymbol> {
             start_line,
             end_line,
             rustdoc_item_id: id.0 as i32,
-            canonical_path: resolve_definition_path(id, krate),
+            canonical_path: canonical_paths
+                .get(id)
+                .cloned()
+                .or_else(|| resolve_definition_path(id, krate)),
             definition_path: resolve_definition_path(id, krate),
             deprecated_since: item
                 .deprecation
@@ -779,15 +851,22 @@ fn extract_symbols(krate: &RustdocCrate) -> Vec<ExtractedSymbol> {
 // Type extraction (structs, enums, unions, type aliases)
 // ============================================================
 
-fn extract_types(krate: &RustdocCrate) -> Vec<ExtractedType> {
+fn extract_types(
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> Vec<ExtractedType> {
     let mut types = Vec::new();
 
     for (id, item) in &krate.index {
         match &item.inner {
-            ItemEnum::Struct(st) => types.push(extract_struct(id, item, st, krate)),
-            ItemEnum::Enum(en) => types.push(extract_enum(id, item, en, krate)),
-            ItemEnum::Union(un) => types.push(extract_union(id, item, un, krate)),
-            ItemEnum::TypeAlias(ta) => types.push(extract_type_alias(id, item, ta, krate)),
+            ItemEnum::Struct(st) => {
+                types.push(extract_struct(id, item, st, krate, canonical_paths))
+            }
+            ItemEnum::Enum(en) => types.push(extract_enum(id, item, en, krate, canonical_paths)),
+            ItemEnum::Union(un) => types.push(extract_union(id, item, un, krate, canonical_paths)),
+            ItemEnum::TypeAlias(ta) => {
+                types.push(extract_type_alias(id, item, ta, krate, canonical_paths))
+            }
             _ => {}
         }
     }
@@ -795,7 +874,13 @@ fn extract_types(krate: &RustdocCrate) -> Vec<ExtractedType> {
     types
 }
 
-fn extract_struct(id: &Id, item: &Item, st: &Struct, krate: &RustdocCrate) -> ExtractedType {
+fn extract_struct(
+    id: &Id,
+    item: &Item,
+    st: &Struct,
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> ExtractedType {
     let name = item
         .name
         .clone()
@@ -818,7 +903,10 @@ fn extract_struct(id: &Id, item: &Item, st: &Struct, krate: &RustdocCrate) -> Ex
         start_line,
         end_line,
         rustdoc_item_id: id.0 as i32,
-        canonical_path: resolve_definition_path(id, krate),
+        canonical_path: canonical_paths
+            .get(id)
+            .cloned()
+            .or_else(|| resolve_definition_path(id, krate)),
         definition_path: resolve_definition_path(id, krate),
         deprecated_since: item
             .deprecation
@@ -834,7 +922,13 @@ fn extract_struct(id: &Id, item: &Item, st: &Struct, krate: &RustdocCrate) -> Ex
     }
 }
 
-fn extract_enum(id: &Id, item: &Item, en: &Enum, krate: &RustdocCrate) -> ExtractedType {
+fn extract_enum(
+    id: &Id,
+    item: &Item,
+    en: &Enum,
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> ExtractedType {
     let name = item
         .name
         .clone()
@@ -881,7 +975,10 @@ fn extract_enum(id: &Id, item: &Item, en: &Enum, krate: &RustdocCrate) -> Extrac
         start_line,
         end_line,
         rustdoc_item_id: id.0 as i32,
-        canonical_path: resolve_definition_path(id, krate),
+        canonical_path: canonical_paths
+            .get(id)
+            .cloned()
+            .or_else(|| resolve_definition_path(id, krate)),
         definition_path: resolve_definition_path(id, krate),
         deprecated_since: item
             .deprecation
@@ -897,7 +994,13 @@ fn extract_enum(id: &Id, item: &Item, en: &Enum, krate: &RustdocCrate) -> Extrac
     }
 }
 
-fn extract_union(id: &Id, item: &Item, un: &Union, krate: &RustdocCrate) -> ExtractedType {
+fn extract_union(
+    id: &Id,
+    item: &Item,
+    un: &Union,
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> ExtractedType {
     let name = item
         .name
         .clone()
@@ -914,7 +1017,10 @@ fn extract_union(id: &Id, item: &Item, un: &Union, krate: &RustdocCrate) -> Extr
         start_line,
         end_line,
         rustdoc_item_id: id.0 as i32,
-        canonical_path: resolve_definition_path(id, krate),
+        canonical_path: canonical_paths
+            .get(id)
+            .cloned()
+            .or_else(|| resolve_definition_path(id, krate)),
         definition_path: resolve_definition_path(id, krate),
         deprecated_since: item
             .deprecation
@@ -930,7 +1036,13 @@ fn extract_union(id: &Id, item: &Item, un: &Union, krate: &RustdocCrate) -> Extr
     }
 }
 
-fn extract_type_alias(id: &Id, item: &Item, ta: &TypeAlias, krate: &RustdocCrate) -> ExtractedType {
+fn extract_type_alias(
+    id: &Id,
+    item: &Item,
+    ta: &TypeAlias,
+    krate: &RustdocCrate,
+    canonical_paths: &HashMap<Id, String>,
+) -> ExtractedType {
     let name = item
         .name
         .clone()
@@ -947,7 +1059,10 @@ fn extract_type_alias(id: &Id, item: &Item, ta: &TypeAlias, krate: &RustdocCrate
         start_line,
         end_line,
         rustdoc_item_id: id.0 as i32,
-        canonical_path: resolve_definition_path(id, krate),
+        canonical_path: canonical_paths
+            .get(id)
+            .cloned()
+            .or_else(|| resolve_definition_path(id, krate)),
         definition_path: resolve_definition_path(id, krate),
         deprecated_since: item
             .deprecation
@@ -1194,9 +1309,10 @@ fn partition_trait_items(
 // ============================================================
 
 fn extract_all(krate: &RustdocCrate) -> RustdocExtraction {
+    let canonical_paths = build_canonical_path_map(krate);
     RustdocExtraction {
-        symbols: extract_symbols(krate),
-        types: extract_types(krate),
+        symbols: extract_symbols(krate, &canonical_paths),
+        types: extract_types(krate, &canonical_paths),
         impls: extract_impls(krate),
         traits: extract_traits(krate),
     }
@@ -1774,7 +1890,7 @@ mod tests {
     use rustdoc_types::{
         Abi, Deprecation, Function, FunctionHeader, FunctionSignature, Generics, Id, Impl, Item,
         ItemEnum, ItemKind, ItemSummary, Module, Path, Span, Struct, StructKind, Target, Trait,
-        Type as RustdocType, Visibility as RustdocVisibility,
+        Type as RustdocType, Use, Visibility as RustdocVisibility,
     };
 
     use super::*;
@@ -2235,6 +2351,134 @@ mod tests {
                 .iter()
                 .any(|m| m["name"] == "provided"),
             "provided_methods should contain 'provided'"
+        );
+    }
+
+    #[test]
+    fn extract_all_prefers_shortest_public_reexport_path_as_canonical() {
+        let mut index = HashMap::new();
+        let mut paths = HashMap::new();
+
+        index.insert(
+            Id(0),
+            item(
+                0,
+                "my_crate",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: true,
+                    items: vec![Id(10), Id(2)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(0),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        index.insert(
+            Id(10),
+            item(
+                10,
+                "internal",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: false,
+                    items: vec![Id(1)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(10),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "internal".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        index.insert(
+            Id(1),
+            item(
+                1,
+                "InnerError",
+                RustdocVisibility::Public,
+                ItemEnum::Struct(Struct {
+                    kind: StructKind::Unit,
+                    generics: empty_generics(),
+                    impls: vec![],
+                }),
+            ),
+        );
+        paths.insert(
+            Id(1),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "internal".into(), "InnerError".into()],
+                kind: ItemKind::Struct,
+            },
+        );
+
+        index.insert(
+            Id(2),
+            item(
+                2,
+                "Error",
+                RustdocVisibility::Public,
+                ItemEnum::Use(Use {
+                    source: "crate::internal::InnerError".into(),
+                    name: "Error".into(),
+                    id: Some(Id(1)),
+                    is_glob: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(2),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "Error".into()],
+                kind: ItemKind::Use,
+            },
+        );
+
+        let krate = RustdocCrate {
+            root: Id(0),
+            crate_version: Some("1.0.0".into()),
+            includes_private: false,
+            index,
+            paths,
+            external_crates: HashMap::new(),
+            target: Target {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                target_features: vec![],
+            },
+            format_version: 57,
+        };
+
+        let result = extract_all(&krate);
+        let symbol = result
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "InnerError")
+            .expect("expected rustdoc symbol for re-exported type");
+        assert_eq!(
+            symbol
+                .definition_path
+                .as_deref(),
+            Some("my_crate::internal::InnerError")
+        );
+        assert_eq!(
+            symbol
+                .canonical_path
+                .as_deref(),
+            Some("my_crate::Error")
         );
     }
 

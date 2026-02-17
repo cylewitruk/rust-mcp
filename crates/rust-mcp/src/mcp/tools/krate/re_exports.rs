@@ -55,6 +55,16 @@ pub(crate) struct ReExportSourceRow {
 }
 
 #[derive(Debug, Clone, FromRow)]
+pub(crate) struct RustdocReExportRow {
+    pub(crate) canonical_path: String,
+    pub(crate) original_definition_path: String,
+    pub(crate) kind: String,
+    pub(crate) visibility: Option<String>,
+    pub(crate) source_path: String,
+    pub(crate) source_line: i32,
+}
+
+#[derive(Debug, Clone, FromRow)]
 pub(crate) struct ReExportSymbolKindRow {
     pub(crate) kind: String,
     pub(crate) visibility: Option<String>,
@@ -347,108 +357,170 @@ impl McpServer {
             latest_version.clone()
         };
 
-        let sources = sqlx::query_as::<_, ReExportSourceRow>(
-            "SELECT path, content
-             FROM source_files
-             WHERE crate_version_id = $1
-               AND (path = 'src/lib.rs' OR path LIKE 'src/%/mod.rs')
-             ORDER BY CASE WHEN path = 'src/lib.rs' THEN 0 ELSE 1 END, path ASC",
+        let rustdoc_re_exports = sqlx::query_as::<_, RustdocReExportRow>(
+            "SELECT
+                s.canonical_path,
+                s.definition_path AS original_definition_path,
+                s.kind,
+                s.visibility,
+                sf.path AS source_path,
+                s.start_line AS source_line
+             FROM symbols s
+             JOIN source_files sf ON sf.id = s.source_file_id
+             WHERE s.crate_version_id = $1
+               AND s.index_source = 'rustdoc_json'
+               AND s.visibility = 'public'
+               AND s.canonical_path IS NOT NULL
+               AND s.definition_path IS NOT NULL
+               AND s.canonical_path <> s.definition_path
+               AND ($2::TEXT IS NULL OR s.canonical_path LIKE ($2 || '%'))
+             ORDER BY
+                s.canonical_path ASC,
+                s.definition_path ASC,
+                s.kind ASC,
+                s.start_line ASC
+             LIMIT $3",
         )
         .bind(selected_version.id)
+        .bind(path_prefix.as_deref())
+        .bind(i64::from(limit))
         .fetch_all(&self.state.db)
         .await
-        .map_err(|e| format!("crate.re_exports source query failed: {e}"))?;
+        .map_err(|e| format!("crate.re_exports rustdoc query failed: {e}"))?;
 
-        let mut re_exports = Vec::<CrateReExportEntry>::new();
-        for source in sources {
-            let module_prefix = module_prefix_from_path(&crate_row.name, &source.path);
-            for (line_idx, line) in source
-                .content
-                .lines()
-                .enumerate()
-            {
-                let parsed = parse_pub_use_statement(line, (line_idx + 1) as u32);
-                for entry in parsed {
-                    let canonical_path = format!("{}::{}", module_prefix, entry.exported_name);
-                    if let Some(prefix) = path_prefix.as_deref()
-                        && !canonical_path.starts_with(prefix)
-                    {
-                        continue;
+        let (re_exports, confidence_assessment, provenance) = if !rustdoc_re_exports.is_empty() {
+            let entries = rustdoc_re_exports
+                .into_iter()
+                .map(|row| CrateReExportEntry {
+                    canonical_path: row.canonical_path,
+                    original_definition_path: row.original_definition_path,
+                    kind: row.kind,
+                    visibility: row
+                        .visibility
+                        .unwrap_or_else(|| "public".to_string()),
+                    shortest_public_path: true,
+                    source_path: row.source_path,
+                    source_line: row.source_line.max(1) as u32,
+                })
+                .collect::<Vec<_>>();
+
+            (
+                entries,
+                ConfidenceAssessment {
+                    level: ConfidenceLevel::High,
+                    reason: "re-export canonical paths were resolved from rustdoc_json symbol \
+                             graph"
+                        .to_string(),
+                },
+                "local_postgres_index(symbols[rustdoc_json], source_files)".to_string(),
+            )
+        } else {
+            let sources = sqlx::query_as::<_, ReExportSourceRow>(
+                "SELECT path, content
+                 FROM source_files
+                 WHERE crate_version_id = $1
+                   AND (path = 'src/lib.rs' OR path LIKE 'src/%/mod.rs')
+                 ORDER BY CASE WHEN path = 'src/lib.rs' THEN 0 ELSE 1 END, path ASC",
+            )
+            .bind(selected_version.id)
+            .fetch_all(&self.state.db)
+            .await
+            .map_err(|e| format!("crate.re_exports source query failed: {e}"))?;
+
+            let mut entries = Vec::<CrateReExportEntry>::new();
+            for source in sources {
+                let module_prefix = module_prefix_from_path(&crate_row.name, &source.path);
+                for (line_idx, line) in source
+                    .content
+                    .lines()
+                    .enumerate()
+                {
+                    let parsed = parse_pub_use_statement(line, (line_idx + 1) as u32);
+                    for entry in parsed {
+                        let canonical_path = format!("{}::{}", module_prefix, entry.exported_name);
+                        if let Some(prefix) = path_prefix.as_deref()
+                            && !canonical_path.starts_with(prefix)
+                        {
+                            continue;
+                        }
+
+                        let normalized_target =
+                            normalize_target_path(&crate_row.name, &entry.target_path);
+
+                        let symbol = sqlx::query_as::<_, ReExportSymbolKindRow>(
+                            "SELECT
+                                s.kind,
+                                s.visibility
+                             FROM symbols s
+                             WHERE s.crate_version_id = $1
+                               AND LOWER(s.name) = LOWER($2)
+                             ORDER BY CASE WHEN s.visibility = 'public' THEN 0 ELSE 1 END, \
+                             s.start_line ASC
+                             LIMIT 1",
+                        )
+                        .bind(selected_version.id)
+                        .bind(&entry.exported_name)
+                        .fetch_optional(&self.state.db)
+                        .await
+                        .map_err(|e| format!("crate.re_exports symbol lookup failed: {e}"))?;
+
+                        let kind = symbol
+                            .as_ref()
+                            .map(|row| row.kind.clone())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let visibility = symbol
+                            .and_then(|row| row.visibility)
+                            .unwrap_or_else(|| "public".to_string());
+
+                        entries.push(CrateReExportEntry {
+                            canonical_path,
+                            original_definition_path: normalized_target,
+                            kind,
+                            visibility,
+                            shortest_public_path: true,
+                            source_path: source.path.clone(),
+                            source_line: entry.source_line,
+                        });
+
+                        if entries.len() >= limit as usize {
+                            break;
+                        }
                     }
 
-                    let normalized_target =
-                        normalize_target_path(&crate_row.name, &entry.target_path);
-
-                    let symbol = sqlx::query_as::<_, ReExportSymbolKindRow>(
-                        "SELECT
-                            s.kind,
-                            s.visibility
-                         FROM symbols s
-                         WHERE s.crate_version_id = $1
-                           AND LOWER(s.name) = LOWER($2)
-                         ORDER BY CASE WHEN s.visibility = 'public' THEN 0 ELSE 1 END, \
-                         s.start_line ASC
-                         LIMIT 1",
-                    )
-                    .bind(selected_version.id)
-                    .bind(&entry.exported_name)
-                    .fetch_optional(&self.state.db)
-                    .await
-                    .map_err(|e| format!("crate.re_exports symbol lookup failed: {e}"))?;
-
-                    let kind = symbol
-                        .as_ref()
-                        .map(|row| row.kind.clone())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let visibility = symbol
-                        .and_then(|row| row.visibility)
-                        .unwrap_or_else(|| "public".to_string());
-
-                    re_exports.push(CrateReExportEntry {
-                        canonical_path,
-                        original_definition_path: normalized_target,
-                        kind,
-                        visibility,
-                        shortest_public_path: true,
-                        source_path: source.path.clone(),
-                        source_line: entry.source_line,
-                    });
-
-                    if re_exports.len() >= limit as usize {
+                    if entries.len() >= limit as usize {
                         break;
                     }
                 }
 
-                if re_exports.len() >= limit as usize {
+                if entries.len() >= limit as usize {
                     break;
                 }
             }
 
-            if re_exports.len() >= limit as usize {
-                break;
-            }
-        }
+            let confidence = if entries.is_empty() {
+                ConfidenceAssessment {
+                    level: ConfidenceLevel::Low,
+                    reason: "no public re-exports were detected in indexed module roots"
+                        .to_string(),
+                }
+            } else if entries
+                .iter()
+                .any(|entry| entry.kind == "unknown")
+            {
+                ConfidenceAssessment {
+                    level: ConfidenceLevel::Medium,
+                    reason: "some re-export entries could not be mapped to indexed symbol kinds"
+                        .to_string(),
+                }
+            } else {
+                ConfidenceAssessment {
+                    level: ConfidenceLevel::High,
+                    reason: "re-export paths and symbol kinds were resolved from indexed source"
+                        .to_string(),
+                }
+            };
 
-        let confidence_assessment = if re_exports.is_empty() {
-            ConfidenceAssessment {
-                level: ConfidenceLevel::Low,
-                reason: "no public re-exports were detected in indexed module roots".to_string(),
-            }
-        } else if re_exports
-            .iter()
-            .any(|entry| entry.kind == "unknown")
-        {
-            ConfidenceAssessment {
-                level: ConfidenceLevel::Medium,
-                reason: "some re-export entries could not be mapped to indexed symbol kinds"
-                    .to_string(),
-            }
-        } else {
-            ConfidenceAssessment {
-                level: ConfidenceLevel::High,
-                reason: "re-export paths and symbol kinds were resolved from indexed source"
-                    .to_string(),
-            }
+            (entries, confidence, "local_postgres_index(source_files, symbols)".to_string())
         };
 
         let freshness_check_result = freshness_outcome
@@ -489,7 +561,7 @@ impl McpServer {
                 "symbol.search".to_string(),
                 "source.read".to_string(),
             ],
-            provenance: "local_postgres_index(source_files, symbols)".to_string(),
+            provenance,
         }))
     }
 }

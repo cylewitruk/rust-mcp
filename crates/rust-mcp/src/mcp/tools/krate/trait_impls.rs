@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use rmcp::{Json, schemars};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateImplLookupRow, CrateImplMethod,
-    CrateVersionSelectionRow, ResponseFreshnessSource,
+    CrateTraitAssociatedType, CrateTraitDefinition, CrateTraitLookupRow, CrateVersionSelectionRow,
+    ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required, trait_impls_limit};
@@ -28,6 +31,7 @@ pub struct CrateTraitImplsResponse {
     pub limit: u32,
     pub count: usize,
     pub impls: Vec<CrateTraitImplRelation>,
+    pub trait_definitions: Vec<CrateTraitDefinition>,
     pub freshness_check_performed: bool,
     pub freshness_check_result: String,
     pub refresh_enqueued: bool,
@@ -46,12 +50,17 @@ pub struct CrateTraitImplRelation {
     pub trait_name: Option<String>,
     pub trait_name_display: Option<String>,
     pub impl_kind: String,
+    pub blanket_impl: bool,
+    pub synthetic_impl: bool,
+    pub negative_impl: bool,
+    pub blanket_type: Option<String>,
+    pub generic_params: Vec<String>,
+    pub where_clauses: Vec<String>,
     pub methods: Vec<CrateImplMethod>,
     pub source_path: String,
     pub start_line: i32,
     pub end_line: i32,
     pub index_source: String,
-    pub blanket_impl: bool,
 }
 
 fn parse_impl_methods(value: &Value) -> Vec<CrateImplMethod> {
@@ -74,17 +83,69 @@ fn parse_impl_methods(value: &Value) -> Vec<CrateImplMethod> {
     }
 }
 
-fn looks_blanket_impl(type_name_display: Option<&str>) -> bool {
-    let Some(value) = type_name_display.map(str::trim) else {
-        return false;
-    };
-    if value.is_empty() {
-        return false;
+fn parse_string_list(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
     }
+}
 
-    value
-        .chars()
-        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+fn parse_generic_param_rendered(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .get("rendered")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_assoc_types(value: &Value) -> Vec<CrateTraitAssociatedType> {
+    match value {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry
+                    .get("name")
+                    .and_then(Value::as_str)?
+                    .to_string();
+                let bounds = entry
+                    .get("bounds")
+                    .map(parse_string_list)
+                    .unwrap_or_default();
+                let default = entry
+                    .get("default")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+                Some(CrateTraitAssociatedType { name, bounds, default })
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
+    CrateTraitDefinition {
+        trait_name: row.trait_name,
+        is_auto: row.is_auto,
+        is_unsafe: row.is_unsafe,
+        is_dyn_compatible: row.is_dyn_compatible,
+        supertraits: parse_string_list(&row.supertraits),
+        required_methods: parse_impl_methods(&row.required_methods),
+        provided_methods: parse_impl_methods(&row.provided_methods),
+        associated_types: parse_assoc_types(&row.associated_types),
+        generic_params: parse_generic_param_rendered(&row.generics),
+        index_source: row.index_source,
+    }
 }
 
 impl McpServer {
@@ -258,6 +319,12 @@ impl McpServer {
                 ci.trait_name_display,
                 ci.impl_kind,
                 ci.methods,
+                ci.is_blanket,
+                ci.is_synthetic,
+                ci.is_negative,
+                ci.blanket_type,
+                ci.generics,
+                ci.where_clauses,
                 sf.path AS source_path,
                 ci.start_line,
                 ci.end_line,
@@ -294,17 +361,73 @@ impl McpServer {
                 trait_name: row.trait_name,
                 trait_name_display: row.trait_name_display,
                 impl_kind: row.impl_kind,
+                blanket_impl: row.is_blanket,
+                synthetic_impl: row.is_synthetic,
+                negative_impl: row.is_negative,
+                blanket_type: row.blanket_type,
+                generic_params: parse_generic_param_rendered(&row.generics),
+                where_clauses: parse_string_list(&row.where_clauses),
                 methods: parse_impl_methods(&row.methods),
                 source_path: row.source_path,
                 start_line: row.start_line,
                 end_line: row.end_line,
                 index_source: row.index_source,
-                blanket_impl: looks_blanket_impl(
-                    row.type_name_display
-                        .as_deref(),
-                ),
             })
             .collect::<Vec<_>>();
+
+        let trait_names = impls
+            .iter()
+            .filter_map(|relation| relation.trait_name.as_deref())
+            .map(|trait_name| trait_name.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+
+        let trait_definitions = if trait_names.is_empty() {
+            Vec::new()
+        } else {
+            let mut definitions_by_name = HashMap::<String, CrateTraitDefinition>::new();
+            let rows = sqlx::query_as::<_, CrateTraitLookupRow>(
+                "SELECT
+                    trait_name,
+                    is_auto,
+                    is_unsafe,
+                    is_dyn_compatible,
+                    supertraits,
+                    required_methods,
+                    provided_methods,
+                    associated_types,
+                    generics,
+                    index_source
+                 FROM crate_traits
+                 WHERE crate_version_id = $1
+                   AND LOWER(trait_name) = ANY($2::TEXT[])
+                 ORDER BY
+                    CASE WHEN index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
+                    trait_name ASC",
+            )
+            .bind(selected_version.id)
+            .bind(&trait_names)
+            .fetch_all(&self.state.db)
+            .await
+            .map_err(|e| format!("crate.trait_impls trait definition query failed: {e}"))?;
+
+            for row in rows {
+                definitions_by_name
+                    .entry(
+                        row.trait_name
+                            .to_ascii_lowercase(),
+                    )
+                    .or_insert_with(|| trait_definition_from_row(row));
+            }
+
+            let mut out = definitions_by_name
+                .into_values()
+                .collect::<Vec<_>>();
+            out.sort_by(|left, right| {
+                left.trait_name
+                    .cmp(&right.trait_name)
+            });
+            out
+        };
 
         let confidence_assessment = if impls.is_empty() {
             ConfidenceAssessment {
@@ -342,6 +465,7 @@ impl McpServer {
             limit,
             count: impls.len(),
             impls,
+            trait_definitions,
             freshness_check_performed: freshness_outcome.freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
             refresh_enqueued,

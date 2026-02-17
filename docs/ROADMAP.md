@@ -1,7 +1,7 @@
 # ROADMAP
 
 Status: Active  
-Last updated: 2026-02-16
+Last updated: 2026-02-17
 
 This file tracks only open work and future direction.
 
@@ -24,6 +24,11 @@ The previously planned milestone set through M13 is complete, including:
 ## P1: Rustdoc Intelligence Quality
 
 - [ ] Complete rustdoc JSON enrichment for type/impl/trait fidelity (including better canonical path handling for re-exports).
+  - [x] Canonical-path mapping now prefers shortest public re-export path from rustdoc `Use` graph.
+  - [x] `crate.re_exports` now prefers rustdoc canonical/definition-path pairs when available.
+  - [x] `crate.type_info` and `crate.trait_impls` now expose richer rustdoc impl metadata (`is_blanket`, `is_synthetic`, `is_negative`, `blanket_type`, generics, where-clauses).
+  - [x] `crate_traits` metadata is now surfaced in `crate.type_info` and `crate.trait_impls` responses as `trait_definitions`.
+  - [ ] Remaining: improve canonicalization coverage for complex glob/re-export edge cases and external-path remapping nuances.
 - [ ] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
 - [ ] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
 - [ ] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
