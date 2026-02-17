@@ -23,6 +23,8 @@ pub(super) const SEEDED_CRATE_VERSION: &str = "1.2.3";
 pub(super) const SEEDED_CRATE_NEXT_VERSION: &str = "1.3.0";
 pub(super) const SEEDED_ALT_CRATE_NAME: &str = "demo-alt";
 pub(super) const SEEDED_ALT_CRATE_VERSION: &str = "0.9.0";
+pub(super) const SEEDED_TOKIO_CRATE_NAME: &str = "tokio";
+pub(super) const SEEDED_TOKIO_CRATE_VERSION: &str = "1.49.0";
 const SEEDED_AUDIT_MOUNT_PATH: &str = "/e2e-fixtures";
 
 struct DocsHtmlFixture {
@@ -149,7 +151,7 @@ async fn mock_search_crates(Query(params): Query<HashMap<String, String>>) -> Js
                 .to_ascii_lowercase()
         })
         .unwrap_or_default();
-    let candidates = [SEEDED_CRATE_NAME, SEEDED_ALT_CRATE_NAME];
+    let candidates = [SEEDED_CRATE_NAME, SEEDED_ALT_CRATE_NAME, SEEDED_TOKIO_CRATE_NAME];
     let crates = candidates
         .into_iter()
         .filter(|name| {
@@ -163,7 +165,7 @@ async fn mock_search_crates(Query(params): Query<HashMap<String, String>>) -> Js
 
     Json(json!({
         "crates": crates,
-        "meta": {"total": 2}
+        "meta": {"total": 3}
     }))
 }
 
@@ -251,6 +253,39 @@ async fn mock_crate_detail(Path(crate_name): Path<String>) -> impl IntoResponse 
                 "category": "Development tools"
             }]
         }),
+        SEEDED_TOKIO_CRATE_NAME => json!({
+            "crate": {
+                "name": SEEDED_TOKIO_CRATE_NAME,
+                "description": "E2E seeded tokio fixture crate",
+                "repository": "https://example.test/tokio",
+                "documentation": "https://docs.rs/tokio",
+                "homepage": "https://example.test/tokio",
+                "max_version": SEEDED_TOKIO_CRATE_VERSION
+            },
+            "versions": [{
+                "num": SEEDED_TOKIO_CRATE_VERSION,
+                "created_at": "2026-01-04T00:00:00Z",
+                "updated_at": "2026-01-04T00:00:00Z",
+                "yanked": false,
+                "downloads": 1_000_000,
+                "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "rust_version": "1.75",
+                "license": "MIT",
+                "features": {
+                    "default": ["rt"],
+                    "rt": []
+                }
+            }],
+            "keywords": [{
+                "id": "kw-async",
+                "keyword": "async"
+            }],
+            "categories": [{
+                "id": "cat-async",
+                "slug": "asynchronous",
+                "category": "Asynchronous"
+            }]
+        }),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
 
@@ -277,6 +312,12 @@ async fn mock_crate_readme(
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
             "# demo-alt\nfixture readme",
+        )
+            .into_response(),
+        (SEEDED_TOKIO_CRATE_NAME, SEEDED_TOKIO_CRATE_VERSION) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "# tokio\nfixture readme",
         )
             .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
@@ -319,6 +360,9 @@ async fn mock_crate_dependencies(
                     "features": []
                 }
             ]
+        }),
+        (SEEDED_TOKIO_CRATE_NAME, SEEDED_TOKIO_CRATE_VERSION) => json!({
+            "dependencies": []
         }),
         _ => return (StatusCode::NOT_FOUND, Json(json!({ "dependencies": [] }))).into_response(),
     };

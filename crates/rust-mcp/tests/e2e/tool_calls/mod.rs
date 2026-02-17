@@ -1,5 +1,6 @@
 //! E2E coverage for MCP tool behavior over HTTP transport.
 
+use rust_mcp_testing::fixtures::{RustdocFixtureDir, materialize_workspace_rustdoc_fixture_zst};
 use rust_mcp_testing::rust_mcp::RustMcpTestContainer;
 use serde_json::{Value, json};
 
@@ -23,8 +24,20 @@ mod metrics;
 mod source_tools;
 mod symbol_tools;
 
+const RUSTDOC_FALLBACK_MOUNT_PATH: &str = "/e2e-rustdoc-json";
+const TOKIO_FALLBACK_FIXTURE_FILE: &str = "tokio_1.49.0_x86_64-unknown-linux-gnu_latest.json.zst";
+const TOKIO_FALLBACK_CRATE_NAME: &str = "tokio";
+const TOKIO_FALLBACK_CRATE_VERSION: &str = "1.49.0";
+const TOKIO_FALLBACK_LOCAL_SOURCE_PATH: &str = "rustdoc-json/tokio-1.49.0.json";
+
 struct SeededContext {
     _mock_server: MockRegistryServer,
+    rust_mcp: RustMcpTestContainer,
+}
+
+struct SeededRustdocFallbackContext {
+    _mock_server: MockRegistryServer,
+    _rustdoc_fixture_dir: RustdocFixtureDir,
     rust_mcp: RustMcpTestContainer,
 }
 
@@ -58,6 +71,43 @@ async fn seeded_indexed_context() -> SeededContext {
     let context = seeded_initialized_context().await;
     seed_index_data(&context.rust_mcp).await;
     context
+}
+
+async fn seeded_rustdoc_fallback_initialized_context() -> SeededRustdocFallbackContext {
+    let mock_server = MockRegistryServer::start()
+        .await
+        .expect("failed to start mock crates/docs server");
+    let rustdoc_fixture_dir = materialize_workspace_rustdoc_fixture_zst(
+        TOKIO_FALLBACK_FIXTURE_FILE,
+        TOKIO_FALLBACK_CRATE_NAME,
+        TOKIO_FALLBACK_CRATE_VERSION,
+    )
+    .expect("failed to materialize tokio rustdoc fixture");
+
+    let mut env = mock_registry_env(&mock_server);
+    env.retain(|(key, _)| key != "DOCS_RS_BASE_URL");
+    // Force docs.rs rustdoc fetches to fail so the server must use local fallback.
+    env.push(("DOCS_RS_BASE_URL".to_string(), "http://127.0.0.1:1".to_string()));
+    env.push(("RUSTDOC_JSON_DIR".to_string(), RUSTDOC_FALLBACK_MOUNT_PATH.to_string()));
+
+    let rust_mcp = start_ready_rust_mcp_with_env_and_mounts(
+        env,
+        vec![(
+            rustdoc_fixture_dir
+                .path()
+                .to_string_lossy()
+                .to_string(),
+            RUSTDOC_FALLBACK_MOUNT_PATH.to_string(),
+        )],
+    )
+    .await;
+    let _ = initialize_mcp_session(&rust_mcp).await;
+
+    SeededRustdocFallbackContext {
+        _mock_server: mock_server,
+        _rustdoc_fixture_dir: rustdoc_fixture_dir,
+        rust_mcp,
+    }
 }
 
 async fn seeded_indexed_manifest_context() -> SeededManifestContext {
