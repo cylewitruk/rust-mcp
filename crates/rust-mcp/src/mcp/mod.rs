@@ -1,6 +1,7 @@
 pub(crate) mod indexing;
 pub(crate) mod metrics;
 pub(crate) mod models;
+pub(crate) mod queries;
 pub(crate) mod query_cache;
 pub(crate) mod server;
 pub(crate) mod tools;

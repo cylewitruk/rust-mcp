@@ -143,6 +143,7 @@ pub async fn search_docs_pages(
     path_prefix: Option<&str>,
     query: &str,
     limit: i64,
+    offset: i64,
 ) -> Result<Vec<DocsSearchRow>, sqlx::Error> {
     let mut qb = QueryBuilder::<Postgres>::new(
         "SELECT
@@ -192,6 +193,8 @@ pub async fn search_docs_pages(
 
     qb.push("ORDER BY dp.indexed_at DESC, c.name ASC, dp.path ASC LIMIT ");
     qb.push_bind(limit.max(1));
+    qb.push(" OFFSET ");
+    qb.push_bind(offset.max(0));
 
     qb.build_query_as::<DocsSearchRow>()
         .fetch_all(db)

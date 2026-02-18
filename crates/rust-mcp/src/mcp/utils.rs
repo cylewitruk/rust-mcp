@@ -1,6 +1,9 @@
+use base64::Engine as _;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::models::CrateSearchRow;
+use super::models::{CrateSearchRow, ResponseFreshnessSource};
 
 pub(crate) const DEFAULT_SYNC_QUERY: &str = "rust";
 
@@ -278,6 +281,144 @@ pub(crate) fn match_reasons(
     }
 
     reasons
+}
+
+// ---------------------------------------------------------------------------
+// Generic cursor encoding / decoding
+// ---------------------------------------------------------------------------
+
+/// Trait implemented by all cursor token structs.
+/// Provides common validation (version check, limit > 0).
+pub(crate) trait CursorToken: Serialize + DeserializeOwned {
+    fn version(&self) -> u8;
+    fn limit(&self) -> u32;
+    fn offset(&self) -> u32;
+}
+
+/// Decode a cursor token from its base64url-encoded string representation.
+/// Validates version == 1 and limit > 0.
+pub(crate) fn decode_cursor<T: CursorToken>(token: &str) -> Result<T, String> {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(token)
+        .map_err(|_| "cursor is invalid".to_string())?;
+    let decoded =
+        serde_json::from_slice::<T>(&bytes).map_err(|_| "cursor is invalid".to_string())?;
+
+    if decoded.version() != 1 {
+        return Err("cursor version is not supported".to_string());
+    }
+    if decoded.limit() == 0 {
+        return Err("cursor is invalid".to_string());
+    }
+
+    Ok(decoded)
+}
+
+/// Encode a cursor token to its base64url string representation.
+pub(crate) fn encode_cursor<T: CursorToken>(token: &T) -> Result<String, String> {
+    let bytes =
+        serde_json::to_vec(token).map_err(|e| format!("cursor serialization failed: {e}"))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+}
+
+// ---------------------------------------------------------------------------
+// Pagination resolution
+// ---------------------------------------------------------------------------
+
+/// Resolved pagination parameters for a tool query.
+#[derive(Debug)]
+pub(crate) struct PaginationParams {
+    pub offset: u32,
+    pub limit: u32,
+    pub effective_page: u32,
+}
+
+/// Resolve pagination from a decoded cursor token or from page + limit params.
+///
+/// If `cursor_token` is provided, extracts offset/limit from it and validates
+/// that the caller's `requested_limit` matches (if the caller provided an
+/// explicit limit). Otherwise computes offset from `page` and
+/// `requested_limit`.
+pub(crate) fn resolve_pagination<T: CursorToken>(
+    cursor_token: Option<&T>,
+    explicit_limit_provided: bool,
+    requested_limit: u32,
+    page: u32,
+) -> Result<PaginationParams, String> {
+    if let Some(token) = cursor_token {
+        if explicit_limit_provided && requested_limit != token.limit() {
+            return Err("limit must match the cursor page size".to_string());
+        }
+        Ok(PaginationParams {
+            offset: token.offset(),
+            limit: token.limit(),
+            effective_page: (token.offset() / token.limit()).saturating_add(1),
+        })
+    } else {
+        Ok(PaginationParams {
+            offset: (page - 1) * requested_limit,
+            limit: requested_limit,
+            effective_page: page,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pagination truncation + next cursor
+// ---------------------------------------------------------------------------
+
+/// Result of applying a pagination limit to a result set.
+pub(crate) struct PaginatedResult<T> {
+    pub items: Vec<T>,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+/// Truncate `items` to `limit`, compute `has_more`, and encode `next_cursor`
+/// if there are more results.
+///
+/// `build_next_token` is called only when `has_more` is true, receiving
+/// the next offset. It should return a cursor token struct for encoding.
+pub(crate) fn apply_pagination_limit<T, C: CursorToken>(
+    mut items: Vec<T>,
+    limit: u32,
+    offset: u32,
+    build_next_token: impl FnOnce(u32) -> C,
+) -> Result<PaginatedResult<T>, String> {
+    let has_more = items.len() > limit as usize;
+    if has_more {
+        items.truncate(limit as usize);
+    }
+    let next_cursor = if has_more {
+        Some(encode_cursor(&build_next_token(offset.saturating_add(limit)))?)
+    } else {
+        None
+    };
+    Ok(PaginatedResult { items, has_more, next_cursor })
+}
+
+// ---------------------------------------------------------------------------
+// Freshness source array builder
+// ---------------------------------------------------------------------------
+
+/// Build the standard two-entry freshness source array used by crate-scoped
+/// tools.
+pub(crate) fn build_crate_freshness_sources(
+    local_checked_at: Option<String>,
+    crates_io_status: &str,
+) -> Vec<ResponseFreshnessSource> {
+    vec![
+        ResponseFreshnessSource {
+            source: "local_postgres_index".to_string(),
+            status: "fresh".to_string(),
+            checked_at: local_checked_at,
+        },
+        ResponseFreshnessSource {
+            source: "crates.io".to_string(),
+            status: crates_io_status.to_string(),
+            checked_at: None,
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -610,5 +751,230 @@ mod tests {
         assert!(reasons.contains(&"name_match".to_string()));
         assert!(reasons.contains(&"description_match".to_string()));
         assert!(reasons.contains(&"keyword_match".to_string()));
+    }
+
+    // --- CursorToken + encode/decode ---
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct TestCursorToken {
+        v: u8,
+        offset: u32,
+        limit: u32,
+        name: String,
+    }
+
+    impl CursorToken for TestCursorToken {
+        fn version(&self) -> u8 {
+            self.v
+        }
+        fn limit(&self) -> u32 {
+            self.limit
+        }
+        fn offset(&self) -> u32 {
+            self.offset
+        }
+    }
+
+    #[test]
+    fn cursor_roundtrip() {
+        let token = TestCursorToken {
+            v: 1,
+            offset: 20,
+            limit: 10,
+            name: "serde".to_string(),
+        };
+        let encoded = encode_cursor(&token).unwrap();
+        let decoded: TestCursorToken = decode_cursor(&encoded).unwrap();
+        assert_eq!(decoded, token);
+    }
+
+    #[test]
+    fn cursor_decode_bad_base64() {
+        let result = decode_cursor::<TestCursorToken>("!!!not-base64!!!");
+        assert_eq!(result.unwrap_err(), "cursor is invalid");
+    }
+
+    #[test]
+    fn cursor_decode_bad_json() {
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not json");
+        let result = decode_cursor::<TestCursorToken>(&encoded);
+        assert_eq!(result.unwrap_err(), "cursor is invalid");
+    }
+
+    #[test]
+    fn cursor_decode_wrong_version() {
+        let token = TestCursorToken {
+            v: 99,
+            offset: 0,
+            limit: 10,
+            name: "x".to_string(),
+        };
+        let encoded = encode_cursor(&token).unwrap();
+        let result = decode_cursor::<TestCursorToken>(&encoded);
+        assert_eq!(result.unwrap_err(), "cursor version is not supported");
+    }
+
+    #[test]
+    fn cursor_decode_zero_limit() {
+        let token = TestCursorToken {
+            v: 1,
+            offset: 0,
+            limit: 0,
+            name: "x".to_string(),
+        };
+        // Encode raw to bypass any construction validation
+        let bytes = serde_json::to_vec(&token).unwrap();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        let result = decode_cursor::<TestCursorToken>(&encoded);
+        assert_eq!(result.unwrap_err(), "cursor is invalid");
+    }
+
+    // --- resolve_pagination ---
+
+    #[test]
+    fn resolve_pagination_from_cursor() {
+        let token = TestCursorToken {
+            v: 1,
+            offset: 30,
+            limit: 10,
+            name: "x".to_string(),
+        };
+        let params = resolve_pagination(Some(&token), false, 10, 1).unwrap();
+        assert_eq!(params.offset, 30);
+        assert_eq!(params.limit, 10);
+        assert_eq!(params.effective_page, 4);
+    }
+
+    #[test]
+    fn resolve_pagination_from_page() {
+        let params = resolve_pagination::<TestCursorToken>(None, false, 25, 3).unwrap();
+        assert_eq!(params.offset, 50);
+        assert_eq!(params.limit, 25);
+        assert_eq!(params.effective_page, 3);
+    }
+
+    #[test]
+    fn resolve_pagination_limit_mismatch() {
+        let token = TestCursorToken {
+            v: 1,
+            offset: 10,
+            limit: 10,
+            name: "x".to_string(),
+        };
+        let result = resolve_pagination(Some(&token), true, 20, 1);
+        assert_eq!(result.unwrap_err(), "limit must match the cursor page size");
+    }
+
+    #[test]
+    fn resolve_pagination_limit_match_ok() {
+        let token = TestCursorToken {
+            v: 1,
+            offset: 10,
+            limit: 10,
+            name: "x".to_string(),
+        };
+        let params = resolve_pagination(Some(&token), true, 10, 1).unwrap();
+        assert_eq!(params.limit, 10);
+    }
+
+    // --- apply_pagination_limit ---
+
+    #[test]
+    fn apply_pagination_no_truncation() {
+        let items = vec![1, 2, 3];
+        let result = apply_pagination_limit(items, 5, 0, |next_offset| TestCursorToken {
+            v: 1,
+            offset: next_offset,
+            limit: 5,
+            name: "x".to_string(),
+        })
+        .unwrap();
+        assert_eq!(result.items, vec![1, 2, 3]);
+        assert!(!result.has_more);
+        assert!(result.next_cursor.is_none());
+    }
+
+    #[test]
+    fn apply_pagination_with_truncation() {
+        let items = vec![1, 2, 3, 4, 5, 6];
+        let result = apply_pagination_limit(items, 5, 10, |next_offset| TestCursorToken {
+            v: 1,
+            offset: next_offset,
+            limit: 5,
+            name: "x".to_string(),
+        })
+        .unwrap();
+        assert_eq!(result.items, vec![1, 2, 3, 4, 5]);
+        assert!(result.has_more);
+        assert!(result.next_cursor.is_some());
+
+        let decoded: TestCursorToken = decode_cursor(
+            result
+                .next_cursor
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded.offset, 15);
+        assert_eq!(decoded.limit, 5);
+    }
+
+    #[test]
+    fn apply_pagination_exact_limit() {
+        let items = vec![1, 2, 3, 4, 5];
+        let result = apply_pagination_limit(items, 5, 0, |next_offset| TestCursorToken {
+            v: 1,
+            offset: next_offset,
+            limit: 5,
+            name: "x".to_string(),
+        })
+        .unwrap();
+        assert_eq!(result.items.len(), 5);
+        assert!(!result.has_more);
+        assert!(result.next_cursor.is_none());
+    }
+
+    #[test]
+    fn apply_pagination_empty() {
+        let items: Vec<i32> = vec![];
+        let result = apply_pagination_limit(items, 10, 0, |next_offset| TestCursorToken {
+            v: 1,
+            offset: next_offset,
+            limit: 10,
+            name: "x".to_string(),
+        })
+        .unwrap();
+        assert!(result.items.is_empty());
+        assert!(!result.has_more);
+        assert!(result.next_cursor.is_none());
+    }
+
+    // --- build_crate_freshness_sources ---
+
+    #[test]
+    fn freshness_sources_shape() {
+        let sources = build_crate_freshness_sources(Some("2025-01-01".to_string()), "fresh");
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].source, "local_postgres_index");
+        assert_eq!(sources[0].status, "fresh");
+        assert_eq!(sources[0].checked_at, Some("2025-01-01".to_string()));
+        assert_eq!(sources[1].source, "crates.io");
+        assert_eq!(sources[1].status, "fresh");
+        assert!(
+            sources[1]
+                .checked_at
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn freshness_sources_changed_status() {
+        let sources = build_crate_freshness_sources(None, "changed");
+        assert_eq!(sources[1].status, "changed");
+        assert!(
+            sources[0]
+                .checked_at
+                .is_none()
+        );
     }
 }

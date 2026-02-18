@@ -39,6 +39,29 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
             .unwrap_or_default()
             >= 1
     );
+    assert_eq!(
+        usage_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        usage_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        usage_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        usage_payload
+            .get("next_cursor")
+            .is_some()
+    );
 
     let hotspots_response = context
         .mcp
@@ -58,6 +81,29 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
         .get("hotspots")
         .and_then(Value::as_array)
         .expect("hotspots should be an array");
+    assert_eq!(
+        hotspots_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        hotspots_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        hotspots_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        hotspots_payload
+            .get("next_cursor")
+            .is_some()
+    );
     assert!(
         hotspots
             .iter()

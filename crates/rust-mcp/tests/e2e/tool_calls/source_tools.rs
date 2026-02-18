@@ -28,6 +28,33 @@ async fn tool_source_search_returns_seeded_path() {
             .is_some_and(|count| count >= 1),
         "expected source.search count >= 1 for seeded fixtures: {payload}"
     );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected source.search to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected source.search has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected source.search truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected source.search next_cursor field: {payload}"
+    );
 
     let hits = payload
         .get("hits")

@@ -6,12 +6,11 @@ pub use rust_mcp_types::types::krate::{
 };
 use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
-};
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, CrateVersionSelectionRow};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{graph_depth, normalize_optional, normalize_required};
+use crate::mcp::utils::{
+    build_crate_freshness_sources, graph_depth, normalize_optional, normalize_required,
+};
 
 #[derive(Debug, FromRow)]
 pub(crate) struct GraphLatestVersionRow {
@@ -170,57 +169,8 @@ impl McpServer {
             .unwrap_or(CrateGraphDirection::Dependencies);
         let depth = graph_depth(request.depth);
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
-
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
-
-        let freshness_outcome = self
-            .ensure_freshness_for_interaction(
-                crate_row.id,
-                &crate_row.name,
-                &latest_version.version,
-            )
+        let ctx = self
+            .fetch_crate_context(&crate_name)
             .await?;
 
         let selected_version = if let Some(version) = requested_version {
@@ -235,21 +185,24 @@ impl McpServer {
                  WHERE crate_id = $1 AND version = $2
                  LIMIT 1",
             )
-            .bind(crate_row.id)
+            .bind(ctx.crate_row.id)
             .bind(&version)
             .fetch_optional(&self.state.db)
             .await
             .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
+                format!(
+                    "selected version lookup failed for {}@{}: {e}",
+                    ctx.crate_row.name, version
+                )
             })?
             .ok_or_else(|| {
                 format!(
                     "version '{}' for crate '{}' is not indexed locally",
-                    version, crate_row.name
+                    version, ctx.crate_row.name
                 )
             })?
         } else {
-            latest_version.clone()
+            ctx.latest_version.clone()
         };
 
         let mut edges = Vec::<CrateGraphEdge>::new();
@@ -257,8 +210,15 @@ impl McpServer {
         let mut node_latest_version = HashMap::<String, Option<String>>::new();
         let mut edge_seen = HashSet::<(String, String, String, String, bool, u32)>::new();
 
-        node_min_distance.insert(crate_row.name.clone(), 0);
-        node_latest_version.insert(crate_row.name.clone(), Some(latest_version.version.clone()));
+        node_min_distance.insert(ctx.crate_row.name.clone(), 0);
+        node_latest_version.insert(
+            ctx.crate_row.name.clone(),
+            Some(
+                ctx.latest_version
+                    .version
+                    .clone(),
+            ),
+        );
 
         if matches!(direction, CrateGraphDirection::Dependencies | CrateGraphDirection::Both) {
             let mut frontier_versions = vec![selected_version.id];
@@ -351,7 +311,7 @@ impl McpServer {
         }
 
         if matches!(direction, CrateGraphDirection::Dependents | CrateGraphDirection::Both) {
-            let mut frontier_crates = vec![crate_row.id];
+            let mut frontier_crates = vec![ctx.crate_row.id];
 
             for depth_level in 1..=depth {
                 if frontier_crates.is_empty() {
@@ -452,8 +412,11 @@ impl McpServer {
         let mut nodes = node_min_distance
             .into_iter()
             .map(|(name, min_distance)| {
-                let role =
-                    if name == crate_row.name { "root".to_string() } else { "related".to_string() };
+                let role = if name == ctx.crate_row.name {
+                    "root".to_string()
+                } else {
+                    "related".to_string()
+                };
                 CrateGraphNode {
                     latest_version: node_latest_version
                         .get(&name)
@@ -474,7 +437,8 @@ impl McpServer {
                 )
         });
 
-        let freshness_check_result = freshness_outcome
+        let freshness_check_result = ctx
+            .freshness_outcome
             .freshness_check_result
             .clone();
         let cycle_notes = cycle_safe_traversal_notes(&edges, depth);
@@ -493,7 +457,7 @@ impl McpServer {
         };
 
         Ok(Json(CrateGraphResponse {
-            crate_name: crate_row.name,
+            crate_name: ctx.crate_row.name,
             selected_version: selected_version.version,
             direction,
             depth,
@@ -502,22 +466,20 @@ impl McpServer {
             nodes,
             edges,
             cycle_safe_traversal_notes: cycle_notes,
-            freshness_check_performed: freshness_outcome.freshness_check_performed,
+            freshness_check_performed: ctx
+                .freshness_outcome
+                .freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
-            refresh_enqueued: freshness_outcome.refresh_enqueued,
-            refresh_job_id: freshness_outcome.refresh_job_id,
-            freshness: vec![
-                ResponseFreshnessSource {
-                    source: "local_postgres_index".to_string(),
-                    status: "fresh".to_string(),
-                    checked_at: crate_row.updated_at,
-                },
-                ResponseFreshnessSource {
-                    source: "crates.io".to_string(),
-                    status: freshness_check_result,
-                    checked_at: None,
-                },
-            ],
+            refresh_enqueued: ctx
+                .freshness_outcome
+                .refresh_enqueued,
+            refresh_job_id: ctx
+                .freshness_outcome
+                .refresh_job_id,
+            freshness: build_crate_freshness_sources(
+                ctx.crate_row.updated_at,
+                &freshness_check_result,
+            ),
             confidence: confidence_assessment
                 .level
                 .as_str()

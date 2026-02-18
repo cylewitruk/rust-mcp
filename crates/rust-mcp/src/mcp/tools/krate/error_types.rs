@@ -4,15 +4,38 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateErrorTypeEntry, CrateErrorTypesRequest, CrateErrorTypesResponse,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
-};
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{error_types_limit, normalize_optional, normalize_required};
+use crate::mcp::utils::{
+    CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, error_types_limit,
+    normalize_optional, normalize_required, resolve_pagination, sync_page,
+};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CrateErrorTypesCursorToken {
+    v: u8,
+    offset: u32,
+    limit: u32,
+    crate_name: String,
+    version: Option<String>,
+    type_name: Option<String>,
+}
+
+impl CursorToken for CrateErrorTypesCursorToken {
+    fn version(&self) -> u8 {
+        self.v
+    }
+    fn limit(&self) -> u32 {
+        self.limit
+    }
+    fn offset(&self) -> u32 {
+        self.offset
+    }
+}
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct ErrorTypeTypeRow {
@@ -128,155 +151,32 @@ impl McpServer {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
         let type_name_filter = normalize_optional(request.type_name);
-        let limit = error_types_limit(request.limit);
+        let cursor = normalize_optional(request.cursor);
+        let page = sync_page(request.page);
+        let requested_limit = error_types_limit(request.limit);
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
+        let decoded = cursor
+            .as_deref()
+            .map(decode_cursor::<CrateErrorTypesCursorToken>)
+            .transpose()?;
 
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
+        if let Some(ref token) = decoded
+            && (token.crate_name != crate_name
+                || token.version != requested_version
+                || token.type_name != type_name_filter)
+        {
+            return Err("cursor does not match current crate.error_types filters".to_string());
+        }
 
-        let freshness_outcome = self
-            .ensure_freshness_for_interaction(
-                crate_row.id,
-                &crate_row.name,
-                &latest_version.version,
-            )
+        let pag =
+            resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
+
+        let ctx = self
+            .fetch_crate_context(&crate_name)
             .await?;
-
-        let latest_version = if freshness_outcome.freshness_check_result == "changed" {
-            sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
-            .ok_or_else(|| {
-                format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                    crate_row.name
-                )
-            })?
-        } else {
-            latest_version
-        };
-
-        let mut refresh_enqueued = freshness_outcome.refresh_enqueued;
-        let mut refresh_job_id = freshness_outcome
-            .refresh_job_id
-            .clone();
-
-        let selected_version = if let Some(version) = requested_version {
-            let selected = sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
-            })?;
-
-            if let Some(selected) = selected {
-                selected
-            } else {
-                let queued_job_id = self
-                    .backfill_missing_requested_version(&crate_row.name)
-                    .await?;
-                if let Some(job_id) = queued_job_id {
-                    refresh_enqueued = true;
-                    refresh_job_id = Some(job_id);
-                }
-
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        id,
-                        version,
-                        rust_version,
-                        published_at::TEXT AS published_at,
-                        readme
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, crate_row.name
-                    )
-                })?
-            }
-        } else {
-            latest_version.clone()
-        };
+        let resolution = self
+            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .await?;
 
         let type_rows = sqlx::query_as::<_, ErrorTypeTypeRow>(
             "SELECT
@@ -291,7 +191,7 @@ impl McpServer {
              WHERE ct.crate_version_id = $1
              ORDER BY ct.type_name ASC",
         )
-        .bind(selected_version.id)
+        .bind(resolution.selected_version.id)
         .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.error_types type query failed: {e}"))?;
@@ -306,7 +206,7 @@ impl McpServer {
              JOIN source_files sf ON sf.id = ci.source_file_id
              WHERE ci.crate_version_id = $1",
         )
-        .bind(selected_version.id)
+        .bind(resolution.selected_version.id)
         .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.error_types impl query failed: {e}"))?;
@@ -350,10 +250,17 @@ impl McpServer {
             .collect::<HashMap<_, _>>();
 
         let mut error_types = Vec::<CrateErrorTypeEntry>::new();
-        for candidate in candidate_names
+        for (index, candidate) in candidate_names
             .into_iter()
-            .take(limit as usize)
+            .enumerate()
         {
+            if index < pag.offset as usize {
+                continue;
+            }
+            if error_types.len() > pag.limit as usize {
+                break;
+            }
+
             let Some(type_row) = type_by_name.get(&candidate.to_ascii_lowercase()) else {
                 continue;
             };
@@ -396,7 +303,7 @@ impl McpServer {
                  ORDER BY s.name ASC
                  LIMIT 50",
             )
-            .bind(selected_version.id)
+            .bind(resolution.selected_version.id)
             .bind(format!("%{}%", candidate))
             .fetch_all(&self.state.db)
             .await
@@ -433,7 +340,7 @@ impl McpServer {
                      WHERE crate_version_id = $1 AND path = $2
                      LIMIT 1",
                 )
-                .bind(selected_version.id)
+                .bind(resolution.selected_version.id)
                 .bind(&row.source_path)
                 .fetch_optional(&self.state.db)
                 .await
@@ -475,6 +382,25 @@ impl McpServer {
             });
         }
 
+        let has_more = error_types.len() > pag.limit as usize;
+        if has_more {
+            error_types.truncate(pag.limit as usize);
+        }
+        let next_cursor = if has_more {
+            Some(encode_cursor(&CrateErrorTypesCursorToken {
+                v: 1,
+                offset: pag
+                    .offset
+                    .saturating_add(pag.limit),
+                limit: pag.limit,
+                crate_name: crate_name.clone(),
+                version: requested_version.clone(),
+                type_name: type_name_filter.clone(),
+            })?)
+        } else {
+            None
+        };
+
         let confidence_assessment = if error_types.is_empty() {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Low,
@@ -502,34 +428,36 @@ impl McpServer {
             }
         };
 
-        let freshness_check_result = freshness_outcome
+        let freshness_check_result = ctx
+            .freshness_outcome
             .freshness_check_result
             .clone();
 
         Ok(Json(CrateErrorTypesResponse {
-            crate_name: crate_row.name,
-            selected_version: selected_version.version,
-            latest_version: latest_version.version,
+            crate_name: ctx.crate_row.name,
+            selected_version: resolution
+                .selected_version
+                .version,
+            latest_version: ctx.latest_version.version,
             type_name: type_name_filter,
-            limit,
+            cursor,
+            next_cursor,
+            page: pag.effective_page,
+            limit: pag.limit,
+            has_more,
+            truncated: has_more,
             count: error_types.len(),
             error_types,
-            freshness_check_performed: freshness_outcome.freshness_check_performed,
+            freshness_check_performed: ctx
+                .freshness_outcome
+                .freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
-            refresh_enqueued,
-            refresh_job_id,
-            freshness: vec![
-                ResponseFreshnessSource {
-                    source: "local_postgres_index".to_string(),
-                    status: "fresh".to_string(),
-                    checked_at: crate_row.updated_at,
-                },
-                ResponseFreshnessSource {
-                    source: "crates.io".to_string(),
-                    status: freshness_check_result,
-                    checked_at: None,
-                },
-            ],
+            refresh_enqueued: resolution.refresh_enqueued,
+            refresh_job_id: resolution.refresh_job_id,
+            freshness: build_crate_freshness_sources(
+                ctx.crate_row.updated_at,
+                &freshness_check_result,
+            ),
             confidence: confidence_assessment
                 .level
                 .as_str()

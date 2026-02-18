@@ -2,6 +2,7 @@ use rmcp::Json;
 pub use rust_mcp_types::types::source::{
     SourceSearchHit, SourceSearchMode, SourceSearchRequest, SourceSearchResponse,
 };
+use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use crate::mcp::models::{
@@ -9,8 +10,8 @@ use crate::mcp::models::{
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    normalize_optional, normalize_required, path_glob_to_like, source_read_end_line,
-    source_search_limit,
+    CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
+    path_glob_to_like, resolve_pagination, source_read_end_line, source_search_limit, sync_page,
 };
 
 #[derive(Debug, FromRow)]
@@ -20,6 +21,42 @@ pub(crate) struct SourceSearchRow {
     pub(crate) path: String,
     pub(crate) content: String,
     pub(crate) indexed_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceSearchCacheKey<'a> {
+    query: &'a str,
+    crate_name: Option<&'a str>,
+    version: Option<&'a str>,
+    path_glob: Option<&'a str>,
+    mode: SourceSearchMode,
+    cursor: Option<&'a str>,
+    page: u32,
+    limit: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SourceCursorToken {
+    v: u8,
+    offset: u32,
+    limit: u32,
+    query: String,
+    crate_name: Option<String>,
+    version: Option<String>,
+    path_glob: Option<String>,
+    mode: SourceSearchMode,
+}
+
+impl CursorToken for SourceCursorToken {
+    fn version(&self) -> u8 {
+        self.v
+    }
+    fn limit(&self) -> u32 {
+        self.limit
+    }
+    fn offset(&self) -> u32 {
+        self.offset
+    }
 }
 
 fn extract_text_snippet(content: &str, query: &str) -> (Option<u32>, String) {
@@ -76,7 +113,51 @@ impl McpServer {
         let mode = request
             .mode
             .unwrap_or(SourceSearchMode::Text);
-        let limit = source_search_limit(request.limit);
+        let cursor = normalize_optional(request.cursor);
+        let page = sync_page(request.page);
+        let requested_limit = source_search_limit(request.limit);
+
+        let cache_key = serde_json::to_string(&SourceSearchCacheKey {
+            query: &query,
+            crate_name: crate_name.as_deref(),
+            version: version.as_deref(),
+            path_glob: path_glob.as_deref(),
+            mode,
+            cursor: cursor.as_deref(),
+            page,
+            limit: requested_limit,
+        })
+        .map_err(|e| format!("failed to build source.search cache key: {e}"))?;
+        if let Some(cached) = self
+            .query_cache_get("source.search", &cache_key)
+            .await?
+        {
+            let cached_response = serde_json::from_value::<SourceSearchResponse>(cached)
+                .map_err(|e| format!("failed to decode source.search cache entry: {e}"))?;
+            return Ok(Json(cached_response));
+        }
+
+        let decoded_cursor = cursor
+            .as_deref()
+            .map(decode_cursor::<SourceCursorToken>)
+            .transpose()?;
+        if let Some(ref decoded) = decoded_cursor
+            && (decoded.query != query
+                || decoded.crate_name != crate_name
+                || decoded.version != version
+                || decoded.path_glob != path_glob
+                || decoded.mode != mode)
+        {
+            return Err("cursor does not match current source.search filters".to_string());
+        }
+        let pagination = resolve_pagination(
+            decoded_cursor.as_ref(),
+            request.limit.is_some(),
+            requested_limit,
+            page,
+        )?;
+        let (offset, limit, effective_page) =
+            (pagination.offset, pagination.limit, pagination.effective_page);
 
         let mut qb = QueryBuilder::<Postgres>::new(
             "SELECT
@@ -130,7 +211,9 @@ impl McpServer {
         }
 
         qb.push("ORDER BY sf.indexed_at DESC, c.name ASC, sf.path ASC LIMIT ");
-        qb.push_bind(i64::from(limit));
+        qb.push_bind(i64::from(limit.saturating_add(1)));
+        qb.push(" OFFSET ");
+        qb.push_bind(i64::from(offset));
 
         let rows = qb
             .build_query_as::<SourceSearchRow>()
@@ -138,7 +221,7 @@ impl McpServer {
             .await
             .map_err(|e| format!("source.search query failed: {e}"))?;
 
-        let hits = rows
+        let mut hits = rows
             .into_iter()
             .map(|row| {
                 let (line, snippet) = extract_text_snippet(&row.content, &query);
@@ -153,6 +236,25 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
+        let has_more = hits.len() > limit as usize;
+        if has_more {
+            hits.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            Some(encode_cursor(&SourceCursorToken {
+                v: 1,
+                offset: offset.saturating_add(limit),
+                limit,
+                query: query.clone(),
+                crate_name: crate_name.clone(),
+                version: version.clone(),
+                path_glob: path_glob.clone(),
+                mode,
+            })?)
+        } else {
+            None
+        };
+
         let confidence_assessment = if hits.is_empty() {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Low,
@@ -165,13 +267,18 @@ impl McpServer {
             }
         };
 
-        Ok(Json(SourceSearchResponse {
+        let response = SourceSearchResponse {
             query,
             crate_name,
             version,
             path_glob,
             mode,
+            cursor,
+            next_cursor,
+            page: effective_page,
             limit,
+            has_more,
+            truncated: has_more,
             count: hits.len(),
             confidence: confidence_assessment
                 .level
@@ -181,7 +288,18 @@ impl McpServer {
             next_best_calls: vec!["source.read".to_string(), "crate.intel".to_string()],
             provenance: "local_postgres_index".to_string(),
             hits,
-        }))
+        };
+
+        self.query_cache_put(
+            "source.search",
+            &cache_key,
+            &serde_json::to_value(&response)
+                .map_err(|e| format!("failed to encode source.search cache value: {e}"))?,
+            300,
+        )
+        .await?;
+
+        Ok(Json(response))
     }
 
     pub(crate) async fn handle_source_read(

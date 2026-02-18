@@ -25,6 +25,30 @@ async fn source_search_and_read_return_seeded_source_content() {
             .and_then(Value::as_u64),
         Some(1)
     );
+    assert_eq!(
+        search_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        search_payload
+            .get("has_more")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        search_payload
+            .get("truncated")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(
+        search_payload
+            .get("next_cursor")
+            .is_some(),
+        "source.search response should include next_cursor field"
+    );
 
     let read_response = context
         .mcp

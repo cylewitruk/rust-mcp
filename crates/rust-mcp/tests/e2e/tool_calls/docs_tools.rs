@@ -26,6 +26,33 @@ async fn tool_docs_search_returns_seeded_docs_hits() {
     );
     assert_eq!(
         payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected docs.search to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected docs.search has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected docs.search truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected docs.search next_cursor field: {payload}"
+    );
+    assert_eq!(
+        payload
             .get("confidence")
             .and_then(Value::as_str),
         Some("medium")

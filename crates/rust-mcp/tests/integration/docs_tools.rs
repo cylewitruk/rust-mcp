@@ -30,6 +30,30 @@ async fn docs_search_returns_seeded_docs_page() {
             .and_then(Value::as_u64),
         Some(1)
     );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "docs.search response should include next_cursor field"
+    );
     let first_hit = payload
         .get("hits")
         .and_then(Value::as_array)

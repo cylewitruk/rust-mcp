@@ -20,6 +20,30 @@ async fn crate_search_returns_seeded_crates_without_freshness_probe() {
     assert!(count >= 2);
     assert_eq!(
         payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "crate.search response should include next_cursor field"
+    );
+    assert_eq!(
+        payload
             .get("freshness_checks_performed")
             .and_then(Value::as_u64),
         Some(0)
@@ -163,6 +187,29 @@ async fn crate_api_and_versions_report_seeded_symbol_timeline() {
         .get("versions")
         .and_then(Value::as_array)
         .expect("versions should be an array");
+    assert_eq!(
+        versions_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        versions_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        versions_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        versions_payload
+            .get("next_cursor")
+            .is_some()
+    );
 
     assert!(!versions.is_empty());
     assert!(

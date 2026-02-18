@@ -139,6 +139,14 @@ curl -sS \
 - Rustdoc-backed type/impl tools (`crate.type_info`, `crate.trait_impls`) prefer richer rustdoc-derived rows when duplicate syn/local and rustdoc rows coexist, and confidence reflects whether definitions/impl metadata were actually resolved.
 - API diffing (`crate.api_diff`) now prioritizes rustdoc-derived public symbols when dual-source duplicates exist, reducing false negatives caused by sparse duplicate snapshots.
 
+## Search Pagination Contract
+
+- Search-style responses expose consistent pagination metadata: `page`, `limit`, `count`, `has_more`, `truncated`, `cursor`, and `next_cursor`.
+- `cursor` is an opaque token; when provided, clients should keep filters unchanged and either omit `limit` or reuse the same page size.
+- `next_cursor` is only populated when additional results are available.
+- `truncated=true` indicates the current page is incomplete relative to available matches and can be continued with `next_cursor`.
+- This contract is now implemented for `symbol.search`, `crate.search`, `source.search`, `docs.search`, `crate.versions`, `crate.alternatives`, `crate.hotspots`, `crate.usage_patterns`, `crate.api`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, and `crate.trait_impls`.
+
 ## MCP Protocol Version Policy
 
 - Latest published MCP protocol version: `2025-11-25`.

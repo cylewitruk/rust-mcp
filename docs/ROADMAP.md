@@ -51,7 +51,10 @@ The previously planned milestone set through M13 is complete, including:
 - [x] Add `crate.import_path` tool (best-known public import path resolution).
   - `crate.import_path` now resolves best-known public import paths and alternative matches from indexed symbol metadata.
 - [ ] Improve `crate.migration_path` heuristics beyond simple rename candidates.
-- [ ] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
+- [x] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
+  - [x] Standardized `page`/`cursor`/`next_cursor` plus `has_more`/`truncated` metadata for `crate.search`, `source.search`, and `docs.search` (matching existing `symbol.search` behavior).
+  - [x] Extended the same metadata contract to `crate.versions`, `crate.alternatives`, `crate.hotspots`, and `crate.usage_patterns`.
+  - [x] Extended the same metadata contract to remaining limit-based crate intelligence tools: `crate.api`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, and `crate.trait_impls`.
 - [x] Publish a machine-readable tool contract snapshot for client generation/testing.
   - `schema.get` now exposes per-tool request/response JSON Schemas over MCP.
   - HTTP endpoints now expose the same schema catalog at `/schemas` and `/schemas/{tool_name}`.

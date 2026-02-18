@@ -23,6 +23,33 @@ async fn tool_crate_search_returns_seeded_hits() {
             .is_some_and(|count| count >= 2),
         "expected crate.search count >= 2 for seeded fixtures: {payload}"
     );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.search to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.search has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.search truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.search next_cursor field: {payload}"
+    );
 
     let hits = payload
         .get("hits")
@@ -62,6 +89,34 @@ async fn tool_crate_api_lists_seeded_function_symbol() {
     )
     .await;
 
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.api to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.api has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.api truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.api next_cursor field: {payload}"
+    );
+
     let symbols = payload
         .get("symbols")
         .and_then(Value::as_array)
@@ -94,6 +149,33 @@ async fn tool_crate_alternatives_includes_seeded_alternative() {
             .and_then(Value::as_u64)
             .is_some_and(|count| count >= 1),
         "expected crate.alternatives count >= 1: {payload}"
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.alternatives to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.alternatives has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.alternatives truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.alternatives next_cursor field: {payload}"
     );
 
     let alternatives = payload
@@ -333,6 +415,34 @@ async fn tool_crate_error_types_handles_sparse_fixture() {
 
     assert_eq!(
         payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.error_types to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.error_types has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.error_types truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.error_types next_cursor field: {payload}"
+    );
+
+    assert_eq!(
+        payload
             .get("count")
             .and_then(Value::as_u64),
         Some(0)
@@ -438,6 +548,33 @@ async fn tool_crate_hotspots_reports_scanned_files() {
             .and_then(Value::as_u64)
             .is_some_and(|count| count >= 1),
         "expected hotspot scan to cover at least one file: {payload}"
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.hotspots to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.hotspots has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.hotspots truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.hotspots next_cursor field: {payload}"
     );
 
     let hotspots = payload
@@ -564,6 +701,34 @@ async fn tool_crate_re_exports_handles_sparse_fixture() {
     )
     .await;
 
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.re_exports to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.re_exports has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.re_exports truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.re_exports next_cursor field: {payload}"
+    );
+
     let re_exports = payload
         .get("re_exports")
         .and_then(Value::as_array)
@@ -594,6 +759,34 @@ async fn tool_crate_import_path_handles_missing_symbol() {
 
     assert_eq!(
         payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.import_path to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.import_path has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.import_path truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.import_path next_cursor field: {payload}"
+    );
+
+    assert_eq!(
+        payload
             .get("count")
             .and_then(Value::as_u64),
         Some(0)
@@ -621,6 +814,34 @@ async fn tool_crate_trait_impls_handles_sparse_fixture() {
         }),
     )
     .await;
+
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.trait_impls to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.trait_impls has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.trait_impls truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.trait_impls next_cursor field: {payload}"
+    );
 
     assert_eq!(
         payload
@@ -683,6 +904,33 @@ async fn tool_crate_usage_patterns_finds_dependent_references() {
             .is_some_and(|count| count >= 1),
         "expected crate.usage_patterns to report at least one usage: {payload}"
     );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.usage_patterns to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.usage_patterns has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.usage_patterns truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.usage_patterns next_cursor field: {payload}"
+    );
 
     let patterns = payload
         .get("patterns")
@@ -718,6 +966,33 @@ async fn tool_crate_versions_marks_latest_version() {
             .and_then(Value::as_u64)
             .is_some_and(|count| count >= 2),
         "expected crate.versions count >= 2 for seeded fixture: {payload}"
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1),
+        "expected crate.versions to return page=1 by default: {payload}"
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.versions has_more field: {payload}"
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some(),
+        "expected crate.versions truncated field: {payload}"
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some(),
+        "expected crate.versions next_cursor field: {payload}"
     );
 
     let versions = payload

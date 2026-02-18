@@ -2,13 +2,51 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateSearchHit, CrateSearchRequest, CrateSearchResponse, CrateSearchSort,
 };
+use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, QueryBuilder};
 
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateSearchRow, ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{match_reasons, normalize_optional, search_limit};
+use crate::mcp::utils::{
+    CursorToken, decode_cursor, encode_cursor, match_reasons, normalize_optional,
+    resolve_pagination, search_limit, sync_page,
+};
+
+#[derive(Debug, Serialize)]
+struct CrateSearchCacheKey<'a> {
+    query: Option<&'a str>,
+    category: Option<&'a str>,
+    keyword: Option<&'a str>,
+    sort: CrateSearchSort,
+    cursor: Option<&'a str>,
+    page: u32,
+    limit: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CrateCursorToken {
+    v: u8,
+    offset: u32,
+    limit: u32,
+    query: Option<String>,
+    category: Option<String>,
+    keyword: Option<String>,
+    sort: CrateSearchSort,
+}
+
+impl CursorToken for CrateCursorToken {
+    fn version(&self) -> u8 {
+        self.v
+    }
+    fn limit(&self) -> u32 {
+        self.limit
+    }
+    fn offset(&self) -> u32 {
+        self.offset
+    }
+}
 
 impl McpServer {
     async fn run_crate_search(
@@ -18,6 +56,7 @@ impl McpServer {
         keyword: Option<&str>,
         sort: CrateSearchSort,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<CrateSearchRow>, sqlx::Error> {
         let mut qb = QueryBuilder::<Postgres>::new(
             "SELECT c.id AS crate_id, c.name, c.description, c.repository_url, c.docs_url, \
@@ -127,6 +166,8 @@ impl McpServer {
 
         qb.push("LIMIT ");
         qb.push_bind(i64::from(limit));
+        qb.push(" OFFSET ");
+        qb.push_bind(i64::from(offset));
 
         qb.build_query_as::<CrateSearchRow>()
             .fetch_all(&self.state.db)
@@ -140,7 +181,9 @@ impl McpServer {
         let query = normalize_optional(request.query);
         let category = normalize_optional(request.category);
         let keyword = normalize_optional(request.keyword);
-        let limit = search_limit(request.limit);
+        let cursor = normalize_optional(request.cursor);
+        let page = sync_page(request.page);
+        let requested_limit = search_limit(request.limit);
 
         let sort = request
             .sort
@@ -152,16 +195,75 @@ impl McpServer {
                 }
             });
 
-        let rows = self
+        let cache_key = serde_json::to_string(&CrateSearchCacheKey {
+            query: query.as_deref(),
+            category: category.as_deref(),
+            keyword: keyword.as_deref(),
+            sort,
+            cursor: cursor.as_deref(),
+            page,
+            limit: requested_limit,
+        })
+        .map_err(|e| format!("failed to build crate.search cache key: {e}"))?;
+        if let Some(cached) = self
+            .query_cache_get("crate.search", &cache_key)
+            .await?
+        {
+            let cached_response = serde_json::from_value::<CrateSearchResponse>(cached)
+                .map_err(|e| format!("failed to decode crate.search cache entry: {e}"))?;
+            return Ok(Json(cached_response));
+        }
+
+        let decoded_cursor = cursor
+            .as_deref()
+            .map(decode_cursor::<CrateCursorToken>)
+            .transpose()?;
+        if let Some(ref decoded) = decoded_cursor
+            && (decoded.query != query
+                || decoded.category != category
+                || decoded.keyword != keyword
+                || decoded.sort != sort)
+        {
+            return Err("cursor does not match current crate.search filters".to_string());
+        }
+        let pagination = resolve_pagination(
+            decoded_cursor.as_ref(),
+            request.limit.is_some(),
+            requested_limit,
+            page,
+        )?;
+        let (offset, limit, effective_page) =
+            (pagination.offset, pagination.limit, pagination.effective_page);
+
+        let mut rows = self
             .run_crate_search(
                 query.as_deref(),
                 category.as_deref(),
                 keyword.as_deref(),
                 sort,
-                limit,
+                limit.saturating_add(1),
+                offset,
             )
             .await
             .map_err(|e| format!("crate.search query failed: {e}"))?;
+
+        let has_more = rows.len() > limit as usize;
+        if has_more {
+            rows.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            Some(encode_cursor(&CrateCursorToken {
+                v: 1,
+                offset: offset.saturating_add(limit),
+                limit,
+                query: query.clone(),
+                category: category.clone(),
+                keyword: keyword.clone(),
+                sort,
+            })?)
+        } else {
+            None
+        };
 
         let mut freshness_checks_performed = 0_usize;
         let mut refresh_jobs_enqueued = 0_usize;
@@ -218,12 +320,17 @@ impl McpServer {
             }
         };
 
-        Ok(Json(CrateSearchResponse {
+        let response = CrateSearchResponse {
             query,
             category,
             keyword,
             sort,
+            cursor,
+            next_cursor,
+            page: effective_page,
             limit,
+            has_more,
+            truncated: has_more,
             count: hits.len(),
             freshness_checks_performed,
             refresh_jobs_enqueued,
@@ -259,6 +366,17 @@ impl McpServer {
             },
             provenance: "local_postgres_index".to_string(),
             hits,
-        }))
+        };
+
+        self.query_cache_put(
+            "crate.search",
+            &cache_key,
+            &serde_json::to_value(&response)
+                .map_err(|e| format!("failed to encode crate.search cache value: {e}"))?,
+            300,
+        )
+        .await?;
+
+        Ok(Json(response))
     }
 }

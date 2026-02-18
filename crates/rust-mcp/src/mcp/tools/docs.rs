@@ -2,14 +2,15 @@ use std::collections::{HashSet, VecDeque};
 
 use rmcp::Json;
 pub use rust_mcp_types::types::docs::{DocsSearchHit, DocsSearchRequest, DocsSearchResponse};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db::{indexing, tools};
 use crate::integration::docs_rs::{DocsRsClient, discover_docs_paths, extract_title, strip_html};
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    docs_search_limit, normalize_optional, normalize_required, sync_page, sync_per_page,
+    CursorToken, decode_cursor, docs_search_limit, encode_cursor, normalize_optional,
+    normalize_required, resolve_pagination, sync_page, sync_per_page,
 };
 
 #[derive(Debug, Serialize)]
@@ -18,7 +19,32 @@ struct DocsSearchCacheKey<'a> {
     crate_name: Option<&'a str>,
     version: Option<&'a str>,
     path_prefix: Option<&'a str>,
+    cursor: Option<&'a str>,
+    page: u32,
     limit: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DocsCursorToken {
+    v: u8,
+    offset: u32,
+    limit: u32,
+    query: String,
+    crate_name: Option<String>,
+    version: Option<String>,
+    path_prefix: Option<String>,
+}
+
+impl CursorToken for DocsCursorToken {
+    fn version(&self) -> u8 {
+        self.v
+    }
+    fn limit(&self) -> u32 {
+        self.limit
+    }
+    fn offset(&self) -> u32 {
+        self.offset
+    }
 }
 
 #[derive(Debug, Default)]
@@ -170,13 +196,38 @@ impl McpServer {
         let crate_name = normalize_optional(request.crate_name);
         let version = normalize_optional(request.version);
         let path_prefix = normalize_optional(request.path_prefix);
-        let limit = docs_search_limit(request.limit);
+        let cursor = normalize_optional(request.cursor);
+        let page = sync_page(request.page);
+        let requested_limit = docs_search_limit(request.limit);
+
+        let decoded_cursor = cursor
+            .as_deref()
+            .map(decode_cursor::<DocsCursorToken>)
+            .transpose()?;
+        if let Some(ref decoded) = decoded_cursor
+            && (decoded.query != query
+                || decoded.crate_name != crate_name
+                || decoded.version != version
+                || decoded.path_prefix != path_prefix)
+        {
+            return Err("cursor does not match current docs.search filters".to_string());
+        }
+        let pagination = resolve_pagination(
+            decoded_cursor.as_ref(),
+            request.limit.is_some(),
+            requested_limit,
+            page,
+        )?;
+        let (offset, limit, effective_page) =
+            (pagination.offset, pagination.limit, pagination.effective_page);
 
         let cache_key = serde_json::to_string(&DocsSearchCacheKey {
             query: &query,
             crate_name: crate_name.as_deref(),
             version: version.as_deref(),
             path_prefix: path_prefix.as_deref(),
+            cursor: cursor.as_deref(),
+            page,
             limit,
         })
         .map_err(|e| format!("failed to build docs.search cache key: {e}"))?;
@@ -195,12 +246,13 @@ impl McpServer {
             version.as_deref(),
             path_prefix.as_deref(),
             &query,
-            i64::from(limit),
+            i64::from(limit.saturating_add(1)),
+            i64::from(offset),
         )
         .await
         .map_err(|e| format!("docs.search query failed: {e}"))?;
 
-        let hits = rows
+        let mut hits = rows
             .into_iter()
             .map(|row| DocsSearchHit {
                 crate_name: row.crate_name,
@@ -212,6 +264,24 @@ impl McpServer {
                 snippet: docs_snippet(&row.content, &query),
             })
             .collect::<Vec<_>>();
+
+        let has_more = hits.len() > limit as usize;
+        if has_more {
+            hits.truncate(limit as usize);
+        }
+        let next_cursor = if has_more {
+            Some(encode_cursor(&DocsCursorToken {
+                v: 1,
+                offset: offset.saturating_add(limit),
+                limit,
+                query: query.clone(),
+                crate_name: crate_name.clone(),
+                version: version.clone(),
+                path_prefix: path_prefix.clone(),
+            })?)
+        } else {
+            None
+        };
 
         let confidence_assessment = if hits.is_empty() {
             ConfidenceAssessment {
@@ -230,7 +300,12 @@ impl McpServer {
             crate_name,
             version,
             path_prefix,
+            cursor,
+            next_cursor,
+            page: effective_page,
             limit,
+            has_more,
+            truncated: has_more,
             count: hits.len(),
             confidence: confidence_assessment
                 .level

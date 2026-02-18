@@ -4,16 +4,39 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateHotspotHit, CrateHotspotsRequest, CrateHotspotsResponse, HotspotKind, HotspotSeverity,
 };
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
-};
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    hotspots_limit, normalize_optional, normalize_required, path_glob_to_like,
+    CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, hotspots_limit,
+    normalize_optional, normalize_required, path_glob_to_like, resolve_pagination, sync_page,
 };
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CrateHotspotsCursorToken {
+    v: u8,
+    offset: u32,
+    limit: u32,
+    crate_name: String,
+    version: Option<String>,
+    path_glob: Option<String>,
+    include_unsafe: bool,
+    include_concurrency: bool,
+}
+
+impl CursorToken for CrateHotspotsCursorToken {
+    fn version(&self) -> u8 {
+        self.v
+    }
+    fn limit(&self) -> u32 {
+        self.limit
+    }
+    fn offset(&self) -> u32 {
+        self.offset
+    }
+}
 
 #[derive(Debug, FromRow)]
 pub(crate) struct HotspotSourceFileRow {
@@ -168,7 +191,27 @@ impl McpServer {
         let include_concurrency = request
             .include_concurrency
             .unwrap_or(true);
-        let limit = hotspots_limit(request.limit);
+        let cursor = normalize_optional(request.cursor);
+        let page = sync_page(request.page);
+        let requested_limit = hotspots_limit(request.limit);
+
+        let decoded = cursor
+            .as_deref()
+            .map(decode_cursor::<CrateHotspotsCursorToken>)
+            .transpose()?;
+
+        if let Some(ref token) = decoded
+            && (token.crate_name != crate_name
+                || token.version != requested_version
+                || token.path_glob != path_glob
+                || token.include_unsafe != include_unsafe
+                || token.include_concurrency != include_concurrency)
+        {
+            return Err("cursor does not match current crate.hotspots filters".to_string());
+        }
+
+        let pag =
+            resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         if !include_unsafe && !include_concurrency {
             return Err(
@@ -176,153 +219,12 @@ impl McpServer {
             );
         }
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
-
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
-
-        let freshness_outcome = self
-            .ensure_freshness_for_interaction(
-                crate_row.id,
-                &crate_row.name,
-                &latest_version.version,
-            )
+        let ctx = self
+            .fetch_crate_context(&crate_name)
             .await?;
-
-        let latest_version = if freshness_outcome.freshness_check_result == "changed" {
-            sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
-            .ok_or_else(|| {
-                format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                    crate_row.name
-                )
-            })?
-        } else {
-            latest_version
-        };
-
-        let mut refresh_enqueued = freshness_outcome.refresh_enqueued;
-        let mut refresh_job_id = freshness_outcome
-            .refresh_job_id
-            .clone();
-
-        let selected_version = if let Some(version) = requested_version {
-            let selected = sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
-            })?;
-
-            if let Some(selected) = selected {
-                selected
-            } else {
-                let queued_job_id = self
-                    .backfill_missing_requested_version(&crate_row.name)
-                    .await?;
-                if let Some(job_id) = queued_job_id {
-                    refresh_enqueued = true;
-                    refresh_job_id = Some(job_id);
-                }
-
-                sqlx::query_as::<_, CrateVersionSelectionRow>(
-                    "SELECT
-                        id,
-                        version,
-                        rust_version,
-                        published_at::TEXT AS published_at,
-                        readme
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, crate_row.name
-                    )
-                })?
-            }
-        } else {
-            latest_version.clone()
-        };
+        let resolution = self
+            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .await?;
 
         let patterns = hotspot_patterns(include_unsafe, include_concurrency);
 
@@ -337,7 +239,7 @@ impl McpServer {
                  ORDER BY sf.path ASC
                  LIMIT 1000",
             )
-            .bind(selected_version.id)
+            .bind(resolution.selected_version.id)
             .bind(path_glob_to_like(path_filter))
             .fetch_all(&self.state.db)
             .await
@@ -352,7 +254,7 @@ impl McpServer {
                  ORDER BY sf.path ASC
                  LIMIT 1000",
             )
-            .bind(selected_version.id)
+            .bind(resolution.selected_version.id)
             .fetch_all(&self.state.db)
             .await
             .map_err(|e| format!("crate.hotspots source scan failed: {e}"))?
@@ -374,7 +276,31 @@ impl McpServer {
                         .cmp(&right.pattern)
                 })
         });
-        hotspots.truncate(limit as usize);
+        let mut hotspots = hotspots
+            .into_iter()
+            .skip(pag.offset as usize)
+            .take(pag.limit as usize + 1)
+            .collect::<Vec<_>>();
+        let has_more = hotspots.len() > pag.limit as usize;
+        if has_more {
+            hotspots.truncate(pag.limit as usize);
+        }
+        let next_cursor = if has_more {
+            Some(encode_cursor(&CrateHotspotsCursorToken {
+                v: 1,
+                offset: pag
+                    .offset
+                    .saturating_add(pag.limit),
+                limit: pag.limit,
+                crate_name: crate_name.clone(),
+                version: requested_version.clone(),
+                path_glob: path_glob.clone(),
+                include_unsafe,
+                include_concurrency,
+            })?)
+        } else {
+            None
+        };
 
         let confidence_assessment = if scanned_files == 0 {
             ConfidenceAssessment {
@@ -395,37 +321,41 @@ impl McpServer {
             }
         };
 
-        let freshness_check_result = freshness_outcome
+        let freshness_check_result = ctx
+            .freshness_outcome
             .freshness_check_result
             .clone();
 
         Ok(Json(CrateHotspotsResponse {
-            crate_name: crate_row.name,
-            selected_version: selected_version.version,
-            latest_version: latest_version.version,
+            crate_name: ctx.crate_row.name,
+            selected_version: resolution
+                .selected_version
+                .version,
+            latest_version: ctx.latest_version.version,
             path_glob,
             include_unsafe,
             include_concurrency,
-            limit,
+            cursor,
+            next_cursor,
+            page: pag.effective_page,
+            limit: pag.limit,
+            has_more,
+            truncated: has_more,
             scanned_files,
             count: hotspots.len(),
             hotspots,
-            freshness_check_performed: freshness_outcome.freshness_check_performed,
+            freshness_check_performed: ctx
+                .freshness_outcome
+                .freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
-            refresh_enqueued,
-            refresh_job_id,
-            freshness: vec![
-                ResponseFreshnessSource {
-                    source: "local_postgres_index".to_string(),
-                    status: "fresh".to_string(),
-                    checked_at: crate_row.updated_at,
-                },
-                ResponseFreshnessSource {
-                    source: "crates.io".to_string(),
-                    status: freshness_check_result,
-                    checked_at: None,
-                },
-            ],
+            refresh_enqueued: resolution.refresh_enqueued,
+            refresh_job_id: resolution.refresh_job_id,
+            freshness: build_crate_freshness_sources(
+                ctx.crate_row
+                    .updated_at
+                    .clone(),
+                &freshness_check_result,
+            ),
             confidence: confidence_assessment
                 .level
                 .as_str()

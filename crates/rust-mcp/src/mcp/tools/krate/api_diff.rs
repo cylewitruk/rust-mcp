@@ -6,12 +6,9 @@ pub use rust_mcp_types::types::krate::{
 };
 use sqlx::FromRow;
 
-use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, CrateVersionSelectionRow,
-    ResponseFreshnessSource,
-};
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, CrateVersionSelectionRow};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{api_diff_limit, normalize_required};
+use crate::mcp::utils::{api_diff_limit, build_crate_freshness_sources, normalize_required};
 
 #[derive(Debug, Clone, FromRow)]
 pub(crate) struct ApiDiffSymbolRow {
@@ -256,60 +253,11 @@ impl McpServer {
         let to_version = normalize_required(request.to_version, "to_version")?;
         let limit = api_diff_limit(request.limit) as usize;
 
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
-
-        let latest_version = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
-            )
-        })?;
-
-        let freshness_outcome = self
-            .ensure_freshness_for_interaction(
-                crate_row.id,
-                &crate_row.name,
-                &latest_version.version,
-            )
+        let ctx = self
+            .fetch_crate_context(&crate_name)
             .await?;
-
-        let freshness_check_result = freshness_outcome
+        let freshness_check_result = ctx
+            .freshness_outcome
             .freshness_check_result
             .clone();
 
@@ -324,17 +272,17 @@ impl McpServer {
              WHERE crate_id = $1 AND version = $2
              LIMIT 1",
         )
-        .bind(crate_row.id)
+        .bind(ctx.crate_row.id)
         .bind(&from_version)
         .fetch_optional(&self.state.db)
         .await
         .map_err(|e| {
-            format!("source version lookup failed for {}@{}: {e}", crate_row.name, from_version)
+            format!("source version lookup failed for {}@{}: {e}", ctx.crate_row.name, from_version)
         })?
         .ok_or_else(|| {
             format!(
                 "version '{}' for crate '{}' is not indexed locally",
-                from_version, crate_row.name
+                from_version, ctx.crate_row.name
             )
         })?;
 
@@ -349,17 +297,17 @@ impl McpServer {
              WHERE crate_id = $1 AND version = $2
              LIMIT 1",
         )
-        .bind(crate_row.id)
+        .bind(ctx.crate_row.id)
         .bind(&to_version)
         .fetch_optional(&self.state.db)
         .await
         .map_err(|e| {
-            format!("target version lookup failed for {}@{}: {e}", crate_row.name, to_version)
+            format!("target version lookup failed for {}@{}: {e}", ctx.crate_row.name, to_version)
         })?
         .ok_or_else(|| {
             format!(
                 "version '{}' for crate '{}' is not indexed locally",
-                to_version, crate_row.name
+                to_version, ctx.crate_row.name
             )
         })?;
 
@@ -388,7 +336,7 @@ impl McpServer {
         .map_err(|e| {
             format!(
                 "public symbol lookup failed for {}@{}: {e}",
-                crate_row.name, from_version_row.version
+                ctx.crate_row.name, from_version_row.version
             )
         })?;
 
@@ -417,7 +365,7 @@ impl McpServer {
         .map_err(|e| {
             format!(
                 "public symbol lookup failed for {}@{}: {e}",
-                crate_row.name, to_version_row.version
+                ctx.crate_row.name, to_version_row.version
             )
         })?;
 
@@ -430,7 +378,7 @@ impl McpServer {
         }
 
         Ok(Json(CrateApiDiffResponse {
-            crate_name: crate_row.name,
+            crate_name: ctx.crate_row.name,
             from_version: from_version_row.version,
             to_version: to_version_row.version,
             added_count: summary.added_count,
@@ -439,22 +387,20 @@ impl McpServer {
             breaking_changes_detected: summary.breaking_changes_detected,
             changes: summary.changes,
             truncated,
-            freshness_check_performed: freshness_outcome.freshness_check_performed,
+            freshness_check_performed: ctx
+                .freshness_outcome
+                .freshness_check_performed,
             freshness_check_result: freshness_check_result.clone(),
-            refresh_enqueued: freshness_outcome.refresh_enqueued,
-            refresh_job_id: freshness_outcome.refresh_job_id,
-            freshness: vec![
-                ResponseFreshnessSource {
-                    source: "local_postgres_index".to_string(),
-                    status: "fresh".to_string(),
-                    checked_at: crate_row.updated_at,
-                },
-                ResponseFreshnessSource {
-                    source: "crates.io".to_string(),
-                    status: freshness_check_result,
-                    checked_at: None,
-                },
-            ],
+            refresh_enqueued: ctx
+                .freshness_outcome
+                .refresh_enqueued,
+            refresh_job_id: ctx
+                .freshness_outcome
+                .refresh_job_id,
+            freshness: build_crate_freshness_sources(
+                ctx.crate_row.updated_at,
+                &freshness_check_result,
+            ),
             confidence: summary
                 .confidence_assessment
                 .level

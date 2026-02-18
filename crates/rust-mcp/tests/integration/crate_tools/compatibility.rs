@@ -128,4 +128,27 @@ async fn crate_license_and_alternatives_return_expected_policy_shapes() {
             .unwrap_or_default()
             >= 1
     );
+    assert_eq!(
+        alternatives_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        alternatives_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        alternatives_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        alternatives_payload
+            .get("next_cursor")
+            .is_some()
+    );
 }

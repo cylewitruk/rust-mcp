@@ -371,7 +371,7 @@ pub mod source {
     use super::*;
 
     /// Search mode for source content matching.
-    #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "lowercase")]
     pub enum SourceSearchMode {
         /// Case-insensitive substring matching.
@@ -393,6 +393,10 @@ pub mod source {
         pub path_glob: Option<String>,
         /// Optional matching mode.
         pub mode: Option<SourceSearchMode>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         /// Optional result limit.
         pub limit: Option<u32>,
     }
@@ -410,8 +414,18 @@ pub mod source {
         pub path_glob: Option<String>,
         /// Effective matching mode.
         pub mode: SourceSearchMode,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         /// Effective result limit.
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         /// Returned hit count.
         pub count: usize,
         /// Coarse confidence string.
@@ -686,6 +700,10 @@ pub mod docs {
         pub version: Option<String>,
         /// Optional docs path prefix filter.
         pub path_prefix: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         /// Result limit.
         pub limit: Option<u32>,
     }
@@ -701,8 +719,18 @@ pub mod docs {
         pub version: Option<String>,
         /// Effective path prefix filter.
         pub path_prefix: Option<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         /// Effective result limit.
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         /// Number of hits returned.
         pub count: usize,
         /// Coarse confidence string.
@@ -1025,7 +1053,7 @@ pub mod krate {
     use super::*;
 
     /// Sort mode for `crate.search`.
-    #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "lowercase")]
     pub enum CrateSearchSort {
         /// Rank by textual relevance.
@@ -1047,6 +1075,10 @@ pub mod krate {
         pub keyword: Option<String>,
         /// Optional sort mode.
         pub sort: Option<CrateSearchSort>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         /// Optional hit limit.
         pub limit: Option<u32>,
     }
@@ -1062,8 +1094,18 @@ pub mod krate {
         pub keyword: Option<String>,
         /// Effective sort mode.
         pub sort: CrateSearchSort,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         /// Effective hit limit.
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         /// Returned hit count.
         pub count: usize,
         /// Number of freshness checks performed across top hits.
@@ -1260,6 +1302,10 @@ pub mod krate {
     pub struct CrateVersionsRequest {
         /// Target crate name.
         pub crate_name: String,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         /// Maximum number of versions to return.
         pub limit: Option<u32>,
     }
@@ -1269,6 +1315,18 @@ pub mod krate {
     pub struct CrateVersionsResponse {
         /// Target crate name.
         pub crate_name: String,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
+        /// Effective page size.
+        pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         /// rust-version from the latest indexed version.
         pub latest_rust_version: Option<String>,
         /// Number of versions returned.
@@ -1353,6 +1411,10 @@ pub mod krate {
         pub version: Option<String>,
         pub path_glob: Option<String>,
         pub kinds: Option<Vec<String>>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1363,7 +1425,17 @@ pub mod krate {
         pub latest_version: String,
         pub path_glob: Option<String>,
         pub kinds: Vec<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub symbols: Vec<CrateApiSymbol>,
         pub freshness_check_performed: bool,
@@ -1539,6 +1611,10 @@ pub mod krate {
         pub path_glob: Option<String>,
         pub include_unsafe: Option<bool>,
         pub include_concurrency: Option<bool>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1565,7 +1641,17 @@ pub mod krate {
         pub path_glob: Option<String>,
         pub include_unsafe: bool,
         pub include_concurrency: bool,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub scanned_files: usize,
         pub count: usize,
         pub hotspots: Vec<CrateHotspotHit>,
@@ -1625,6 +1711,10 @@ pub mod krate {
         pub crate_name: String,
         pub symbol_name: String,
         pub version: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1634,7 +1724,17 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub symbol_name: String,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub patterns: Vec<CrateUsagePattern>,
         pub freshness_check_performed: bool,
@@ -1664,6 +1764,10 @@ pub mod krate {
         pub crate_name: String,
         pub version: Option<String>,
         pub path_prefix: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1673,7 +1777,17 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub path_prefix: Option<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub re_exports: Vec<CrateReExportEntry>,
         pub freshness_check_performed: bool,
@@ -1704,6 +1818,10 @@ pub mod krate {
         pub symbol_name: String,
         pub version: Option<String>,
         pub kind: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1714,7 +1832,17 @@ pub mod krate {
         pub latest_version: String,
         pub symbol_name: String,
         pub kind: Option<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub best_import_path: Option<String>,
         pub matches: Vec<CrateImportPathMatch>,
@@ -1934,6 +2062,10 @@ pub mod krate {
         pub crate_name: String,
         pub version: Option<String>,
         pub type_name: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -1943,7 +2075,17 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub type_name: Option<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub error_types: Vec<CrateErrorTypeEntry>,
         pub freshness_check_performed: bool,
@@ -1974,6 +2116,10 @@ pub mod krate {
     pub struct CrateAlternativesRequest {
         pub crate_name: String,
         pub version: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
         pub allow_licenses: Option<Vec<String>>,
         pub deny_licenses: Option<Vec<String>>,
@@ -1984,7 +2130,17 @@ pub mod krate {
         pub crate_name: String,
         pub selected_version: String,
         pub latest_version: String,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub allow_licenses: Vec<String>,
         pub deny_licenses: Vec<String>,
@@ -2024,6 +2180,10 @@ pub mod krate {
         pub version: Option<String>,
         pub trait_name: Option<String>,
         pub type_name: Option<String>,
+        /// Opaque cursor token for paging.
+        pub cursor: Option<String>,
+        /// 1-based page when cursor is not provided.
+        pub page: Option<u32>,
         pub limit: Option<u32>,
     }
 
@@ -2034,7 +2194,17 @@ pub mod krate {
         pub latest_version: String,
         pub trait_name: Option<String>,
         pub type_name: Option<String>,
+        /// Cursor that was used for this page.
+        pub cursor: Option<String>,
+        /// Cursor for the next page when more results exist.
+        pub next_cursor: Option<String>,
+        /// Effective 1-based page.
+        pub page: u32,
         pub limit: u32,
+        /// Whether more results are available.
+        pub has_more: bool,
+        /// Whether results were truncated by pagination.
+        pub truncated: bool,
         pub count: usize,
         pub impls: Vec<CrateTraitImplRelation>,
         pub trait_definitions: Vec<CrateTraitDefinition>,

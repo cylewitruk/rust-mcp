@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use rmcp::Json;
 pub use rust_mcp_types::types::symbol::{
     SymbolSearchHit, SymbolSearchRequest, SymbolSearchResponse,
@@ -8,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{normalize_optional, normalize_required, symbol_search_limit, sync_page};
+use crate::mcp::utils::{
+    CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
+    resolve_pagination, symbol_search_limit, sync_page,
+};
 
 #[derive(Debug, Serialize)]
 struct SymbolSearchCacheKey<'a> {
@@ -36,27 +38,16 @@ struct SymbolCursorToken {
     collapse_by_canonical: bool,
 }
 
-fn decode_symbol_cursor(token: &str) -> Result<SymbolCursorToken, String> {
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(token)
-        .map_err(|_| "cursor is invalid".to_string())?;
-    let decoded = serde_json::from_slice::<SymbolCursorToken>(&bytes)
-        .map_err(|_| "cursor is invalid".to_string())?;
-
-    if decoded.v != 1 {
-        return Err("cursor version is not supported".to_string());
+impl CursorToken for SymbolCursorToken {
+    fn version(&self) -> u8 {
+        self.v
     }
-    if decoded.limit == 0 {
-        return Err("cursor is invalid".to_string());
+    fn limit(&self) -> u32 {
+        self.limit
     }
-
-    Ok(decoded)
-}
-
-fn encode_symbol_cursor(token: &SymbolCursorToken) -> Result<String, String> {
-    let bytes =
-        serde_json::to_vec(token).map_err(|e| format!("cursor serialization failed: {e}"))?;
-    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+    fn offset(&self) -> u32 {
+        self.offset
+    }
 }
 
 impl McpServer {
@@ -99,26 +90,28 @@ impl McpServer {
             return Ok(Json(cached_response));
         }
 
-        let (offset, limit, effective_page) = if let Some(ref token) = cursor {
-            let decoded = decode_symbol_cursor(token)?;
-            if decoded.query != query
+        let decoded_cursor = cursor
+            .as_deref()
+            .map(decode_cursor::<SymbolCursorToken>)
+            .transpose()?;
+        if let Some(ref decoded) = decoded_cursor
+            && (decoded.query != query
                 || decoded.crate_name != crate_name
                 || decoded.version != version
                 || decoded.kind != kind
                 || decoded.include_all_versions != include_all_versions
-                || decoded.collapse_by_canonical != collapse_by_canonical
-            {
-                return Err("cursor does not match current symbol.search filters".to_string());
-            }
-
-            if request.limit.is_some() && requested_limit != decoded.limit {
-                return Err("limit must match the cursor page size".to_string());
-            }
-
-            (decoded.offset, decoded.limit, (decoded.offset / decoded.limit).saturating_add(1))
-        } else {
-            ((page - 1) * requested_limit, requested_limit, page)
-        };
+                || decoded.collapse_by_canonical != collapse_by_canonical)
+        {
+            return Err("cursor does not match current symbol.search filters".to_string());
+        }
+        let pagination = resolve_pagination(
+            decoded_cursor.as_ref(),
+            request.limit.is_some(),
+            requested_limit,
+            page,
+        )?;
+        let (offset, limit, effective_page) =
+            (pagination.offset, pagination.limit, pagination.effective_page);
 
         let filters = tools::SymbolSearchFilters {
             query: &query,
@@ -162,7 +155,7 @@ impl McpServer {
 
         let has_more = ((offset as usize) + hits.len()) < total_count;
         let next_cursor = if has_more {
-            Some(encode_symbol_cursor(&SymbolCursorToken {
+            Some(encode_cursor(&SymbolCursorToken {
                 v: 1,
                 offset: offset.saturating_add(limit),
                 limit,

@@ -45,6 +45,29 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
     let trait_impls_payload = common::structured_content(&trait_impls_response);
     assert_eq!(
         trait_impls_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        trait_impls_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        trait_impls_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        trait_impls_payload
+            .get("next_cursor")
+            .is_some()
+    );
+    assert_eq!(
+        trait_impls_payload
             .get("count")
             .and_then(Value::as_u64),
         Some(0)
@@ -68,6 +91,29 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
         .await
         .expect("crate.error_types call failed");
     let error_types_payload = common::structured_content(&error_types_response);
+    assert_eq!(
+        error_types_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        error_types_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        error_types_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        error_types_payload
+            .get("next_cursor")
+            .is_some()
+    );
     assert_eq!(
         error_types_payload
             .get("count")
@@ -185,6 +231,29 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
         .await
         .expect("crate.trait_impls call failed");
     let trait_impls_payload = common::structured_content(&trait_impls_response);
+    assert_eq!(
+        trait_impls_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        trait_impls_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        trait_impls_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        trait_impls_payload
+            .get("next_cursor")
+            .is_some()
+    );
     assert!(
         trait_impls_payload
             .get("count")
@@ -221,6 +290,29 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
         .await
         .expect("crate.error_types call failed");
     let error_types_payload = common::structured_content(&error_types_response);
+    assert_eq!(
+        error_types_payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        error_types_payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        error_types_payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        error_types_payload
+            .get("next_cursor")
+            .is_some()
+    );
     assert_eq!(
         error_types_payload
             .get("count")

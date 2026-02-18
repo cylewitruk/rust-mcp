@@ -184,29 +184,11 @@ impl McpServer {
         crate_name: String,
         requested_version: Option<String>,
     ) -> Result<CompareSnapshot, String> {
-        let crate_row = sqlx::query_as::<_, CrateCoreRow>(
-            "SELECT
-                id,
-                name,
-                description,
-                repository_url,
-                docs_url,
-                homepage_url,
-                categories,
-                keywords,
-                updated_at::TEXT AS updated_at
-             FROM crates
-             WHERE name = $1",
-        )
-        .bind(&crate_name)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
-        })?;
+        let ctx = self
+            .fetch_crate_context(&crate_name)
+            .await?;
 
-        let mut latest_version = sqlx::query_as::<_, CrateCompareVersionRow>(
+        let latest_version = sqlx::query_as::<_, CrateCompareVersionRow>(
             "SELECT
                 id,
                 version,
@@ -220,51 +202,16 @@ impl McpServer {
              ORDER BY published_at DESC NULLS LAST, id DESC
              LIMIT 1",
         )
-        .bind(crate_row.id)
+        .bind(ctx.crate_row.id)
         .fetch_optional(&self.state.db)
         .await
         .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
         .ok_or_else(|| {
             format!(
                 "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                crate_row.name
+                ctx.crate_row.name
             )
         })?;
-
-        let freshness_outcome = self
-            .ensure_freshness_for_interaction(
-                crate_row.id,
-                &crate_row.name,
-                &latest_version.version,
-            )
-            .await?;
-
-        if freshness_outcome.freshness_check_result == "changed" {
-            latest_version = sqlx::query_as::<_, CrateCompareVersionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    yanked,
-                    total_downloads,
-                    license_expression
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC
-                 LIMIT 1",
-            )
-            .bind(crate_row.id)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
-            .ok_or_else(|| {
-                format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                    crate_row.name
-                )
-            })?;
-        }
 
         let selected_version = if let Some(version) = requested_version {
             let selected = sqlx::query_as::<_, CrateCompareVersionRow>(
@@ -280,19 +227,22 @@ impl McpServer {
                  WHERE crate_id = $1 AND version = $2
                  LIMIT 1",
             )
-            .bind(crate_row.id)
+            .bind(ctx.crate_row.id)
             .bind(&version)
             .fetch_optional(&self.state.db)
             .await
             .map_err(|e| {
-                format!("selected version lookup failed for {}@{}: {e}", crate_row.name, version)
+                format!(
+                    "selected version lookup failed for {}@{}: {e}",
+                    ctx.crate_row.name, version
+                )
             })?;
 
             if let Some(selected) = selected {
                 selected
             } else {
                 let _ = self
-                    .backfill_missing_requested_version(&crate_row.name)
+                    .backfill_missing_requested_version(&ctx.crate_row.name)
                     .await?;
 
                 sqlx::query_as::<_, CrateCompareVersionRow>(
@@ -308,20 +258,20 @@ impl McpServer {
                      WHERE crate_id = $1 AND version = $2
                      LIMIT 1",
                 )
-                .bind(crate_row.id)
+                .bind(ctx.crate_row.id)
                 .bind(&version)
                 .fetch_optional(&self.state.db)
                 .await
                 .map_err(|e| {
                     format!(
                         "selected version lookup failed after backfill for {}@{}: {e}",
-                        crate_row.name, version
+                        ctx.crate_row.name, version
                     )
                 })?
                 .ok_or_else(|| {
                     format!(
                         "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, crate_row.name
+                        version, ctx.crate_row.name
                     )
                 })?
             }
@@ -347,19 +297,19 @@ impl McpServer {
                  WHERE de2.to_crate_id = $2) AS dependent_count",
         )
         .bind(selected_version.id)
-        .bind(crate_row.id)
+        .bind(ctx.crate_row.id)
         .fetch_one(&self.state.db)
         .await
         .map_err(|e| {
-            format!("crate.compare count aggregation failed for {}: {e}", crate_row.name)
+            format!("crate.compare count aggregation failed for {}: {e}", ctx.crate_row.name)
         })?;
 
         Ok(CompareSnapshot {
-            crate_row,
+            crate_row: ctx.crate_row,
             latest_version,
             selected_version,
             counts,
-            freshness_outcome,
+            freshness_outcome: ctx.freshness_outcome,
         })
     }
 
