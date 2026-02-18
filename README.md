@@ -155,6 +155,7 @@ Important environment variables:
 - `MCP_HTTP_BIND` (default `127.0.0.1:43173`)
 - `MCP_SSE_KEEP_ALIVE_SECS` (default `15`)
 - `MCP_SSE_RETRY_MS` (default `3000`)
+- `MCP_STRICT_ACCEPT` (default `false`; when `true`, reject POST `/mcp` requests that do not accept both `application/json` and `text/event-stream`)
 - `DATABASE_URL`
 - `PROMETHEUS_BIND` (default `0.0.0.0:9090` in container)
 - `CRATES_IO_BASE_URL`, `DOCS_RS_BASE_URL`
@@ -170,6 +171,7 @@ Important environment variables:
 - Supported in this binary: Streamable HTTP at `/mcp`
 - Not implemented in this binary: stdio transport
 - If a client only supports stdio process launch, run a separate stdio-to-HTTP proxy binary against this server instance.
+- In non-strict mode, JSON-only Accept headers are rewritten for compatibility and include an RFC `Warning` response header.
 
 ## Development
 

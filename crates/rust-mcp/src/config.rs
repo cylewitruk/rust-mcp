@@ -8,6 +8,7 @@ pub(crate) mod env_vars {
     pub(crate) const MCP_HTTP_BIND: &str = "MCP_HTTP_BIND";
     pub(crate) const MCP_SSE_KEEP_ALIVE_SECS: &str = "MCP_SSE_KEEP_ALIVE_SECS";
     pub(crate) const MCP_SSE_RETRY_MS: &str = "MCP_SSE_RETRY_MS";
+    pub(crate) const MCP_STRICT_ACCEPT: &str = "MCP_STRICT_ACCEPT";
     pub(crate) const DATABASE_URL: &str = "DATABASE_URL";
     pub(crate) const CRATES_IO_BASE_URL: &str = "CRATES_IO_BASE_URL";
     pub(crate) const CRATES_IO_USER_AGENT: &str = "CRATES_IO_USER_AGENT";
@@ -57,6 +58,10 @@ pub struct Config {
     /// SSE retry delay in milliseconds for reconnecting clients.
     #[arg(long, env = env_vars::MCP_SSE_RETRY_MS, default_value_t = 3000)]
     pub mcp_sse_retry_ms: u64,
+
+    /// Enforce strict MCP Accept-header conformance on `/mcp` POST requests.
+    #[arg(long, env = env_vars::MCP_STRICT_ACCEPT, default_value_t = false)]
+    pub mcp_strict_accept: bool,
 
     /// PostgreSQL connection string (unix socket by default in Docker).
     #[arg(

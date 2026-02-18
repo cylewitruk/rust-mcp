@@ -1,11 +1,11 @@
 use super::{
     DEFAULT_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_params, initialize_raw_session,
     json, jsonrpc_notification, jsonrpc_request, notify_initialized, parse_mcp_response_from_http,
-    post_mcp_jsonrpc, start_ready_rust_mcp,
+    post_mcp_jsonrpc, start_ready_rust_mcp, start_ready_rust_mcp_with_env,
 };
 
 #[tokio::test]
-async fn rust_mcp_container_requires_streamable_accept_for_mcp_requests() {
+async fn rust_mcp_container_accepts_json_only_accept_for_initialize() {
     let rust_mcp = start_ready_rust_mcp().await;
 
     let client = reqwest::Client::new();
@@ -21,9 +21,17 @@ async fn rust_mcp_container_requires_streamable_accept_for_mcp_requests() {
     assert!(
         json_only_initialize
             .status()
-            .is_client_error(),
-        "expected client error for JSON-only accept, got {}",
+            .is_success(),
+        "expected success for JSON-only accept, got {}",
         json_only_initialize.status()
+    );
+    let warning = json_only_initialize
+        .headers()
+        .get("warning")
+        .and_then(|value| value.to_str().ok());
+    assert!(
+        warning.is_some_and(|value| value.contains("Non-conformant Accept header rewritten")),
+        "expected Warning header for relaxed Accept rewrite, got: {warning:?}"
     );
 
     let (session_id, initialize_payload) =
@@ -67,6 +75,35 @@ async fn rust_mcp_container_requires_streamable_accept_for_mcp_requests() {
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty()),
         "tools/list returned unexpected payload: {tools_list_payload}"
+    );
+}
+
+#[tokio::test]
+async fn rust_mcp_container_rejects_json_only_accept_in_strict_mode() {
+    let rust_mcp = start_ready_rust_mcp_with_env([("MCP_STRICT_ACCEPT", "true")]).await;
+
+    let response = reqwest::Client::new()
+        .post(rust_mcp.mcp_url())
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .json(&jsonrpc_request(1, "initialize", initialize_params(DEFAULT_TEST_PROTOCOL_VERSION)))
+        .send()
+        .await
+        .expect("strict-mode initialize request failed");
+
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_ACCEPTABLE,
+        "strict-mode JSON-only Accept should be rejected"
+    );
+
+    let body = response
+        .text()
+        .await
+        .expect("failed to read strict-mode rejection body");
+    assert!(
+        body.contains("must accept both application/json and text/event-stream"),
+        "unexpected strict-mode rejection body: {body}"
     );
 }
 

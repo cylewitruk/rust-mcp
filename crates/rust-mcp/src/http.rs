@@ -1,5 +1,8 @@
+use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::http::header::{ACCEPT, WARNING};
+use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -16,13 +19,17 @@ use crate::state::AppState;
 /// mounting.
 pub fn router(state: AppState, config: Config) -> Router {
     let mcp_service = mcp::streamable_http_service(state.clone(), &config);
+    let strict_accept = config.mcp_strict_accept;
+    let mcp_router = Router::new()
+        .route_service("/", mcp_service)
+        .layer(middleware::from_fn_with_state(strict_accept, relax_mcp_accept_header));
 
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/schemas", get(list_tool_schemas))
         .route("/schemas/{tool_name}", get(get_tool_schema))
-        .nest_service("/mcp", mcp_service)
+        .nest("/mcp", mcp_router)
         .with_state(state)
         .layer(ConcurrencyLimitLayer::new(
             config
@@ -30,6 +37,47 @@ pub fn router(state: AppState, config: Config) -> Router {
                 .max(1) as usize,
         ))
         .layer(TraceLayer::new_for_http())
+}
+
+async fn relax_mcp_accept_header(
+    State(strict_accept): State<bool>,
+    mut request: axum::http::Request<Body>,
+    next: Next,
+) -> impl IntoResponse {
+    let should_rewrite = request
+        .headers()
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|accept| {
+            accept.contains("application/json") && !accept.contains("text/event-stream")
+        });
+
+    if should_rewrite && strict_accept {
+        return (
+            StatusCode::NOT_ACCEPTABLE,
+            "Not Acceptable: Client must accept both application/json and text/event-stream",
+        )
+            .into_response();
+    }
+
+    if should_rewrite {
+        request.headers_mut().insert(
+            ACCEPT,
+            axum::http::HeaderValue::from_static("application/json, text/event-stream"),
+        );
+    }
+
+    let mut response = next.run(request).await;
+    if should_rewrite {
+        response.headers_mut().insert(
+            WARNING,
+            axum::http::HeaderValue::from_static(
+                "199 rust-mcp \"Non-conformant Accept header rewritten; expected application/json \
+                 and text/event-stream\"",
+            ),
+        );
+    }
+    response
 }
 
 #[derive(Debug, Serialize)]

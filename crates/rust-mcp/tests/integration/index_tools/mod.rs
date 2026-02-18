@@ -63,6 +63,7 @@ fn test_config(
         schema_export_dir: None,
         rust_log: "warn".to_string(),
         log_format: LogFormat::Pretty,
+        mcp_strict_accept: true,
     }
 }
 
