@@ -25,7 +25,10 @@ The previously planned milestone set through M13 is complete, including:
 - [x] Expand e2e protocol assertions for non-happy-path JSON-RPC/MCP error envelopes and status mappings.
   - Added e2e matrix assertions for JSON-RPC error envelope shape (`jsonrpc`, `id`, `error.code`, `error.message`) on successful transport responses.
   - Added stricter 400/401/422 status assertions for malformed and unauthorized protocol paths.
-- [ ] Add clear compatibility policy for supported MCP protocol versions (currently tests use `2025-11-25`).
+- [x] Add clear compatibility policy for supported MCP protocol versions.
+  - Policy is now documented in `README.md` (`MCP Protocol Version Policy`).
+  - Latest published version and currently negotiated server version are both explicitly documented.
+  - Default initialize examples/test harness constants now use a shared protocol constant to avoid drift.
 
 ## P1: Rustdoc Intelligence Quality
 
@@ -48,10 +51,13 @@ The previously planned milestone set through M13 is complete, including:
   - `schema.get` now exposes per-tool request/response JSON Schemas over MCP.
   - HTTP endpoints now expose the same schema catalog at `/schemas` and `/schemas/{tool_name}`.
   - `SCHEMA_EXPORT_DIR` now writes `tool-schemas.json` plus per-tool artifacts at startup.
+- [ ] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running rust-mcp HTTP instance.
+  - _**Background:** As `rust-mcp` is designed to run as a single instance/server in Docker, MCP clients which do not support remote/HTTP(S) MCP server configurations will not be able to use it. The major players (Claude Code, Codex, Copilot) all support remote server configurations, so this is a compatibility-maximizing point to reach a broader userbase._
 
 ## P2: Indexing and Operations
 
 - [ ] Optional container-side rustdoc JSON generation workflow (nightly, bounded/isolated execution).
+  - _**Background:** docs.rs does not have rustdoc-json built for all versions of all crates yet. Many crate [versions] published prior to May, 2025-ish are not available for download._
 - [ ] Background refresh fairness/backpressure tuning for large local registries.
 - [ ] More granular per-source/per-tool SLO metrics and alertable counters.
 - [ ] CI split for faster feedback: lint, integration, and e2e lanes with artifact reuse.
@@ -60,7 +66,6 @@ The previously planned milestone set through M13 is complete, including:
 
 - [ ] Evaluate optional rust-analyzer-assisted enrichment for workspace-local, position-aware context where rustdoc/syn are insufficient.
 - [ ] Consider new tools for deprecations and feature-gated API surfacing after rustdoc data quality goals are met.
-- [ ] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running `rust-mcp` HTTP instance.
 
 ## Out of Scope (For Now)
 

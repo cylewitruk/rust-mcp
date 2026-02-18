@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 
 const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 const MCP_ACCEPT_HEADER: &str = "application/json, text/event-stream";
-const PROTOCOL_VERSION: &str = "2025-11-25";
 
 #[derive(Debug, Parser)]
 #[command(name = "load-test-mcp", about = "Run concurrent MCP tool load tests")]
@@ -184,7 +183,7 @@ async fn main() -> Result<(), String> {
         1,
         "initialize",
         json!({
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": rust_mcp::LATEST_MCP_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "load-test-mcp", "version": "0.1.0"}
         }),

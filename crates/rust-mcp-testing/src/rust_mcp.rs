@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use testcontainers_modules::testcontainers::core::{
@@ -22,7 +23,7 @@ use tokio::time::{Instant, sleep};
 use crate::env;
 
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
-const DEFAULT_PROTOCOL_VERSION: &str = "2025-11-25";
+const DEFAULT_PROTOCOL_VERSION: &str = LATEST_MCP_PROTOCOL_VERSION;
 const MCP_INTERNAL_PORT: u16 = 43173;
 const METRICS_INTERNAL_PORT: u16 = 9090;
 

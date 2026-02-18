@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use axum::Router;
+use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
@@ -125,7 +126,7 @@ impl LocalMcpHttpHarness {
             .rpc_call(
                 "initialize",
                 json!({
-                    "protocolVersion": "2025-11-25",
+                    "protocolVersion": LATEST_MCP_PROTOCOL_VERSION,
                     "capabilities": {},
                     "clientInfo": {"name": client_name, "version": "0.1.0"},
                 }),

@@ -1,5 +1,7 @@
 //! Local-first Rust dependency intelligence MCP server library.
 
+pub use rust_mcp_types::protocol::{LATEST_MCP_PROTOCOL_VERSION, SUPPORTED_MCP_PROTOCOL_VERSION};
+
 /// Application startup and runtime orchestration.
 pub mod app;
 /// Typed runtime configuration loaded from CLI flags and environment variables.

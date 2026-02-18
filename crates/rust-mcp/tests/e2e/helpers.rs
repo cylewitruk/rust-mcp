@@ -10,7 +10,7 @@ const MCP_ACCEPT_STREAMABLE: &str = "application/json, text/event-stream";
 const E2E_CLIENT_NAME: &str = "rust-mcp-e2e";
 const E2E_CLIENT_VERSION: &str = "0.1.0";
 
-pub(super) const DEFAULT_TEST_PROTOCOL_VERSION: &str = "2025-11-25";
+pub(super) const DEFAULT_TEST_PROTOCOL_VERSION: &str = rust_mcp::LATEST_MCP_PROTOCOL_VERSION;
 const DEFAULT_CONTAINER_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
 async fn wait_until_container_ready(rust_mcp: &RustMcpTestContainer) {

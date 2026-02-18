@@ -12,35 +12,34 @@ e2e-tests = ["testing"]
 testing = []
 
 [dependencies]
-anyhow = "1.0"
-axum = { version = "0.8", features = ["json"] }
-base64 = "0.22"
-clap = { version = "4.5", features = ["derive", "env"] }
-flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
-metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.18.1", features = ["http-listener"] }
-rmcp = { version = "0.15.0", features = ["transport-streamable-http-server"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
-quote = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-semver = "1.0"
-sha2 = "0.10"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "migrate"] }
-syn = { version = "2.0", features = ["full"] }
-thiserror = "2.0"
-tokio = { version = "1.44", features = ["macros", "rt-multi-thread", "signal"] }
-toml = "0.9.8"
-tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6", features = ["trace"] }
-tracing = "0.1"
+anyhow = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+clap = { workspace = true }
+flate2 = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+rmcp = { workspace = true }
+reqwest = { workspace = true }
+quote = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+semver = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+syn = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
 rustdoc-types = { workspace = true }
-rust-mcp-types = { path = "../rust-mcp-types" }
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+rust-mcp-types = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-rust-mcp-testing = { path = "../rust-mcp-testing" }
-rust-mcp = { path = ".", features = ["testing"] }
+rust-mcp-testing = { workspace = true }
 
 [[test]]
 name = "integration"

@@ -207,55 +207,84 @@ async fn rust_mcp_container_rejects_malformed_json_request_body() {
 }
 
 #[tokio::test]
-async fn rust_mcp_container_negotiates_initialize_from_older_protocol_version() {
+async fn rust_mcp_container_negotiates_initialize_for_all_recognized_protocol_versions() {
     let rust_mcp = start_ready_rust_mcp().await;
-
-    let requested_protocol_version = "2024-11-05";
     let client = reqwest::Client::new();
-    let (session_id, initialize_payload) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, requested_protocol_version).await;
 
-    let negotiated_protocol_version = initialize_payload
-        .get("result")
-        .and_then(|result| result.get("protocolVersion"))
-        .and_then(Value::as_str)
-        .expect("initialize result.protocolVersion should be present");
-    assert!(
-        !negotiated_protocol_version
-            .trim()
-            .is_empty(),
-        "initialize should return a non-empty protocol version: {initialize_payload}"
-    );
+    let requested_versions = ["2024-11-05", "2025-03-26", "2025-06-18"];
 
-    let initialized_notification =
-        notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
-    assert!(
-        initialized_notification
-            .status()
-            .is_success()
-    );
+    for (index, requested_protocol_version) in requested_versions
+        .into_iter()
+        .enumerate()
+    {
+        let request_id = 100_u64 + index as u64;
+        let (session_id, initialize_payload) = initialize_raw_session(
+            &client,
+            rust_mcp.mcp_url(),
+            request_id,
+            requested_protocol_version,
+        )
+        .await;
 
-    let tools_list = post_mcp_jsonrpc(
-        &client,
-        rust_mcp.mcp_url(),
-        Some(&session_id),
-        jsonrpc_request(2, "tools/list", json!({})),
-        "tools/list request failed after older-version negotiation",
-    )
-    .await;
-    assert!(
-        tools_list
-            .status()
-            .is_success()
-    );
-    let tools_list_payload =
-        parse_mcp_response_from_http(tools_list, "failed to read tools/list response body").await;
-    assert!(
-        tools_list_payload
+        let negotiated_protocol_version = initialize_payload
             .get("result")
-            .and_then(|result| result.get("tools"))
-            .and_then(Value::as_array)
-            .is_some_and(|tools| !tools.is_empty()),
-        "tools/list should succeed after negotiated initialize: {tools_list_payload}"
-    );
+            .and_then(|result| result.get("protocolVersion"))
+            .and_then(Value::as_str)
+            .expect("initialize result.protocolVersion should be present");
+
+        let expected_negotiated =
+            if requested_protocol_version <= rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION {
+                requested_protocol_version
+            } else {
+                rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION
+            };
+        assert_eq!(
+            negotiated_protocol_version, expected_negotiated,
+            "unexpected negotiated protocol version for requested {requested_protocol_version}"
+        );
+
+        let initialized_notification =
+            notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
+        assert!(
+            initialized_notification
+                .status()
+                .is_success(),
+            "notifications/initialized failed for requested {requested_protocol_version}"
+        );
+
+        let tools_list = post_mcp_jsonrpc(
+            &client,
+            rust_mcp.mcp_url(),
+            Some(&session_id),
+            jsonrpc_request(200_u64 + index as u64, "tools/list", json!({})),
+            &format!(
+                "tools/list request failed after protocol negotiation for \
+                 {requested_protocol_version}"
+            ),
+        )
+        .await;
+        assert!(
+            tools_list
+                .status()
+                .is_success(),
+            "tools/list HTTP status not successful for requested {requested_protocol_version}"
+        );
+        let tools_list_payload = parse_mcp_response_from_http(
+            tools_list,
+            &format!(
+                "failed to read tools/list response body for requested \
+                 {requested_protocol_version}"
+            ),
+        )
+        .await;
+        assert!(
+            tools_list_payload
+                .get("result")
+                .and_then(|result| result.get("tools"))
+                .and_then(Value::as_array)
+                .is_some_and(|tools| !tools.is_empty()),
+            "tools/list should succeed after negotiated initialize for requested \
+             {requested_protocol_version}: {tools_list_payload}"
+        );
+    }
 }

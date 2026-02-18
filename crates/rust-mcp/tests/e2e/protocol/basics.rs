@@ -135,7 +135,8 @@ async fn rust_mcp_container_initialize_response_matches_expected_contract() {
         .and_then(Value::as_str)
         .expect("initialize result.protocolVersion should be present");
     assert_eq!(
-        protocol_version, "2025-03-26",
+        protocol_version,
+        rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION,
         "initialize should negotiate the server-supported MCP protocol version"
     );
 
@@ -195,7 +196,8 @@ async fn rust_mcp_container_negotiates_initialize_from_newer_protocol_version() 
         "initialize should not echo unsupported client protocol version"
     );
     assert_eq!(
-        negotiated_protocol_version, "2025-03-26",
+        negotiated_protocol_version,
+        rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION,
         "initialize should negotiate to server-supported MCP protocol version"
     );
 

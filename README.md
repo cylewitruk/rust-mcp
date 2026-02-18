@@ -131,6 +131,13 @@ curl -sS \
 - `index.refresh` supports scope-specific refreshes (`crate`, `all`, `security`, `docs`, `local_cache`, `rustdoc_json`).
 - `crate.search` and `crate.intel` can trigger freshness checks and enqueue deeper refresh work.
 
+## MCP Protocol Version Policy
+
+- Latest published MCP protocol version: `2025-11-25`.
+- Server-supported (negotiated) MCP protocol version: `2025-03-26`.
+- Recommended client initialize request: send `protocolVersion: "2025-11-25"` and honor negotiated `result.protocolVersion`.
+- Requested protocol versions are treated as compatibility negotiation, not a guarantee that the requested version is accepted as-is.
+
 ## Observability
 
 - Metrics exporter: `http://127.0.0.1:9090/metrics` (separate listener).
