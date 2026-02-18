@@ -132,6 +132,13 @@ curl -sS \
 - `index.refresh` supports scope-specific refreshes (`crate`, `all`, `security`, `docs`, `local_cache`, `rustdoc_json`).
 - `crate.search` and `crate.intel` can trigger freshness checks and enqueue deeper refresh work.
 
+## Rustdoc Freshness and Confidence
+
+- Rustdoc-backed crate tools continue to report freshness checks against crates.io and local index provenance in `freshness`, `freshness_check_result`, and `refresh_enqueued` fields.
+- Rustdoc-backed path/shape resolution tools (`crate.re_exports`, `crate.import_path`) return high confidence when canonical rustdoc symbol metadata is available, and degrade to medium/low confidence when falling back to sparse local metadata.
+- Rustdoc-backed type/impl tools (`crate.type_info`, `crate.trait_impls`) prefer richer rustdoc-derived rows when duplicate syn/local and rustdoc rows coexist, and confidence reflects whether definitions/impl metadata were actually resolved.
+- API diffing (`crate.api_diff`) now prioritizes rustdoc-derived public symbols when dual-source duplicates exist, reducing false negatives caused by sparse duplicate snapshots.
+
 ## MCP Protocol Version Policy
 
 - Latest published MCP protocol version: `2025-11-25`.

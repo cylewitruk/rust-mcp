@@ -38,12 +38,13 @@ The previously planned milestone set through M13 is complete, including:
   - [x] `crate.type_info` and `crate.trait_impls` now expose richer rustdoc impl metadata (`is_blanket`, `is_synthetic`, `is_negative`, `blanket_type`, generics, where-clauses).
   - [x] `crate_traits` metadata is now surfaced in `crate.type_info` and `crate.trait_impls` responses as `trait_definitions`.
   - [ ] Remaining: improve canonicalization coverage for complex glob/re-export edge cases and external-path remapping nuances.
-- [ ] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
+- [x] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
   - [x] `crate.type_info` and `crate.trait_impls` now collapse duplicate dual-source impl rows and prioritize richer rustdoc-backed metadata over sparse duplicates.
-  - [ ] Remaining: extend dual-source prioritization heuristics to `crate.api_diff`.
+  - [x] `crate.api_diff` now prefers rustdoc-backed symbol rows when dual-source duplicates exist.
 - [x] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
   - Rustdoc ingestion now reports unsupported `format_version` mismatches explicitly and appends targeted hints for fallback/configuration/decode failures.
-- [ ] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
+- [x] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
+  - Documented in `README.md` (`Rustdoc Freshness and Confidence`) with tool-level behavior notes for `crate.re_exports`, `crate.import_path`, `crate.type_info`, `crate.trait_impls`, and `crate.api_diff`.
 
 ## P1: Tooling and UX Improvements
 

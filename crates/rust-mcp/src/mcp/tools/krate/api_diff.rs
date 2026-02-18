@@ -19,6 +19,7 @@ pub(crate) struct ApiDiffSymbolRow {
     pub(crate) kind: String,
     pub(crate) signature: Option<String>,
     pub(crate) visibility: Option<String>,
+    pub(crate) index_source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,9 +54,43 @@ fn row_key(row: &ApiDiffSymbolRow) -> (String, String) {
     (row.name.clone(), row.kind.clone())
 }
 
+fn symbol_row_priority(row: &ApiDiffSymbolRow) -> u8 {
+    let mut score = 0u8;
+    if row.index_source == "rustdoc_json" {
+        score = score.saturating_add(4);
+    }
+    if normalize_signature(row.signature.clone()).is_some() {
+        score = score.saturating_add(2);
+    }
+    if normalize_visibility(row.visibility.clone()).is_some() {
+        score = score.saturating_add(1);
+    }
+    score
+}
+
+fn prioritize_symbol_rows(rows: Vec<ApiDiffSymbolRow>) -> Vec<ApiDiffSymbolRow> {
+    let mut best_by_key = BTreeMap::<(String, String), (u8, ApiDiffSymbolRow)>::new();
+
+    for row in rows {
+        let key = row_key(&row);
+        let priority = symbol_row_priority(&row);
+        match best_by_key.get(&key) {
+            Some((existing_priority, _)) if *existing_priority >= priority => {}
+            _ => {
+                best_by_key.insert(key, (priority, row));
+            }
+        }
+    }
+
+    best_by_key
+        .into_values()
+        .map(|(_, row)| row)
+        .collect()
+}
+
 fn map_symbols(rows: Vec<ApiDiffSymbolRow>) -> BTreeMap<(String, String), SymbolFingerprint> {
     let mut out = BTreeMap::<(String, String), SymbolFingerprint>::new();
-    for row in rows {
+    for row in prioritize_symbol_rows(rows) {
         out.entry(row_key(&row))
             .or_insert(SymbolFingerprint {
                 signature: normalize_signature(row.signature),
@@ -333,11 +368,19 @@ impl McpServer {
                 s.name,
                 s.kind,
                 s.signature,
-                s.visibility
+                                s.visibility,
+                                s.index_source
              FROM symbols s
              WHERE s.crate_version_id = $1
                AND (s.visibility = 'public' OR s.visibility IS NULL)
-             ORDER BY s.name ASC, s.kind ASC, s.start_line ASC, s.end_line ASC, s.id ASC",
+                         ORDER BY s.name ASC,
+                                            s.kind ASC,
+                                            CASE WHEN s.index_source = 'rustdoc_json' THEN 0 ELSE \
+             1 END,
+                                            CASE WHEN s.signature IS NULL THEN 1 ELSE 0 END,
+                                            s.start_line ASC,
+                                            s.end_line ASC,
+                                            s.id ASC",
         )
         .bind(from_version_row.id)
         .fetch_all(&self.state.db)
@@ -354,11 +397,19 @@ impl McpServer {
                 s.name,
                 s.kind,
                 s.signature,
-                s.visibility
+                                s.visibility,
+                                s.index_source
              FROM symbols s
              WHERE s.crate_version_id = $1
                AND (s.visibility = 'public' OR s.visibility IS NULL)
-             ORDER BY s.name ASC, s.kind ASC, s.start_line ASC, s.end_line ASC, s.id ASC",
+                         ORDER BY s.name ASC,
+                                            s.kind ASC,
+                                            CASE WHEN s.index_source = 'rustdoc_json' THEN 0 ELSE \
+             1 END,
+                                            CASE WHEN s.signature IS NULL THEN 1 ELSE 0 END,
+                                            s.start_line ASC,
+                                            s.end_line ASC,
+                                            s.id ASC",
         )
         .bind(to_version_row.id)
         .fetch_all(&self.state.db)
@@ -422,7 +473,9 @@ impl McpServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiDiffSymbolRow, CrateApiDiffChangeType, build_diff_summary};
+    use super::{
+        ApiDiffSymbolRow, CrateApiDiffChangeType, build_diff_summary, prioritize_symbol_rows,
+    };
 
     fn symbol(
         name: &str,
@@ -435,6 +488,23 @@ mod tests {
             kind: kind.to_string(),
             signature: signature.map(ToString::to_string),
             visibility: visibility.map(ToString::to_string),
+            index_source: "local_cache".to_string(),
+        }
+    }
+
+    fn symbol_with_source(
+        name: &str,
+        kind: &str,
+        signature: Option<&str>,
+        visibility: Option<&str>,
+        index_source: &str,
+    ) -> ApiDiffSymbolRow {
+        ApiDiffSymbolRow {
+            name: name.to_string(),
+            kind: kind.to_string(),
+            signature: signature.map(ToString::to_string),
+            visibility: visibility.map(ToString::to_string),
+            index_source: index_source.to_string(),
         }
     }
 
@@ -489,5 +559,35 @@ mod tests {
         assert!(summary.breaking_changes_detected);
         assert_eq!(summary.changes[0].change_type, CrateApiDiffChangeType::VisibilityChanged);
         assert!(summary.changes[0].breaking_change);
+    }
+
+    #[test]
+    fn prioritize_symbol_rows_prefers_rustdoc_and_complete_signatures() {
+        let prioritized = prioritize_symbol_rows(vec![
+            symbol_with_source("foo", "function", None, Some("public"), "local_cache"),
+            symbol_with_source(
+                "foo",
+                "function",
+                Some("pub fn foo()"),
+                Some("public"),
+                "rustdoc_json",
+            ),
+            symbol_with_source(
+                "foo",
+                "function",
+                Some("pub fn foo_local()"),
+                Some("public"),
+                "local_cache",
+            ),
+        ]);
+
+        assert_eq!(prioritized.len(), 1);
+        assert_eq!(prioritized[0].index_source, "rustdoc_json");
+        assert_eq!(
+            prioritized[0]
+                .signature
+                .as_deref(),
+            Some("pub fn foo()")
+        );
     }
 }

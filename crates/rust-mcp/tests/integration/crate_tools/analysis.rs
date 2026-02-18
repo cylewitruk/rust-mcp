@@ -417,3 +417,164 @@ async fn crate_import_path_resolves_best_known_public_path() {
             >= 1
     );
 }
+
+#[tokio::test]
+async fn crate_api_diff_prefers_rustdoc_rows_when_dual_source_symbols_exist() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let previous_version_id = seed_crate_version(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .crate_id,
+        "1.0.143",
+        570_000_000,
+        Some("2025-12-30T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed previous crate version");
+
+    let from_local_source = seed_source_file(
+        &context.state.db,
+        previous_version_id,
+        "src/lib.rs",
+        Some("rust"),
+        "pub fn dual_source() -> bool { true }",
+    )
+    .await
+    .expect("failed to seed previous local source");
+
+    let from_rustdoc_source = seed_source_file(
+        &context.state.db,
+        previous_version_id,
+        "rustdoc-json/serde_json-1.0.143.json",
+        Some("rustdoc_json"),
+        "{\"mock\":\"rustdoc\"}",
+    )
+    .await
+    .expect("failed to seed previous rustdoc source");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES
+            ($1, $2, 'dual_source', 'function', 'pub fn dual_source() -> bool', 'public', 1, 1, \
+         'local_cache'),
+            ($1, $3, 'dual_source', 'function', 'pub fn dual_source() -> bool', 'public', 1, 1, \
+         'rustdoc_json')",
+    )
+    .bind(previous_version_id)
+    .bind(from_local_source)
+    .bind(from_rustdoc_source)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed previous symbols");
+
+    let to_local_source = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/lib.rs",
+        Some("rust"),
+        "pub fn dual_source() -> bool { true }",
+    )
+    .await
+    .expect("failed to seed current local source");
+
+    let to_rustdoc_source = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "rustdoc-json/serde_json-1.0.145.json",
+        Some("rustdoc_json"),
+        "{\"mock\":\"rustdoc\"}",
+    )
+    .await
+    .expect("failed to seed current rustdoc source");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source
+         ) VALUES
+            ($1, $2, 'dual_source', 'function', 'pub fn dual_source() -> bool', 'public', 1, 1, \
+         'local_cache'),
+            ($1, $3, 'dual_source', 'function', 'pub fn dual_source(input: &str) -> bool', \
+         'public', 1, 1, 'rustdoc_json')",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(to_local_source)
+    .bind(to_rustdoc_source)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed current symbols");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.api_diff",
+            json!({
+                "crate_name": "serde_json",
+                "from_version": "1.0.143",
+                "to_version": "1.0.145",
+                "limit": 100
+            }),
+        )
+        .await
+        .expect("crate.api_diff call failed");
+    let payload = common::structured_content(&response);
+
+    let changed_count = payload
+        .get("changed_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    assert!(
+        changed_count >= 1,
+        "expected signature change from rustdoc-prioritized rows: {payload}"
+    );
+    assert!(
+        payload
+            .get("changes")
+            .and_then(Value::as_array)
+            .is_some_and(|changes| {
+                changes.iter().any(|change| {
+                    change
+                        .get("name")
+                        .and_then(Value::as_str)
+                        == Some("dual_source")
+                        && change
+                            .get("change_type")
+                            .and_then(Value::as_str)
+                            == Some("signature_changed")
+                })
+            }),
+        "expected dual_source signature_changed entry: {payload}"
+    );
+}
