@@ -70,7 +70,7 @@ crates/rust-mcp/
 ## MCP Tool Inventory (Current)
 
 - Core/index: `ping`, `schema.get`, `index.sync_crates`, `index.status`, `index.refresh`
-- Crate: `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.error_types`, `crate.derive_macros`, `crate.compare`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.migration_path`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `crate.usage_patterns`
+- Crate: `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, `crate.derive_macros`, `crate.compare`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.migration_path`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `crate.usage_patterns`
 - Dependency: `dependency.audit`, `dependency.resolve`, `dependency.feature_impact`
 - Source/symbol/docs: `source.search`, `source.read`, `source.context`, `symbol.search`, `docs.search`
 

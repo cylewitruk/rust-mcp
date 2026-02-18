@@ -69,6 +69,113 @@ fn trait_definition_from_row(row: CrateTraitLookupRow) -> CrateTraitDefinition {
     }
 }
 
+fn impl_kind_rank(kind: &str) -> u8 {
+    match kind {
+        "derive" => 0,
+        "trait" => 1,
+        _ => 2,
+    }
+}
+
+fn impl_row_identity(row: &CrateImplLookupRow) -> String {
+    let trait_key = row
+        .trait_name
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let trait_display_key = row
+        .trait_name_display
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let type_display_key = row
+        .type_name_display
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    format!(
+        "{}|{}|{}|{}|{}",
+        row.type_name
+            .to_ascii_lowercase(),
+        type_display_key,
+        trait_key,
+        trait_display_key,
+        row.impl_kind
+    )
+}
+
+fn impl_row_priority(row: &CrateImplLookupRow) -> u8 {
+    let mut score = 0u8;
+    if row.index_source == "rustdoc_json" {
+        score = score.saturating_add(4);
+    }
+    if !row.methods.0.is_empty() {
+        score = score.saturating_add(2);
+    }
+    if row
+        .trait_name_display
+        .is_some()
+        || row
+            .type_name_display
+            .is_some()
+    {
+        score = score.saturating_add(1);
+    }
+    if !row.generics.0.is_empty() || !row.where_clauses.0.is_empty() {
+        score = score.saturating_add(1);
+    }
+    if row.is_blanket || row.is_synthetic || row.is_negative || row.blanket_type.is_some() {
+        score = score.saturating_add(1);
+    }
+    score
+}
+
+fn prioritize_impl_rows(rows: Vec<CrateImplLookupRow>) -> Vec<CrateImplLookupRow> {
+    let mut best_by_identity = HashMap::<String, (u8, CrateImplLookupRow)>::new();
+
+    for row in rows {
+        let key = impl_row_identity(&row);
+        let priority = impl_row_priority(&row);
+        match best_by_identity.get(&key) {
+            Some((existing_priority, _)) if *existing_priority >= priority => {}
+            _ => {
+                best_by_identity.insert(key, (priority, row));
+            }
+        }
+    }
+
+    let mut prioritized = best_by_identity
+        .into_values()
+        .map(|(_, row)| row)
+        .collect::<Vec<_>>();
+    prioritized.sort_by(|left, right| {
+        impl_kind_rank(&left.impl_kind)
+            .cmp(&impl_kind_rank(&right.impl_kind))
+            .then_with(|| {
+                if left.index_source == right.index_source {
+                    std::cmp::Ordering::Equal
+                } else if left.index_source == "rustdoc_json" {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            })
+            .then_with(|| {
+                left.type_name
+                    .cmp(&right.type_name)
+            })
+            .then_with(|| {
+                left.start_line
+                    .cmp(&right.start_line)
+            })
+            .then_with(|| {
+                left.end_line
+                    .cmp(&right.end_line)
+            })
+    });
+    prioritized
+}
+
 impl McpServer {
     pub(crate) async fn handle_crate_trait_impls(
         &self,
@@ -261,7 +368,18 @@ impl McpServer {
                     WHEN 'trait' THEN 1
                     ELSE 2
                 END,
-                CASE WHEN ci.index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
+                     CASE
+                          WHEN ci.index_source = 'rustdoc_json'
+                                 AND (
+                                     jsonb_array_length(ci.methods::jsonb) > 0
+                                     OR ci.trait_name_display IS NOT NULL
+                                     OR ci.is_blanket
+                                     OR ci.is_synthetic
+                                     OR ci.is_negative
+                                 ) THEN 0
+                          WHEN ci.index_source = 'rustdoc_json' THEN 1
+                          ELSE 2
+                     END,
                 ci.type_name ASC,
                 ci.start_line ASC
              LIMIT $4",
@@ -273,6 +391,8 @@ impl McpServer {
         .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.trait_impls query failed: {e}"))?;
+
+        let impl_rows = prioritize_impl_rows(impl_rows);
 
         let impls = impl_rows
             .into_iter()

@@ -8,6 +8,7 @@ pub(crate) mod error_types;
 pub(crate) mod features;
 pub(crate) mod graph;
 pub(crate) mod hotspots;
+pub(crate) mod import_path;
 pub(crate) mod intel;
 pub(crate) mod license;
 pub(crate) mod migration_path;

@@ -13,7 +13,7 @@ Local-first Rust dependency intelligence MCP server.
 
 ## Current Status
 
-- Active development, with 33 MCP tools currently registered.
+- Active development, with 34 MCP tools currently registered.
 - Health/readiness endpoints are exposed on the same HTTP listener as MCP.
 - The index can ingest crates.io metadata, local cargo registry source, docs.rs pages, and optional rustdoc JSON files.
 
@@ -37,6 +37,7 @@ Crate intelligence:
 - `crate.type_info`
 - `crate.trait_impls`
 - `crate.re_exports`
+- `crate.import_path`
 - `crate.error_types`
 - `crate.derive_macros`
 - `crate.compare`

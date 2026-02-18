@@ -2,3 +2,4 @@
 .env
 pg_data/
 mcp_data/
+.vscode

@@ -338,3 +338,82 @@ async fn crate_re_exports_prefers_rustdoc_canonical_paths_when_available() {
             })
     );
 }
+
+#[tokio::test]
+async fn crate_import_path_resolves_best_known_public_path() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let rustdoc_source_file_id = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "rustdoc-json/serde_json-1.0.145.json",
+        Some("rustdoc_json"),
+        "{\"mock\":\"rustdoc\"}",
+    )
+    .await
+    .expect("failed to seed rustdoc-json source file");
+
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source,
+            rustdoc_item_id,
+            canonical_path,
+            definition_path
+         ) VALUES (
+            $1, $2, 'Parser', 'struct', 'struct Parser', 'public', 1, 1, 'rustdoc_json', 43, \
+         'serde_json::Parser', 'serde_json::internal::Parser'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(rustdoc_source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed rustdoc import-path symbol");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.import_path",
+            json!({
+                "crate_name": "serde_json",
+                "symbol_name": "Parser",
+                "kind": "struct",
+                "limit": 10
+            }),
+        )
+        .await
+        .expect("crate.import_path call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("best_import_path")
+            .and_then(Value::as_str),
+        Some("serde_json::Parser")
+    );
+    assert!(
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1
+    );
+}

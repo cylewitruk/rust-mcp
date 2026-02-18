@@ -150,6 +150,12 @@ pub(crate) fn re_exports_limit(value: Option<u32>) -> u32 {
         .clamp(1, 1_000)
 }
 
+pub(crate) fn import_path_limit(value: Option<u32>) -> u32 {
+    value
+        .unwrap_or(10)
+        .clamp(1, 100)
+}
+
 pub(crate) fn error_types_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)

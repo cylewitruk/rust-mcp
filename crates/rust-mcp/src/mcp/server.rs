@@ -35,6 +35,7 @@ use super::tools::krate::error_types::{CrateErrorTypesRequest, CrateErrorTypesRe
 use super::tools::krate::features::{CrateFeaturesRequest, CrateFeaturesResponse};
 use super::tools::krate::graph::{CrateGraphRequest, CrateGraphResponse};
 use super::tools::krate::hotspots::{CrateHotspotsRequest, CrateHotspotsResponse};
+use super::tools::krate::import_path::{CrateImportPathRequest, CrateImportPathResponse};
 use super::tools::krate::intel::{CrateIntelRequest, CrateIntelResponse};
 use super::tools::krate::license::{CrateLicenseCheckRequest, CrateLicenseCheckResponse};
 use super::tools::krate::migration_path::{CrateMigrationPathRequest, CrateMigrationPathResponse};
@@ -341,6 +342,19 @@ impl McpServer {
         Parameters(request): Parameters<CrateReExportsRequest>,
     ) -> Result<Json<CrateReExportsResponse>, String> {
         self.instrument_tool("crate.re_exports", self.handle_crate_re_exports(request))
+            .await
+    }
+
+    #[tool(
+        name = "crate.import_path",
+        description = "Resolve best-known public import paths for a crate symbol from indexed \
+                       metadata."
+    )]
+    async fn crate_import_path(
+        &self,
+        Parameters(request): Parameters<CrateImportPathRequest>,
+    ) -> Result<Json<CrateImportPathResponse>, String> {
+        self.instrument_tool("crate.import_path", self.handle_crate_import_path(request))
             .await
     }
 

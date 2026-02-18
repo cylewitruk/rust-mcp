@@ -577,6 +577,36 @@ async fn tool_crate_re_exports_handles_sparse_fixture() {
 }
 
 #[tokio::test]
+async fn tool_crate_import_path_handles_missing_symbol() {
+    let context = seeded_indexed_context().await;
+
+    let payload = call_tool_payload(
+        &context.rust_mcp,
+        "crate.import_path",
+        json!({
+            "crate_name": SEEDED_CRATE_NAME,
+            "version": SEEDED_CRATE_NEXT_VERSION,
+            "symbol_name": "definitely_missing_symbol",
+            "limit": 10
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        payload
+            .get("count")
+            .and_then(Value::as_u64),
+        Some(0)
+    );
+    assert!(
+        payload
+            .get("best_import_path")
+            .is_some_and(Value::is_null),
+        "expected missing symbol to return null best_import_path: {payload}"
+    );
+}
+
+#[tokio::test]
 async fn tool_crate_trait_impls_handles_sparse_fixture() {
     let context = seeded_indexed_context().await;
 

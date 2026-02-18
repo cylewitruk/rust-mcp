@@ -58,7 +58,7 @@ async fn rust_mcp_container_exposes_http_schema_catalog_endpoints() {
         .get("total_tools")
         .and_then(Value::as_u64)
         .expect("schemas endpoint should include total_tools");
-    assert!(total_tools >= 33, "expected at least 33 tool schemas, got: {all_payload}");
+    assert!(total_tools >= 34, "expected at least 34 tool schemas, got: {all_payload}");
 
     let ping_schema = client
         .get(format!("{}/schemas/ping", rust_mcp.base_url()))
@@ -276,6 +276,7 @@ async fn rust_mcp_container_supports_tools_list_after_initialize() {
         "crate.type_info",
         "crate.trait_impls",
         "crate.re_exports",
+        "crate.import_path",
         "crate.error_types",
         "crate.derive_macros",
         "crate.compare",

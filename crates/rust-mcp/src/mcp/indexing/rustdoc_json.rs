@@ -146,6 +146,77 @@ fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
     format!("rustdoc-json/{relative}")
 }
 
+fn format_rustdoc_parse_error(
+    candidate: &RustdocSyncCandidateRow,
+    source_path: &str,
+    content: &str,
+    parse_error: &serde_json::Error,
+) -> String {
+    let format_version = serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("format_version")
+                .and_then(serde_json::Value::as_u64)
+        });
+
+    match format_version {
+        Some(version) => format!(
+            "failed to parse rustdoc JSON payload for {}@{} from {}: {} (payload \
+             format_version={version}, expected={}; verify rustdoc-types compatibility)",
+            candidate.crate_name,
+            candidate.version,
+            source_path,
+            parse_error,
+            rustdoc_types::FORMAT_VERSION,
+        ),
+        None => format!(
+            "failed to parse rustdoc JSON payload for {}@{} from {}: {} (payload is missing \
+             format_version; ensure this is rustdoc JSON output)",
+            candidate.crate_name, candidate.version, source_path, parse_error,
+        ),
+    }
+}
+
+fn diagnostic_hint_for_sync_error(error: &str) -> Option<&'static str> {
+    if error.contains("RUSTDOC_JSON_DIR is not configured") {
+        Some("set RUSTDOC_JSON_DIR to enable local rustdoc fallback")
+    } else if error.contains("rustdoc JSON directory not found") {
+        Some("verify RUSTDOC_JSON_DIR points to an existing directory")
+    } else if error.contains("payload format_version=") {
+        Some("re-generate rustdoc JSON with a compatible nightly / rustdoc-types format")
+    } else if error.contains("crate mismatch") {
+        Some("ensure rustdoc file name and payload crate match the indexed crate version")
+    } else if error.contains("could not be decoded") {
+        Some("confirm docs.rs payload is gzip/zstd-compressed rustdoc JSON")
+    } else if error.contains("invalid UTF-8") {
+        Some("ensure local fallback files are UTF-8 JSON documents")
+    } else if error.contains("no local rustdoc JSON file found") {
+        Some("add a matching <crate>-<version>.json file in RUSTDOC_JSON_DIR")
+    } else {
+        None
+    }
+}
+
+fn format_candidate_sync_failure(
+    crate_name: &str,
+    version: &str,
+    source_errors: &[String],
+) -> String {
+    let mut message = format!("rustdoc JSON sync failed for {crate_name}@{version}");
+    for (index, error) in source_errors
+        .iter()
+        .enumerate()
+    {
+        let attempt = index + 1;
+        let _ = write!(message, " | attempt #{attempt}: {error}");
+        if let Some(hint) = diagnostic_hint_for_sync_error(error) {
+            let _ = write!(message, " (hint: {hint})");
+        }
+    }
+    message
+}
+
 // ============================================================
 // Type rendering
 // ============================================================
@@ -1233,12 +1304,20 @@ impl McpServer {
         content: &str,
         outcome: &mut RustdocJsonRefreshOutcome,
     ) -> Result<(), String> {
-        let krate = serde_json::from_str::<RustdocCrate>(content).map_err(|e| {
-            format!(
-                "failed to parse rustdoc JSON payload for {}@{} from {}: {e}",
-                candidate.crate_name, candidate.version, source_path
-            )
-        })?;
+        let krate = serde_json::from_str::<RustdocCrate>(content)
+            .map_err(|error| format_rustdoc_parse_error(candidate, source_path, content, &error))?;
+
+        if krate.format_version != rustdoc_types::FORMAT_VERSION {
+            return Err(format!(
+                "failed to parse rustdoc JSON payload for {}@{} from {}: payload \
+                 format_version={} is not supported (expected={})",
+                candidate.crate_name,
+                candidate.version,
+                source_path,
+                krate.format_version,
+                rustdoc_types::FORMAT_VERSION,
+            ));
+        }
 
         let resolved_crate_name = krate
             .index
@@ -1486,12 +1565,13 @@ impl McpServer {
             }
 
             if !local_ingested {
-                outcome.errors.push(format!(
-                    "rustdoc JSON sync failed for {}@{}: {}",
-                    candidate.crate_name,
-                    candidate.version,
-                    source_errors.join("; ")
-                ));
+                outcome
+                    .errors
+                    .push(format_candidate_sync_failure(
+                        &candidate.crate_name,
+                        &candidate.version,
+                        &source_errors,
+                    ));
             }
         }
 

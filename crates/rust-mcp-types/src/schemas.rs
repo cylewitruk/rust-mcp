@@ -253,6 +253,13 @@ pub mod krate {
         )
     }
 
+    /// JSON Schemas for `crate.import_path`.
+    pub fn import_path() -> ToolSchema {
+        ToolSchema::new::<types::krate::CrateImportPathRequest, types::krate::CrateImportPathResponse>(
+            "crate.import_path",
+        )
+    }
+
     /// JSON Schemas for `crate.error_types`.
     pub fn error_types() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateErrorTypesRequest, types::krate::CrateErrorTypesResponse>(
@@ -355,6 +362,7 @@ pub mod krate {
             type_info(),
             trait_impls(),
             re_exports(),
+            import_path(),
             error_types(),
             derive_macros(),
             compare(),
@@ -407,7 +415,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
 
         assert_eq!(schemas.len(), names.len(), "duplicate tool names found");
-        assert_eq!(schemas.len(), 33, "unexpected tool schema count");
+        assert_eq!(schemas.len(), 34, "unexpected tool schema count");
     }
 
     #[test]

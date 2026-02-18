@@ -1699,6 +1699,50 @@ pub mod krate {
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateImportPathRequest {
+        pub crate_name: String,
+        pub symbol_name: String,
+        pub version: Option<String>,
+        pub kind: Option<String>,
+        pub limit: Option<u32>,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateImportPathResponse {
+        pub crate_name: String,
+        pub selected_version: String,
+        pub latest_version: String,
+        pub symbol_name: String,
+        pub kind: Option<String>,
+        pub limit: u32,
+        pub count: usize,
+        pub best_import_path: Option<String>,
+        pub matches: Vec<CrateImportPathMatch>,
+        pub freshness_check_performed: bool,
+        pub freshness_check_result: String,
+        pub refresh_enqueued: bool,
+        pub refresh_job_id: Option<String>,
+        pub freshness: Vec<ResponseFreshnessSource>,
+        pub confidence: String,
+        pub confidence_assessment: ConfidenceAssessment,
+        pub next_best_calls: Vec<String>,
+        pub provenance: String,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateImportPathMatch {
+        pub symbol_name: String,
+        pub kind: String,
+        pub import_path: String,
+        pub definition_path: Option<String>,
+        pub source_path: String,
+        pub start_line: u32,
+        pub end_line: u32,
+        pub index_source: String,
+        pub exact_name_match: bool,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateMigrationPathRequest {
         pub crate_name: String,
         pub from_version: String,

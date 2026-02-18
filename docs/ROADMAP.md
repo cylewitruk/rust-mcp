@@ -39,12 +39,16 @@ The previously planned milestone set through M13 is complete, including:
   - [x] `crate_traits` metadata is now surfaced in `crate.type_info` and `crate.trait_impls` responses as `trait_definitions`.
   - [ ] Remaining: improve canonicalization coverage for complex glob/re-export edge cases and external-path remapping nuances.
 - [ ] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
-- [ ] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
+  - [x] `crate.type_info` and `crate.trait_impls` now collapse duplicate dual-source impl rows and prioritize richer rustdoc-backed metadata over sparse duplicates.
+  - [ ] Remaining: extend dual-source prioritization heuristics to `crate.api_diff`.
+- [x] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
+  - Rustdoc ingestion now reports unsupported `format_version` mismatches explicitly and appends targeted hints for fallback/configuration/decode failures.
 - [ ] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
 
 ## P1: Tooling and UX Improvements
 
-- [ ] Add `crate.import_path` tool (best-known public import path resolution).
+- [x] Add `crate.import_path` tool (best-known public import path resolution).
+  - `crate.import_path` now resolves best-known public import paths and alternative matches from indexed symbol metadata.
 - [ ] Improve `crate.migration_path` heuristics beyond simple rename candidates.
 - [ ] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
 - [x] Publish a machine-readable tool contract snapshot for client generation/testing.
