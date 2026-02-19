@@ -5,8 +5,9 @@ pub use rust_mcp_types::types::krate::{
     CrateAlternativeHit, CrateAlternativesRequest, CrateAlternativesResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::models::AlternativesCandidateRow;
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, LicensePolicyResult};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -35,21 +36,6 @@ impl CursorToken for CrateAlternativesCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct AlternativesCandidateRow {
-    pub(crate) crate_name: String,
-    pub(crate) description: Option<String>,
-    pub(crate) categories: Vec<String>,
-    pub(crate) keywords: Vec<String>,
-    pub(crate) latest_version: Option<String>,
-    pub(crate) total_downloads: i64,
-    pub(crate) yanked: bool,
-    pub(crate) advisory_count: i64,
-    pub(crate) license_expression: Option<String>,
-    pub(crate) dependent_count: i64,
-    pub(crate) name_similarity: f64,
 }
 
 fn normalize_policy_list(values: Option<Vec<String>>) -> Vec<String> {
@@ -267,63 +253,19 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let candidates = sqlx::query_as::<_, AlternativesCandidateRow>(
-            "SELECT
-                c.name AS crate_name,
-                c.description,
-                c.categories,
-                c.keywords,
-                lv.version AS latest_version,
-                COALESCE(lv.total_downloads, 0)::BIGINT AS total_downloads,
-                COALESCE(lv.yanked, false) AS yanked,
-                COALESCE(lv.advisory_count, 0)::BIGINT AS advisory_count,
-                lv.license_expression,
-                COALESCE(dep.dependent_count, 0)::BIGINT AS dependent_count,
-                similarity(c.name, $2)::DOUBLE PRECISION AS name_similarity
-             FROM crates c
-             LEFT JOIN LATERAL (
-                 SELECT
-                     cv.version,
-                     cv.total_downloads,
-                     cv.yanked,
-                     cv.license_expression,
-                     COUNT(am.id)::BIGINT AS advisory_count
-                 FROM crate_versions cv
-                 LEFT JOIN advisory_matches am ON am.version_id = cv.id
-                 WHERE cv.crate_id = c.id
-                 GROUP BY cv.id
-                 ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                 LIMIT 1
-             ) lv ON true
-             LEFT JOIN LATERAL (
-                 SELECT COALESCE(COUNT(DISTINCT cv_from.crate_id), 0)::BIGINT AS dependent_count
-                 FROM dependency_edges d
-                 JOIN crate_versions cv_from ON cv_from.id = d.from_version_id
-                 WHERE d.to_crate_id = c.id
-             ) dep ON true
-             WHERE c.id <> $1
-               AND (
-                   similarity(c.name, $2) >= 0.10
-                   OR c.categories && $3::TEXT[]
-                   OR c.keywords && $4::TEXT[]
-               )
-             ORDER BY
-                similarity(c.name, $2) DESC,
-                COALESCE(lv.total_downloads, 0) DESC,
-                c.name ASC
-             LIMIT $5",
+        let candidates = tools::list_alternatives_candidates(
+            &self.state.db,
+            ctx.crate_row.id,
+            &ctx.crate_row.name,
+            &ctx.crate_row.categories,
+            &ctx.crate_row.keywords,
+            i64::from(
+                pag.offset
+                    .saturating_add(pag.limit)
+                    .saturating_add(1)
+                    .saturating_mul(8),
+            ),
         )
-        .bind(ctx.crate_row.id)
-        .bind(&ctx.crate_row.name)
-        .bind(&ctx.crate_row.categories)
-        .bind(&ctx.crate_row.keywords)
-        .bind(i64::from(
-            pag.offset
-                .saturating_add(pag.limit)
-                .saturating_add(1)
-                .saturating_mul(8),
-        ))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.alternatives candidate query failed: {e}"))?;
 

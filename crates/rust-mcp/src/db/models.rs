@@ -47,6 +47,17 @@ pub struct SourceReadRow {
     pub content: String,
 }
 
+/// Row for searching indexed source content.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct SourceSearchRow {
+    pub crate_name: String,
+    pub version: String,
+    pub path: String,
+    pub content: String,
+    pub indexed_at: String,
+}
+
 /// Row for reading indexed docs pages for `docs.search`.
 #[derive(Debug, Clone, FromRow)]
 pub struct DocsSearchRow {
@@ -741,4 +752,260 @@ pub struct IndexedExtractionBatch {
     pub impls: Vec<IndexedImplInsert>,
     /// Extracted trait inserts.
     pub traits: Vec<IndexedTraitInsert>,
+}
+
+/// Public symbol row used by `crate.api`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ApiSurfaceRow {
+    pub name: String,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub visibility: Option<String>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+}
+
+/// Import path lookup row used by `crate.import_path`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ImportPathRow {
+    pub symbol_name: String,
+    pub kind: String,
+    pub canonical_path: Option<String>,
+    pub definition_path: Option<String>,
+    pub source_path: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub index_source: String,
+}
+
+/// Error-type candidate row used by `crate.error_types`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ErrorTypeTypeRow {
+    pub type_name: String,
+    pub kind: String,
+    pub fields: Value,
+    pub variants: Value,
+    pub source_path: String,
+    pub start_line: i32,
+}
+
+/// Error impl row used by `crate.error_types`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ErrorTypeImplRow {
+    pub type_name: String,
+    pub trait_name: Option<String>,
+    pub trait_name_display: Option<String>,
+    pub source_path: String,
+}
+
+/// Function signature row used by `crate.error_types`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ErrorTypeReturnRow {
+    pub name: String,
+    pub signature: Option<String>,
+}
+
+/// Rustdoc re-export row used by `crate.re_exports`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct RustdocReExportRow {
+    pub canonical_path: String,
+    pub original_definition_path: String,
+    pub kind: String,
+    pub visibility: Option<String>,
+    pub source_path: String,
+    pub source_line: i32,
+}
+
+/// Source content row used by `crate.re_exports` fallback parser.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ReExportSourceRow {
+    pub path: String,
+    pub content: String,
+}
+
+/// Symbol metadata row used by `crate.re_exports` fallback parser.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ReExportSymbolKindRow {
+    pub kind: String,
+    pub visibility: Option<String>,
+}
+
+/// Dependent source row used by `crate.usage_patterns`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateUsageSourceRow {
+    pub dependent_crate: String,
+    pub dependent_version: String,
+    pub dependent_downloads: i64,
+    pub path: String,
+    pub content: String,
+}
+
+/// License metadata row used by `crate.license_check`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateVersionLicenseRow {
+    pub version: String,
+    pub license_expression: Option<String>,
+}
+
+/// Source file row used by `crate.hotspots` and `crate.derive_macros`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct HotspotSourceFileRow {
+    pub path: String,
+    pub content: String,
+}
+
+/// Feature row used by `dependency.feature_impact` and `crate.features`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct FeatureImpactFeatureRow {
+    pub feature_name: String,
+    pub enables: Value,
+}
+
+/// Dependency row used by `dependency.feature_impact`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct FeatureImpactDependencyRow {
+    pub dependency_name: String,
+    pub optional: bool,
+}
+
+/// Version timeline row used by `crate.versions`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateVersionTimelineRow {
+    pub version: String,
+    pub rust_version: Option<String>,
+    pub published_at: Option<String>,
+    pub yanked: bool,
+    pub total_downloads: i64,
+    pub advisory_count: i64,
+    pub release_age_days: Option<i64>,
+}
+
+/// Candidate alternative row used by `crate.alternatives`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct AlternativesCandidateRow {
+    pub crate_name: String,
+    pub description: Option<String>,
+    pub categories: Vec<String>,
+    pub keywords: Vec<String>,
+    pub latest_version: Option<String>,
+    pub total_downloads: i64,
+    pub yanked: bool,
+    pub advisory_count: i64,
+    pub license_expression: Option<String>,
+    pub dependent_count: i64,
+    pub name_similarity: f64,
+}
+
+/// API diff symbol row used by `crate.api_diff`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct ApiDiffSymbolRow {
+    pub name: String,
+    pub kind: String,
+    pub signature: Option<String>,
+    pub visibility: Option<String>,
+    pub index_source: String,
+}
+
+/// Compare snapshot version row used by `crate.compare`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateCompareVersionRow {
+    pub id: i64,
+    pub version: String,
+    pub rust_version: Option<String>,
+    pub published_at: Option<String>,
+    pub yanked: bool,
+    pub total_downloads: i64,
+    pub license_expression: Option<String>,
+}
+
+/// Compare aggregate counts row used by `crate.compare`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct CrateCompareCountsRow {
+    pub dependency_count: i64,
+    pub feature_count: i64,
+    pub advisory_count: i64,
+    pub dependent_count: i64,
+}
+
+/// Latest-version row used by `crate.graph` traversal.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GraphLatestVersionRow {
+    pub crate_id: i64,
+    pub id: i64,
+    pub version: String,
+}
+
+/// Dependency traversal row used by `crate.graph`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GraphDependencyTraversalRow {
+    pub from_crate_name: String,
+    pub from_version: String,
+    pub to_crate_id: i64,
+    pub to_crate_name: String,
+    pub requirement: String,
+    pub dependency_kind: String,
+    pub optional: bool,
+}
+
+/// Dependent traversal row used by `crate.graph`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GraphDependentTraversalRow {
+    pub from_crate_id: i64,
+    pub from_crate_name: String,
+    pub from_version: String,
+    pub to_crate_name: String,
+    pub requirement: String,
+    pub dependency_kind: String,
+    pub optional: bool,
+}
+
+/// Crate/id lookup row used by dependency tools.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct DependencyCrateRow {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Dependency-version row used by dependency tools.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct DependencyVersionRow {
+    pub id: i64,
+    pub version: String,
+    pub rust_version: Option<String>,
+    pub yanked: bool,
+}
+
+/// Dependency edge row used by `dependency.resolve`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct DependencyResolveEdgeRow {
+    pub to_crate_name: String,
+    pub requirement: String,
+    pub optional: bool,
+    pub features: Value,
 }

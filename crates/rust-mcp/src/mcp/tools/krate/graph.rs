@@ -4,42 +4,13 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateGraphDirection, CrateGraphEdge, CrateGraphNode, CrateGraphRequest, CrateGraphResponse,
 };
-use sqlx::FromRow;
 
-use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, CrateVersionSelectionRow};
+use crate::db::tools;
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, graph_depth, normalize_optional, normalize_required,
 };
-
-#[derive(Debug, FromRow)]
-pub(crate) struct GraphLatestVersionRow {
-    pub(crate) crate_id: i64,
-    pub(crate) id: i64,
-    pub(crate) version: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct GraphDependencyTraversalRow {
-    pub(crate) from_crate_name: String,
-    pub(crate) from_version: String,
-    pub(crate) to_crate_id: i64,
-    pub(crate) to_crate_name: String,
-    pub(crate) requirement: String,
-    pub(crate) dependency_kind: String,
-    pub(crate) optional: bool,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct GraphDependentTraversalRow {
-    pub(crate) from_crate_id: i64,
-    pub(crate) from_crate_name: String,
-    pub(crate) from_version: String,
-    pub(crate) to_crate_name: String,
-    pub(crate) requirement: String,
-    pub(crate) dependency_kind: String,
-    pub(crate) optional: bool,
-}
 
 fn detect_cycle_presence(edges: &[CrateGraphEdge]) -> bool {
     let mut adjacency = HashMap::<&str, HashSet<&str>>::new();
@@ -138,19 +109,9 @@ impl McpServer {
             return Ok(HashMap::new());
         }
 
-        let rows = sqlx::query_as::<_, GraphLatestVersionRow>(
-            "SELECT DISTINCT ON (crate_id)
-                crate_id,
-                id,
-                version
-             FROM crate_versions
-             WHERE crate_id = ANY($1)
-             ORDER BY crate_id, published_at DESC NULLS LAST, id DESC",
-        )
-        .bind(crate_ids)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("latest-version lookup failed: {e}"))?;
+        let rows = tools::list_graph_latest_versions_for_crates(&self.state.db, crate_ids)
+            .await
+            .map_err(|e| format!("latest-version lookup failed: {e}"))?;
 
         Ok(rows
             .into_iter()
@@ -174,33 +135,20 @@ impl McpServer {
             .await?;
 
         let selected_version = if let Some(version) = requested_version {
-            sqlx::query_as::<_, CrateVersionSelectionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    readme
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(ctx.crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!(
-                    "selected version lookup failed for {}@{}: {e}",
-                    ctx.crate_row.name, version
-                )
-            })?
-            .ok_or_else(|| {
-                format!(
-                    "version '{}' for crate '{}' is not indexed locally",
-                    version, ctx.crate_row.name
-                )
-            })?
+            tools::fetch_crate_version_by_name(&self.state.db, ctx.crate_row.id, &version)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "selected version lookup failed for {}@{}: {e}",
+                        ctx.crate_row.name, version
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "version '{}' for crate '{}' is not indexed locally",
+                        version, ctx.crate_row.name
+                    )
+                })?
         } else {
             ctx.latest_version.clone()
         };
@@ -228,25 +176,10 @@ impl McpServer {
                     break;
                 }
 
-                let rows = sqlx::query_as::<_, GraphDependencyTraversalRow>(
-                    "SELECT
-                        c_from.name AS from_crate_name,
-                        cv_from.version AS from_version,
-                        d.to_crate_id AS to_crate_id,
-                        c_to.name AS to_crate_name,
-                        d.requirement,
-                        d.dependency_kind,
-                        d.optional
-                     FROM dependency_edges d
-                     JOIN crate_versions cv_from ON cv_from.id = d.from_version_id
-                     JOIN crates c_from ON c_from.id = cv_from.crate_id
-                     JOIN crates c_to ON c_to.id = d.to_crate_id
-                     WHERE d.from_version_id = ANY($1)",
-                )
-                .bind(&frontier_versions)
-                .fetch_all(&self.state.db)
-                .await
-                .map_err(|e| format!("dependency traversal failed: {e}"))?;
+                let rows =
+                    tools::list_graph_dependency_traversal_rows(&self.state.db, &frontier_versions)
+                        .await
+                        .map_err(|e| format!("dependency traversal failed: {e}"))?;
 
                 let next_crate_ids = rows
                     .iter()
@@ -318,25 +251,10 @@ impl McpServer {
                     break;
                 }
 
-                let rows = sqlx::query_as::<_, GraphDependentTraversalRow>(
-                    "SELECT
-                        cv_from.crate_id AS from_crate_id,
-                        c_from.name AS from_crate_name,
-                        cv_from.version AS from_version,
-                        c_to.name AS to_crate_name,
-                        d.requirement,
-                        d.dependency_kind,
-                        d.optional
-                     FROM dependency_edges d
-                     JOIN crate_versions cv_from ON cv_from.id = d.from_version_id
-                     JOIN crates c_from ON c_from.id = cv_from.crate_id
-                     JOIN crates c_to ON c_to.id = d.to_crate_id
-                     WHERE d.to_crate_id = ANY($1)",
-                )
-                .bind(&frontier_crates)
-                .fetch_all(&self.state.db)
-                .await
-                .map_err(|e| format!("dependent traversal failed: {e}"))?;
+                let rows =
+                    tools::list_graph_dependent_traversal_rows(&self.state.db, &frontier_crates)
+                        .await
+                        .map_err(|e| format!("dependent traversal failed: {e}"))?;
 
                 let next_crate_ids = rows
                     .iter()

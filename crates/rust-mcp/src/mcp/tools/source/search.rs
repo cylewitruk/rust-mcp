@@ -3,25 +3,16 @@ pub use rust_mcp_types::types::source::{
     SourceSearchHit, SourceSearchMode, SourceSearchRequest, SourceSearchResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Postgres, QueryBuilder};
 
+use crate::db::tools;
 use crate::mcp::models::{
-    ConfidenceAssessment, ConfidenceLevel, SourceReadRequest, SourceReadResponse, SourceReadRow,
+    ConfidenceAssessment, ConfidenceLevel, SourceReadRequest, SourceReadResponse,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
     path_glob_to_like, resolve_pagination, source_read_end_line, source_search_limit, sync_page,
 };
-
-#[derive(Debug, FromRow)]
-pub(crate) struct SourceSearchRow {
-    pub(crate) crate_name: String,
-    pub(crate) version: String,
-    pub(crate) path: String,
-    pub(crate) content: String,
-    pub(crate) indexed_at: String,
-}
 
 #[derive(Debug, Serialize)]
 struct SourceSearchCacheKey<'a> {
@@ -159,67 +150,23 @@ impl McpServer {
         let (offset, limit, effective_page) =
             (pagination.offset, pagination.limit, pagination.effective_page);
 
-        let mut qb = QueryBuilder::<Postgres>::new(
-            "SELECT
-                c.name AS crate_name,
-                cv.version,
-                sf.path,
-                sf.content,
-                sf.indexed_at::TEXT AS indexed_at
-             FROM source_files sf
-             JOIN crate_versions cv ON cv.id = sf.crate_version_id
-             JOIN crates c ON c.id = cv.crate_id ",
-        );
-
-        let mut has_where = false;
-        if let Some(ref crate_name_filter) = crate_name {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("c.name = ");
-            qb.push_bind(crate_name_filter);
-            qb.push(' ');
-        }
-
-        if let Some(ref version_filter) = version {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("cv.version = ");
-            qb.push_bind(version_filter);
-            qb.push(' ');
-        }
-
-        if let Some(ref path_filter) = path_glob {
-            qb.push(if has_where { "AND " } else { "WHERE " });
-            has_where = true;
-            qb.push("sf.path ILIKE ");
-            qb.push_bind(path_glob_to_like(path_filter));
-            qb.push(" ESCAPE '\\\\' ");
-        }
-
-        qb.push(if has_where { "AND " } else { "WHERE " });
-        match mode {
-            SourceSearchMode::Text => {
-                qb.push("sf.content ILIKE ");
-                qb.push_bind(format!("%{query}%"));
-                qb.push(' ');
-            }
-            SourceSearchMode::Regex => {
-                qb.push("sf.content ~* ");
-                qb.push_bind(&query);
-                qb.push(' ');
-            }
-        }
-
-        qb.push("ORDER BY sf.indexed_at DESC, c.name ASC, sf.path ASC LIMIT ");
-        qb.push_bind(i64::from(limit.saturating_add(1)));
-        qb.push(" OFFSET ");
-        qb.push_bind(i64::from(offset));
-
-        let rows = qb
-            .build_query_as::<SourceSearchRow>()
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("source.search query failed: {e}"))?;
+        let path_like = path_glob
+            .as_deref()
+            .map(path_glob_to_like);
+        let rows = tools::search_source_files(
+            &self.state.db,
+            &tools::SourceFileSearchParams {
+                query: &query,
+                crate_name: crate_name.as_deref(),
+                version: version.as_deref(),
+                path_like: path_like.as_deref(),
+                mode,
+                limit: i64::from(limit.saturating_add(1)),
+                offset: i64::from(offset),
+            },
+        )
+        .await
+        .map_err(|e| format!("source.search query failed: {e}"))?;
 
         let mut hits = rows
             .into_iter()
@@ -310,47 +257,46 @@ impl McpServer {
         let path = normalize_required(request.path, "path")?;
 
         let row = if let Some(version) = normalize_optional(request.version) {
-            sqlx::query_as::<_, SourceReadRow>(
-                "SELECT
-                    c.name AS crate_name,
-                    cv.version,
-                    sf.path,
-                    sf.content
-                 FROM source_files sf
-                 JOIN crate_versions cv ON cv.id = sf.crate_version_id
-                 JOIN crates c ON c.id = cv.crate_id
-                 WHERE c.name = $1 AND cv.version = $2 AND sf.path = $3
-                 LIMIT 1",
+            let crate_row = tools::fetch_crate_core_by_name(&self.state.db, &crate_name)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "source.read crate lookup failed for {crate_name}@{version}:{path}: {e}"
+                    )
+                })?
+                .ok_or_else(|| format!("crate '{crate_name}' is not indexed locally"))?;
+
+            let crate_version =
+                tools::fetch_crate_version_by_name(&self.state.db, crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "source.read version lookup failed for {crate_name}@{version}:{path}: \
+                             {e}"
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "version '{version}' for crate '{crate_name}' is not indexed locally"
+                        )
+                    })?;
+
+            tools::fetch_source_read_for_crate_version_path(
+                &self.state.db,
+                &crate_name,
+                crate_version.id,
+                &path,
             )
-            .bind(&crate_name)
-            .bind(&version)
-            .bind(&path)
-            .fetch_optional(&self.state.db)
             .await
             .map_err(|e| {
                 format!("source.read lookup failed for {crate_name}@{version}:{path}: {e}")
             })?
             .ok_or_else(|| format!("source file not found for {crate_name}@{version}:{path}"))?
         } else {
-            sqlx::query_as::<_, SourceReadRow>(
-                "SELECT
-                    c.name AS crate_name,
-                    cv.version,
-                    sf.path,
-                    sf.content
-                 FROM source_files sf
-                 JOIN crate_versions cv ON cv.id = sf.crate_version_id
-                 JOIN crates c ON c.id = cv.crate_id
-                 WHERE c.name = $1 AND sf.path = $2
-                 ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                 LIMIT 1",
-            )
-            .bind(&crate_name)
-            .bind(&path)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("source.read lookup failed for {crate_name}:{path}: {e}"))?
-            .ok_or_else(|| format!("source file not found for {crate_name}:{path}"))?
+            tools::fetch_source_read_latest_for_crate_path(&self.state.db, &crate_name, &path)
+                .await
+                .map_err(|e| format!("source.read lookup failed for {crate_name}:{path}: {e}"))?
+                .ok_or_else(|| format!("source file not found for {crate_name}:{path}"))?
         };
 
         let lines = row

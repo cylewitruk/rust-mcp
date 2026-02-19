@@ -416,9 +416,7 @@ mod tests {
         assert_eq!(collapsed.count, 1);
         assert_eq!(collapsed.hits[0].version, "2.0.0");
 
-        sqlx::query("DELETE FROM crates WHERE id = $1")
-            .bind(crate_id)
-            .execute(&pool)
+        tools::delete_crate_by_id(&pool, crate_id)
             .await
             .expect("cleanup test crate");
     }

@@ -8,9 +8,10 @@ pub use rust_mcp_types::types::krate::{
 use sqlx::types::Json as SqlJson;
 
 use crate::db::models::{
-    CrateImplLookupRow, CrateTraitLookupRow, CrateTypeInfoRow, GenericParamEntry, ImplMethodEntry,
+    CrateImplLookupRow, CrateTraitLookupRow, GenericParamEntry, ImplMethodEntry,
     TraitAssociatedTypeEntry, TypeFieldEntry, TypeVariantEntry,
 };
+use crate::db::tools;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateImplMethod, CrateTraitAssociatedType,
     CrateTraitDefinition,
@@ -239,93 +240,22 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let type_row = sqlx::query_as::<_, CrateTypeInfoRow>(
-            "SELECT
-                ct.type_name,
-                ct.kind,
-                ct.visibility,
-                ct.canonical_path,
-                ct.definition_path,
-                ct.generic_params,
-                ct.where_clauses,
-                ct.fields,
-                ct.variants,
-                ct.deprecated_since,
-                ct.deprecated_note,
-                ct.is_non_exhaustive,
-                ct.auto_traits,
-                sf.path AS source_path,
-                ct.start_line,
-                ct.end_line,
-                ct.index_source
-             FROM crate_types ct
-             JOIN source_files sf ON sf.id = ct.source_file_id
-             WHERE ct.crate_version_id = $1
-               AND LOWER(ct.type_name) = LOWER($2)
-             ORDER BY
-                CASE WHEN ct.visibility = 'public' THEN 0 ELSE 1 END,
-                     CASE
-                          WHEN ct.index_source = 'rustdoc_json'
-                                 AND ct.canonical_path IS NOT NULL
-                                 AND ct.definition_path IS NOT NULL THEN 0
-                          WHEN ct.index_source = 'rustdoc_json' THEN 1
-                          WHEN ct.canonical_path IS NOT NULL THEN 2
-                          ELSE 3
-                     END,
-                ct.start_line ASC
-             LIMIT 1",
+        let type_row = tools::fetch_crate_type_info_row(
+            &self.state.db,
+            resolution.selected_version.id,
+            &type_name,
         )
-        .bind(resolution.selected_version.id)
-        .bind(&type_name)
-        .fetch_optional(&self.state.db)
         .await
         .map_err(|e| format!("crate.type_info type query failed: {e}"))?;
 
-        let impl_rows = sqlx::query_as::<_, CrateImplLookupRow>(
-            "SELECT
-                ci.type_name,
-                ci.type_name_display,
-                ci.trait_name,
-                ci.trait_name_display,
-                ci.impl_kind,
-                ci.methods,
-                ci.is_blanket,
-                ci.is_synthetic,
-                ci.is_negative,
-                ci.blanket_type,
-                ci.generics,
-                ci.where_clauses,
-                sf.path AS source_path,
-                ci.start_line,
-                ci.end_line,
-                ci.index_source
-             FROM crate_impls ci
-             JOIN source_files sf ON sf.id = ci.source_file_id
-             WHERE ci.crate_version_id = $1
-               AND LOWER(ci.type_name) = LOWER($2)
-             ORDER BY
-                CASE ci.impl_kind
-                    WHEN 'inherent' THEN 0
-                    WHEN 'derive' THEN 1
-                    ELSE 2
-                END,
-                                CASE
-                                        WHEN ci.index_source = 'rustdoc_json'
-                                                 AND (
-                                                        jsonb_array_length(ci.methods::jsonb) > 0
-                                                        OR ci.trait_name_display IS NOT NULL
-                                                        OR ci.is_blanket
-                                                        OR ci.is_synthetic
-                                                        OR ci.is_negative
-                                                 ) THEN 0
-                                        WHEN ci.index_source = 'rustdoc_json' THEN 1
-                                        ELSE 2
-                                END,
-                ci.start_line ASC",
+        let impl_rows = tools::list_crate_impl_rows_for_filters(
+            &self.state.db,
+            resolution.selected_version.id,
+            None,
+            Some(&type_name),
+            None,
+            None,
         )
-        .bind(resolution.selected_version.id)
-        .bind(&type_name)
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.type_info impl query failed: {e}"))?;
 
@@ -396,28 +326,11 @@ impl McpServer {
             Vec::new()
         } else {
             let mut definitions_by_name = HashMap::<String, CrateTraitDefinition>::new();
-            let rows = sqlx::query_as::<_, CrateTraitLookupRow>(
-                "SELECT
-                    trait_name,
-                    is_auto,
-                    is_unsafe,
-                    is_dyn_compatible,
-                    supertraits,
-                    required_methods,
-                    provided_methods,
-                    associated_types,
-                    generics,
-                    index_source
-                 FROM crate_traits
-                 WHERE crate_version_id = $1
-                   AND LOWER(trait_name) = ANY($2::TEXT[])
-                 ORDER BY
-                    CASE WHEN index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
-                    trait_name ASC",
+            let rows = tools::list_crate_trait_rows_for_names(
+                &self.state.db,
+                resolution.selected_version.id,
+                &trait_names,
             )
-            .bind(resolution.selected_version.id)
-            .bind(&trait_names)
-            .fetch_all(&self.state.db)
             .await
             .map_err(|e| format!("crate.type_info trait definition query failed: {e}"))?;
 

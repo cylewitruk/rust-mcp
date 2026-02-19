@@ -3,8 +3,8 @@ pub use rust_mcp_types::types::krate::{
     CrateVersionTimelineItem, CrateVersionsRequest, CrateVersionsResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -30,17 +30,6 @@ impl CursorToken for CrateVersionsCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateVersionTimelineRow {
-    pub(crate) version: String,
-    pub(crate) rust_version: Option<String>,
-    pub(crate) published_at: Option<String>,
-    pub(crate) yanked: bool,
-    pub(crate) total_downloads: i64,
-    pub(crate) advisory_count: i64,
-    pub(crate) release_age_days: Option<i64>,
 }
 
 fn adoption_signal(downloads: i64, yanked: bool) -> String {
@@ -84,30 +73,12 @@ impl McpServer {
             .fetch_crate_context(&crate_name)
             .await?;
 
-        let rows = sqlx::query_as::<_, CrateVersionTimelineRow>(
-            "SELECT
-                cv.version,
-                cv.rust_version,
-                cv.published_at::TEXT AS published_at,
-                cv.yanked,
-                COALESCE(cv.total_downloads, 0)::BIGINT AS total_downloads,
-                COUNT(am.id)::BIGINT AS advisory_count,
-                CASE
-                    WHEN cv.published_at IS NULL THEN NULL
-                    ELSE EXTRACT(EPOCH FROM (NOW() - cv.published_at))::BIGINT / 86400
-                END AS release_age_days
-             FROM crate_versions cv
-             LEFT JOIN advisory_matches am ON am.version_id = cv.id
-             WHERE cv.crate_id = $1
-             GROUP BY cv.id, cv.version, cv.published_at, cv.yanked, cv.total_downloads
-             ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-               LIMIT $2
-               OFFSET $3",
+        let rows = tools::list_crate_version_timeline(
+            &self.state.db,
+            ctx.crate_row.id,
+            i64::from(pag.limit.saturating_add(1)),
+            i64::from(pag.offset),
         )
-        .bind(ctx.crate_row.id)
-        .bind(i64::from(pag.limit.saturating_add(1)))
-        .bind(i64::from(pag.offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("version timeline query failed for {}: {e}", ctx.crate_row.name))?;
 

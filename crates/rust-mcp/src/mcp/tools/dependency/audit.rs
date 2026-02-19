@@ -7,26 +7,12 @@ pub use rust_mcp_types::types::dependency::{
     DependencyAuditRequest, DependencyAuditResponse, DependencyAuditSeverity,
 };
 use semver::{Version, VersionReq};
-use sqlx::FromRow;
 use toml::Value;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::normalize_required;
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DependencyAuditCrateRow {
-    pub(crate) id: i64,
-    pub(crate) name: String,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DependencyAuditVersionRow {
-    pub(crate) id: i64,
-    pub(crate) version: String,
-    pub(crate) rust_version: Option<String>,
-    pub(crate) yanked: bool,
-}
 
 #[derive(Debug, Clone)]
 struct ParsedDependency {
@@ -275,16 +261,9 @@ impl McpServer {
         let mut no_requirement_count = 0usize;
 
         for dep in parsed_manifest.dependencies {
-            let crate_row = sqlx::query_as::<_, DependencyAuditCrateRow>(
-                "SELECT id, name
-                 FROM crates
-                 WHERE name = $1
-                 LIMIT 1",
-            )
-            .bind(&dep.name)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("dependency lookup failed for {}: {e}", dep.name))?;
+            let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &dep.name)
+                .await
+                .map_err(|e| format!("dependency lookup failed for {}: {e}", dep.name))?;
 
             let Some(crate_row) = crate_row else {
                 unresolved_count += 1;
@@ -311,20 +290,9 @@ impl McpServer {
                 continue;
             };
 
-            let versions = sqlx::query_as::<_, DependencyAuditVersionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    yanked
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC",
-            )
-            .bind(crate_row.id)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("version lookup failed for {}: {e}", crate_row.name))?;
+            let versions = tools::list_dependency_versions_by_crate(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("version lookup failed for {}: {e}", crate_row.name))?;
 
             let latest = versions.first().cloned();
 
@@ -364,15 +332,11 @@ impl McpServer {
             }
 
             let advisory_count = if let Some(ref selected_row) = selected {
-                sqlx::query_scalar::<_, i64>(
-                    "SELECT COUNT(*)::BIGINT
-                     FROM advisory_matches
-                     WHERE crate_id = $1
-                       AND (version_id = $2 OR version_id IS NULL)",
+                tools::count_advisories_for_crate_version(
+                    &self.state.db,
+                    crate_row.id,
+                    selected_row.id,
                 )
-                .bind(crate_row.id)
-                .bind(selected_row.id)
-                .fetch_one(&self.state.db)
                 .await
                 .map_err(|e| format!("advisory lookup failed for {}: {e}", dep.name))?
             } else {

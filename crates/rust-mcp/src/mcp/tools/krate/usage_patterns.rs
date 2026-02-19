@@ -3,8 +3,8 @@ pub use rust_mcp_types::types::krate::{
     CrateUsagePattern, CrateUsagePatternsRequest, CrateUsagePatternsResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -32,15 +32,6 @@ impl CursorToken for CrateUsagePatternsCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct CrateUsageSourceRow {
-    pub(crate) dependent_crate: String,
-    pub(crate) dependent_version: String,
-    pub(crate) dependent_downloads: i64,
-    pub(crate) path: String,
-    pub(crate) content: String,
 }
 
 fn extract_usage_snippet(content: &str, symbol_name: &str) -> (u32, u32, String) {
@@ -108,38 +99,13 @@ impl McpServer {
 
         let symbol_filter = format!("%{}%", symbol_name);
 
-        let rows = sqlx::query_as::<_, CrateUsageSourceRow>(
-            "WITH dependents AS (
-                SELECT DISTINCT ON (dc.id)
-                    dc.id AS dependent_crate_id,
-                    dc.name AS dependent_crate_name,
-                    dcv.id AS dependent_version_id,
-                    dcv.version AS dependent_version,
-                    dcv.total_downloads AS dependent_downloads
-                FROM dependency_edges de
-                JOIN crate_versions dcv ON dcv.id = de.from_version_id
-                JOIN crates dc ON dc.id = dcv.crate_id
-                WHERE de.to_crate_id = $1
-                ORDER BY dc.id, dcv.published_at DESC NULLS LAST, dcv.id DESC
-            )
-            SELECT
-                d.dependent_crate_name AS dependent_crate,
-                d.dependent_version,
-                d.dependent_downloads,
-                sf.path,
-                sf.content
-            FROM dependents d
-            JOIN source_files sf ON sf.crate_version_id = d.dependent_version_id
-            WHERE sf.content ILIKE $2
-            ORDER BY d.dependent_downloads DESC, d.dependent_crate_name ASC, sf.path ASC
-            LIMIT $3
-            OFFSET $4",
+        let rows = tools::list_crate_usage_sources(
+            &self.state.db,
+            ctx.crate_row.id,
+            &symbol_filter,
+            i64::from(pag.limit.saturating_add(1)),
+            i64::from(pag.offset),
         )
-        .bind(ctx.crate_row.id)
-        .bind(&symbol_filter)
-        .bind(i64::from(pag.limit.saturating_add(1)))
-        .bind(i64::from(pag.offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.usage_patterns query failed: {e}"))?;
 

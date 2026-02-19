@@ -3,8 +3,9 @@ pub use rust_mcp_types::types::krate::{
     CrateImportPathMatch, CrateImportPathRequest, CrateImportPathResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::models::ImportPathRow;
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -33,18 +34,6 @@ impl CursorToken for CrateImportPathCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-struct ImportPathRow {
-    symbol_name: String,
-    kind: String,
-    canonical_path: Option<String>,
-    definition_path: Option<String>,
-    source_path: String,
-    start_line: i32,
-    end_line: i32,
-    index_source: String,
 }
 
 fn normalized_import_path(crate_name: &str, row: &ImportPathRow) -> String {
@@ -93,46 +82,14 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let symbol_rows = sqlx::query_as::<_, ImportPathRow>(
-            "SELECT
-                s.name AS symbol_name,
-                s.kind,
-                s.canonical_path,
-                s.definition_path,
-                sf.path AS source_path,
-                s.start_line,
-                s.end_line,
-                s.index_source
-             FROM symbols s
-             JOIN source_files sf ON sf.id = s.source_file_id
-             WHERE s.crate_version_id = $1
-               AND (s.visibility = 'public' OR s.visibility IS NULL)
-               AND (
-                    LOWER(s.name) = LOWER($2)
-                    OR LOWER(COALESCE(s.canonical_path, '')) = LOWER($2)
-                    OR LOWER(COALESCE(s.canonical_path, '')) LIKE ('%::' || LOWER($2))
-               )
-               AND ($3::TEXT IS NULL OR LOWER(s.kind) = LOWER($3))
-             ORDER BY
-                CASE
-                    WHEN LOWER(s.name) = LOWER($2) THEN 0
-                    WHEN LOWER(COALESCE(s.canonical_path, '')) = LOWER($2) THEN 1
-                    WHEN LOWER(COALESCE(s.canonical_path, '')) LIKE ('%::' || LOWER($2)) THEN 2
-                    ELSE 3
-                END,
-                CASE WHEN s.canonical_path IS NULL THEN 1 ELSE 0 END,
-                CASE WHEN s.index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
-                s.start_line ASC,
-                s.id ASC
-             LIMIT $4
-             OFFSET $5",
+        let symbol_rows = tools::list_import_path_matches(
+            &self.state.db,
+            resolution.selected_version.id,
+            &symbol_name,
+            kind.as_deref(),
+            i64::from(pag.limit.saturating_add(1)),
+            i64::from(pag.offset),
         )
-        .bind(resolution.selected_version.id)
-        .bind(&symbol_name)
-        .bind(kind.as_deref())
-        .bind(i64::from(pag.limit.saturating_add(1)))
-        .bind(i64::from(pag.offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.import_path query failed: {e}"))?;
 

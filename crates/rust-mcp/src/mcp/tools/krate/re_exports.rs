@@ -3,8 +3,8 @@ pub use rust_mcp_types::types::krate::{
     CrateReExportEntry, CrateReExportsRequest, CrateReExportsResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -32,28 +32,6 @@ impl CursorToken for CrateReExportsCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ReExportSourceRow {
-    pub(crate) path: String,
-    pub(crate) content: String,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct RustdocReExportRow {
-    pub(crate) canonical_path: String,
-    pub(crate) original_definition_path: String,
-    pub(crate) kind: String,
-    pub(crate) visibility: Option<String>,
-    pub(crate) source_path: String,
-    pub(crate) source_line: i32,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ReExportSymbolKindRow {
-    pub(crate) kind: String,
-    pub(crate) visibility: Option<String>,
 }
 
 #[derive(Debug)]
@@ -220,36 +198,13 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let rustdoc_re_exports = sqlx::query_as::<_, RustdocReExportRow>(
-            "SELECT
-                s.canonical_path,
-                s.definition_path AS original_definition_path,
-                s.kind,
-                s.visibility,
-                sf.path AS source_path,
-                s.start_line AS source_line
-             FROM symbols s
-             JOIN source_files sf ON sf.id = s.source_file_id
-             WHERE s.crate_version_id = $1
-               AND s.index_source = 'rustdoc_json'
-               AND s.visibility = 'public'
-               AND s.canonical_path IS NOT NULL
-               AND s.definition_path IS NOT NULL
-               AND s.canonical_path <> s.definition_path
-               AND ($2::TEXT IS NULL OR s.canonical_path LIKE ($2 || '%'))
-             ORDER BY
-                s.canonical_path ASC,
-                s.definition_path ASC,
-                s.kind ASC,
-                s.start_line ASC
-               LIMIT $3
-               OFFSET $4",
+        let rustdoc_re_exports = tools::list_rustdoc_re_exports(
+            &self.state.db,
+            resolution.selected_version.id,
+            path_prefix.as_deref(),
+            i64::from(pag.limit.saturating_add(1)),
+            i64::from(pag.offset),
         )
-        .bind(resolution.selected_version.id)
-        .bind(path_prefix.as_deref())
-        .bind(i64::from(pag.limit.saturating_add(1)))
-        .bind(i64::from(pag.offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.re_exports rustdoc query failed: {e}"))?;
 
@@ -281,15 +236,10 @@ impl McpServer {
                 "local_postgres_index(symbols[rustdoc_json], source_files)".to_string(),
             )
         } else {
-            let sources = sqlx::query_as::<_, ReExportSourceRow>(
-                "SELECT path, content
-                 FROM source_files
-                 WHERE crate_version_id = $1
-                   AND (path = 'src/lib.rs' OR path LIKE 'src/%/mod.rs')
-                 ORDER BY CASE WHEN path = 'src/lib.rs' THEN 0 ELSE 1 END, path ASC",
+            let sources = tools::list_re_export_sources_for_version(
+                &self.state.db,
+                resolution.selected_version.id,
             )
-            .bind(resolution.selected_version.id)
-            .fetch_all(&self.state.db)
             .await
             .map_err(|e| format!("crate.re_exports source query failed: {e}"))?;
 
@@ -317,20 +267,11 @@ impl McpServer {
                         let normalized_target =
                             normalize_target_path(&ctx.crate_row.name, &entry.target_path);
 
-                        let symbol = sqlx::query_as::<_, ReExportSymbolKindRow>(
-                            "SELECT
-                                s.kind,
-                                s.visibility
-                             FROM symbols s
-                             WHERE s.crate_version_id = $1
-                               AND LOWER(s.name) = LOWER($2)
-                             ORDER BY CASE WHEN s.visibility = 'public' THEN 0 ELSE 1 END, \
-                             s.start_line ASC
-                             LIMIT 1",
+                        let symbol = tools::fetch_re_export_symbol_kind(
+                            &self.state.db,
+                            resolution.selected_version.id,
+                            &entry.exported_name,
                         )
-                        .bind(resolution.selected_version.id)
-                        .bind(&entry.exported_name)
-                        .fetch_optional(&self.state.db)
                         .await
                         .map_err(|e| format!("crate.re_exports symbol lookup failed: {e}"))?;
 

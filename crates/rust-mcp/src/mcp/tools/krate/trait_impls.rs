@@ -11,6 +11,7 @@ use crate::db::models::{
     CrateImplLookupRow, CrateTraitLookupRow, GenericParamEntry, ImplMethodEntry,
     TraitAssociatedTypeEntry,
 };
+use crate::db::tools;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateImplMethod, CrateTraitAssociatedType,
     CrateTraitDefinition,
@@ -244,58 +245,14 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let impl_rows = sqlx::query_as::<_, CrateImplLookupRow>(
-            "SELECT
-                ci.type_name,
-                ci.type_name_display,
-                ci.trait_name,
-                ci.trait_name_display,
-                ci.impl_kind,
-                ci.methods,
-                ci.is_blanket,
-                ci.is_synthetic,
-                ci.is_negative,
-                ci.blanket_type,
-                ci.generics,
-                ci.where_clauses,
-                sf.path AS source_path,
-                ci.start_line,
-                ci.end_line,
-                ci.index_source
-             FROM crate_impls ci
-             JOIN source_files sf ON sf.id = ci.source_file_id
-             WHERE ci.crate_version_id = $1
-               AND ($2::TEXT IS NULL OR LOWER(ci.trait_name) = LOWER($2))
-               AND ($3::TEXT IS NULL OR LOWER(ci.type_name) = LOWER($3))
-             ORDER BY
-                CASE ci.impl_kind
-                    WHEN 'derive' THEN 0
-                    WHEN 'trait' THEN 1
-                    ELSE 2
-                END,
-                     CASE
-                          WHEN ci.index_source = 'rustdoc_json'
-                                 AND (
-                                     jsonb_array_length(ci.methods::jsonb) > 0
-                                     OR ci.trait_name_display IS NOT NULL
-                                     OR ci.is_blanket
-                                     OR ci.is_synthetic
-                                     OR ci.is_negative
-                                 ) THEN 0
-                          WHEN ci.index_source = 'rustdoc_json' THEN 1
-                          ELSE 2
-                     END,
-                ci.type_name ASC,
-                ci.start_line ASC
-             LIMIT $4
-             OFFSET $5",
+        let impl_rows = tools::list_crate_impl_rows_for_filters(
+            &self.state.db,
+            resolution.selected_version.id,
+            trait_name.as_deref(),
+            type_name.as_deref(),
+            Some(i64::from(pag.limit.saturating_add(1))),
+            Some(i64::from(pag.offset)),
         )
-        .bind(resolution.selected_version.id)
-        .bind(trait_name.as_deref())
-        .bind(type_name.as_deref())
-        .bind(i64::from(pag.limit.saturating_add(1)))
-        .bind(i64::from(pag.offset))
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.trait_impls query failed: {e}"))?;
 
@@ -352,28 +309,11 @@ impl McpServer {
             Vec::new()
         } else {
             let mut definitions_by_name = HashMap::<String, CrateTraitDefinition>::new();
-            let rows = sqlx::query_as::<_, CrateTraitLookupRow>(
-                "SELECT
-                    trait_name,
-                    is_auto,
-                    is_unsafe,
-                    is_dyn_compatible,
-                    supertraits,
-                    required_methods,
-                    provided_methods,
-                    associated_types,
-                    generics,
-                    index_source
-                 FROM crate_traits
-                 WHERE crate_version_id = $1
-                   AND LOWER(trait_name) = ANY($2::TEXT[])
-                 ORDER BY
-                    CASE WHEN index_source = 'rustdoc_json' THEN 0 ELSE 1 END,
-                    trait_name ASC",
+            let rows = tools::list_crate_trait_rows_for_names(
+                &self.state.db,
+                resolution.selected_version.id,
+                &trait_names,
             )
-            .bind(resolution.selected_version.id)
-            .bind(&trait_names)
-            .fetch_all(&self.state.db)
             .await
             .map_err(|e| format!("crate.trait_impls trait definition query failed: {e}"))?;
 

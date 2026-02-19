@@ -5,8 +5,8 @@ pub use rust_mcp_types::types::krate::{
     CrateHotspotHit, CrateHotspotsRequest, CrateHotspotsResponse, HotspotKind, HotspotSeverity,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -36,12 +36,6 @@ impl CursorToken for CrateHotspotsCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct HotspotSourceFileRow {
-    pub(crate) path: String,
-    pub(crate) content: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -228,37 +222,16 @@ impl McpServer {
 
         let patterns = hotspot_patterns(include_unsafe, include_concurrency);
 
-        let files = if let Some(path_filter) = path_glob.as_deref() {
-            sqlx::query_as::<_, HotspotSourceFileRow>(
-                "SELECT
-                    sf.path,
-                    sf.content
-                 FROM source_files sf
-                 WHERE sf.crate_version_id = $1
-                   AND sf.path ILIKE $2 ESCAPE '\\\\'
-                 ORDER BY sf.path ASC
-                 LIMIT 1000",
-            )
-            .bind(resolution.selected_version.id)
-            .bind(path_glob_to_like(path_filter))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.hotspots source scan failed: {e}"))?
-        } else {
-            sqlx::query_as::<_, HotspotSourceFileRow>(
-                "SELECT
-                    sf.path,
-                    sf.content
-                 FROM source_files sf
-                 WHERE sf.crate_version_id = $1
-                 ORDER BY sf.path ASC
-                 LIMIT 1000",
-            )
-            .bind(resolution.selected_version.id)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.hotspots source scan failed: {e}"))?
-        };
+        let path_like = path_glob
+            .as_deref()
+            .map(path_glob_to_like);
+        let files = tools::list_source_files_for_hotspots(
+            &self.state.db,
+            resolution.selected_version.id,
+            path_like.as_deref(),
+        )
+        .await
+        .map_err(|e| format!("crate.hotspots source scan failed: {e}"))?;
 
         let scanned_files = files.len();
         let mut hotspots = files

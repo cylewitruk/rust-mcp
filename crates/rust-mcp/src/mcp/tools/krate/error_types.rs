@@ -6,8 +6,8 @@ pub use rust_mcp_types::types::krate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -35,30 +35,6 @@ impl CursorToken for CrateErrorTypesCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ErrorTypeTypeRow {
-    pub(crate) type_name: String,
-    pub(crate) kind: String,
-    pub(crate) fields: Value,
-    pub(crate) variants: Value,
-    pub(crate) source_path: String,
-    pub(crate) start_line: i32,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ErrorTypeImplRow {
-    pub(crate) type_name: String,
-    pub(crate) trait_name: Option<String>,
-    pub(crate) trait_name_display: Option<String>,
-    pub(crate) source_path: String,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ErrorTypeReturnRow {
-    pub(crate) name: String,
-    pub(crate) signature: Option<String>,
 }
 
 fn collect_field_types(value: &Value) -> Vec<String> {
@@ -178,38 +154,13 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let type_rows = sqlx::query_as::<_, ErrorTypeTypeRow>(
-            "SELECT
-                ct.type_name,
-                ct.kind,
-                ct.fields,
-                ct.variants,
-                sf.path AS source_path,
-                ct.start_line
-             FROM crate_types ct
-             JOIN source_files sf ON sf.id = ct.source_file_id
-             WHERE ct.crate_version_id = $1
-             ORDER BY ct.type_name ASC",
-        )
-        .bind(resolution.selected_version.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("crate.error_types type query failed: {e}"))?;
+        let type_rows = tools::list_error_type_rows(&self.state.db, resolution.selected_version.id)
+            .await
+            .map_err(|e| format!("crate.error_types type query failed: {e}"))?;
 
-        let impl_rows = sqlx::query_as::<_, ErrorTypeImplRow>(
-            "SELECT
-                ci.type_name,
-                ci.trait_name,
-                ci.trait_name_display,
-                sf.path AS source_path
-             FROM crate_impls ci
-             JOIN source_files sf ON sf.id = ci.source_file_id
-             WHERE ci.crate_version_id = $1",
-        )
-        .bind(resolution.selected_version.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| format!("crate.error_types impl query failed: {e}"))?;
+        let impl_rows = tools::list_error_impl_rows(&self.state.db, resolution.selected_version.id)
+            .await
+            .map_err(|e| format!("crate.error_types impl query failed: {e}"))?;
 
         let mut candidate_names = BTreeSet::<String>::new();
         for row in &type_rows {
@@ -291,21 +242,11 @@ impl McpServer {
                 }
             }
 
-            let return_rows = sqlx::query_as::<_, ErrorTypeReturnRow>(
-                "SELECT
-                    s.name,
-                    s.signature
-                 FROM symbols s
-                 WHERE s.crate_version_id = $1
-                   AND s.signature IS NOT NULL
-                   AND s.signature ILIKE '%Result<%'
-                   AND s.signature ILIKE $2
-                 ORDER BY s.name ASC
-                 LIMIT 50",
+            let return_rows = tools::list_error_return_rows(
+                &self.state.db,
+                resolution.selected_version.id,
+                &format!("%{}%", candidate),
             )
-            .bind(resolution.selected_version.id)
-            .bind(format!("%{}%", candidate))
-            .fetch_all(&self.state.db)
             .await
             .map_err(|e| format!("crate.error_types return signature query failed: {e}"))?;
 
@@ -334,15 +275,11 @@ impl McpServer {
                     continue;
                 }
 
-                let content = sqlx::query_scalar::<_, String>(
-                    "SELECT content
-                     FROM source_files
-                     WHERE crate_version_id = $1 AND path = $2
-                     LIMIT 1",
+                let content = tools::fetch_source_content_for_version_path(
+                    &self.state.db,
+                    resolution.selected_version.id,
+                    &row.source_path,
                 )
-                .bind(resolution.selected_version.id)
-                .bind(&row.source_path)
-                .fetch_optional(&self.state.db)
                 .await
                 .map_err(|e| format!("crate.error_types display source lookup failed: {e}"))?
                 .unwrap_or_default();

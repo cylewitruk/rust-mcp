@@ -6,21 +6,15 @@ pub use rust_mcp_types::types::krate::{
     CrateAttributeMacroEntry, CrateDeriveMacroEntry, CrateDeriveMacrosRequest,
     CrateDeriveMacrosResponse, CrateFunctionLikeMacroEntry,
 };
-use sqlx::FromRow;
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Item};
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, dedupe_strings, normalize_optional, normalize_required,
 };
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DeriveMacroSourceRow {
-    pub(crate) path: String,
-    pub(crate) content: String,
-}
 
 #[derive(Debug, Clone)]
 struct DeriveMacroCandidate {
@@ -189,15 +183,10 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let source_rows = sqlx::query_as::<_, DeriveMacroSourceRow>(
-            "SELECT path, content
-             FROM source_files
-             WHERE crate_version_id = $1
-               AND language = 'rust'
-             ORDER BY path ASC",
+        let source_rows = tools::list_rust_source_files_for_version(
+            &self.state.db,
+            resolution.selected_version.id,
         )
-        .bind(resolution.selected_version.id)
-        .fetch_all(&self.state.db)
         .await
         .map_err(|e| format!("crate.derive_macros source query failed: {e}"))?;
 

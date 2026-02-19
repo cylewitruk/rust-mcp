@@ -4,20 +4,12 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateApiDiffChange, CrateApiDiffChangeType, CrateApiDiffRequest, CrateApiDiffResponse,
 };
-use sqlx::FromRow;
 
-use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, CrateVersionSelectionRow};
+use crate::db::models::ApiDiffSymbolRow;
+use crate::db::tools;
+use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{api_diff_limit, build_crate_freshness_sources, normalize_required};
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct ApiDiffSymbolRow {
-    pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) signature: Option<String>,
-    pub(crate) visibility: Option<String>,
-    pub(crate) index_source: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SymbolFingerprint {
@@ -261,113 +253,57 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let from_version_row = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1 AND version = $2
-             LIMIT 1",
-        )
-        .bind(ctx.crate_row.id)
-        .bind(&from_version)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!("source version lookup failed for {}@{}: {e}", ctx.crate_row.name, from_version)
-        })?
-        .ok_or_else(|| {
-            format!(
-                "version '{}' for crate '{}' is not indexed locally",
-                from_version, ctx.crate_row.name
-            )
-        })?;
+        let from_version_row =
+            tools::fetch_crate_version_by_name(&self.state.db, ctx.crate_row.id, &from_version)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "source version lookup failed for {}@{}: {e}",
+                        ctx.crate_row.name, from_version
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "version '{}' for crate '{}' is not indexed locally",
+                        from_version, ctx.crate_row.name
+                    )
+                })?;
 
-        let to_version_row = sqlx::query_as::<_, CrateVersionSelectionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                readme
-             FROM crate_versions
-             WHERE crate_id = $1 AND version = $2
-             LIMIT 1",
-        )
-        .bind(ctx.crate_row.id)
-        .bind(&to_version)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!("target version lookup failed for {}@{}: {e}", ctx.crate_row.name, to_version)
-        })?
-        .ok_or_else(|| {
-            format!(
-                "version '{}' for crate '{}' is not indexed locally",
-                to_version, ctx.crate_row.name
-            )
-        })?;
+        let to_version_row =
+            tools::fetch_crate_version_by_name(&self.state.db, ctx.crate_row.id, &to_version)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "target version lookup failed for {}@{}: {e}",
+                        ctx.crate_row.name, to_version
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "version '{}' for crate '{}' is not indexed locally",
+                        to_version, ctx.crate_row.name
+                    )
+                })?;
 
-        let from_symbols = sqlx::query_as::<_, ApiDiffSymbolRow>(
-            "SELECT DISTINCT ON (s.name, s.kind)
-                s.name,
-                s.kind,
-                s.signature,
-                                s.visibility,
-                                s.index_source
-             FROM symbols s
-             WHERE s.crate_version_id = $1
-               AND (s.visibility = 'public' OR s.visibility IS NULL)
-                         ORDER BY s.name ASC,
-                                            s.kind ASC,
-                                            CASE WHEN s.index_source = 'rustdoc_json' THEN 0 ELSE \
-             1 END,
-                                            CASE WHEN s.signature IS NULL THEN 1 ELSE 0 END,
-                                            s.start_line ASC,
-                                            s.end_line ASC,
-                                            s.id ASC",
-        )
-        .bind(from_version_row.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!(
-                "public symbol lookup failed for {}@{}: {e}",
-                ctx.crate_row.name, from_version_row.version
-            )
-        })?;
+        let from_symbols =
+            tools::list_api_diff_symbols_for_version(&self.state.db, from_version_row.id)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "public symbol lookup failed for {}@{}: {e}",
+                        ctx.crate_row.name, from_version_row.version
+                    )
+                })?;
 
-        let to_symbols = sqlx::query_as::<_, ApiDiffSymbolRow>(
-            "SELECT DISTINCT ON (s.name, s.kind)
-                s.name,
-                s.kind,
-                s.signature,
-                                s.visibility,
-                                s.index_source
-             FROM symbols s
-             WHERE s.crate_version_id = $1
-               AND (s.visibility = 'public' OR s.visibility IS NULL)
-                         ORDER BY s.name ASC,
-                                            s.kind ASC,
-                                            CASE WHEN s.index_source = 'rustdoc_json' THEN 0 ELSE \
-             1 END,
-                                            CASE WHEN s.signature IS NULL THEN 1 ELSE 0 END,
-                                            s.start_line ASC,
-                                            s.end_line ASC,
-                                            s.id ASC",
-        )
-        .bind(to_version_row.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!(
-                "public symbol lookup failed for {}@{}: {e}",
-                ctx.crate_row.name, to_version_row.version
-            )
-        })?;
+        let to_symbols =
+            tools::list_api_diff_symbols_for_version(&self.state.db, to_version_row.id)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "public symbol lookup failed for {}@{}: {e}",
+                        ctx.crate_row.name, to_version_row.version
+                    )
+                })?;
 
         let mut summary = build_diff_summary(from_symbols, to_symbols);
         let truncated = summary.changes.len() > limit;

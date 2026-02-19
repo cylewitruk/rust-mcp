@@ -4,6 +4,7 @@ pub use rust_mcp_types::types::krate::{
     CrateCompatibilityMatrixResponse, CrateCompatibilityRequest, CrateCompatibilityResponse,
 };
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::tools::dependency::resolve::{
@@ -99,37 +100,33 @@ impl McpServer {
         let left_versions = if let Some(values) = request.left_versions {
             dedupe_strings(values)
         } else {
-            sqlx::query_scalar::<_, String>(
-                "SELECT cv.version
-                 FROM crate_versions cv
-                 JOIN crates c ON c.id = cv.crate_id
-                 WHERE c.name = $1
-                 ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                 LIMIT $2",
-            )
-            .bind(&left_crate)
-            .bind(i64::from(version_limit))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to load versions for {left_crate}: {e}"))?
+            let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &left_crate)
+                .await
+                .map_err(|e| format!("failed to load crate row for {left_crate}: {e}"))?
+                .ok_or_else(|| format!("crate '{left_crate}' is not indexed locally"))?;
+            tools::list_dependency_versions_by_crate(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("failed to load versions for {left_crate}: {e}"))?
+                .into_iter()
+                .take(version_limit as usize)
+                .map(|row| row.version)
+                .collect::<Vec<_>>()
         };
 
         let right_versions = if let Some(values) = request.right_versions {
             dedupe_strings(values)
         } else {
-            sqlx::query_scalar::<_, String>(
-                "SELECT cv.version
-                 FROM crate_versions cv
-                 JOIN crates c ON c.id = cv.crate_id
-                 WHERE c.name = $1
-                 ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
-                 LIMIT $2",
-            )
-            .bind(&right_crate)
-            .bind(i64::from(version_limit))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("failed to load versions for {right_crate}: {e}"))?
+            let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &right_crate)
+                .await
+                .map_err(|e| format!("failed to load crate row for {right_crate}: {e}"))?
+                .ok_or_else(|| format!("crate '{right_crate}' is not indexed locally"))?;
+            tools::list_dependency_versions_by_crate(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("failed to load versions for {right_crate}: {e}"))?
+                .into_iter()
+                .take(version_limit as usize)
+                .map(|row| row.version)
+                .collect::<Vec<_>>()
         };
 
         if left_versions.is_empty() {

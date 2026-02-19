@@ -9,33 +9,12 @@ pub use rust_mcp_types::types::dependency::{
 };
 use semver::{Version, VersionReq};
 use serde_json::Value as JsonValue;
-use sqlx::FromRow;
 use toml::Value;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{dependency_resolve_limit, normalize_required};
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DependencyResolveCrateRow {
-    pub(crate) id: i64,
-    pub(crate) name: String,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DependencyResolveVersionRow {
-    pub(crate) id: i64,
-    pub(crate) version: String,
-    pub(crate) yanked: bool,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct DependencyResolveEdgeRow {
-    pub(crate) to_crate_name: String,
-    pub(crate) requirement: String,
-    pub(crate) optional: bool,
-    pub(crate) features: JsonValue,
-}
 
 #[derive(Debug, Clone)]
 struct NormalizedDependency {
@@ -344,13 +323,9 @@ impl McpServer {
         let mut unindexed_count = 0usize;
 
         for dependency in &requested {
-            let crate_row = sqlx::query_as::<_, DependencyResolveCrateRow>(
-                "SELECT id, name FROM crates WHERE name = $1 LIMIT 1",
-            )
-            .bind(&dependency.name)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| format!("crate lookup failed for {}: {e}", dependency.name))?;
+            let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &dependency.name)
+                .await
+                .map_err(|e| format!("crate lookup failed for {}: {e}", dependency.name))?;
 
             let Some(crate_row) = crate_row else {
                 unindexed_count += 1;
@@ -364,16 +339,9 @@ impl McpServer {
                 continue;
             };
 
-            let versions = sqlx::query_as::<_, DependencyResolveVersionRow>(
-                "SELECT id, version, yanked
-                 FROM crate_versions
-                 WHERE crate_id = $1
-                 ORDER BY published_at DESC NULLS LAST, id DESC",
-            )
-            .bind(crate_row.id)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("version lookup failed for {}: {e}", crate_row.name))?;
+            let versions = tools::list_dependency_versions_by_crate(&self.state.db, crate_row.id)
+                .await
+                .map_err(|e| format!("version lookup failed for {}: {e}", crate_row.name))?;
 
             let selected_version = if let Some(version_req) = dependency
                 .version_req
@@ -437,20 +405,10 @@ impl McpServer {
         let mut feature_names = BTreeSet::<String>::new();
 
         if !selected_ids.is_empty() {
-            let edges = sqlx::query_as::<_, DependencyResolveEdgeRow>(
-                "SELECT
-                    to_c.name AS to_crate_name,
-                    de.requirement,
-                    de.optional,
-                    de.features
-                 FROM dependency_edges de
-                 JOIN crates to_c ON to_c.id = de.to_crate_id
-                 WHERE de.from_version_id = ANY($1::BIGINT[])",
-            )
-            .bind(&selected_ids)
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("dependency edge lookup failed: {e}"))?;
+            let edges =
+                tools::list_dependency_resolve_edges_for_versions(&self.state.db, &selected_ids)
+                    .await
+                    .map_err(|e| format!("dependency edge lookup failed: {e}"))?;
 
             feature_edges_evaluated = edges.len();
 
@@ -509,14 +467,10 @@ impl McpServer {
                     continue;
                 }
 
-                let candidate_versions = sqlx::query_as::<_, DependencyResolveVersionRow>(
-                    "SELECT cv.id, cv.version, cv.yanked
-                     FROM crate_versions cv
-                     JOIN crates c ON c.id = cv.crate_id
-                     WHERE LOWER(c.name) = $1",
+                let candidate_versions = tools::list_dependency_versions_by_lower_name(
+                    &self.state.db,
+                    &target_crate_key,
                 )
-                .bind(&target_crate_key)
-                .fetch_all(&self.state.db)
                 .await
                 .map_err(|e| {
                     format!("version lookup failed for transitive crate {target_crate_key}: {e}")

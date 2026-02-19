@@ -242,12 +242,14 @@ impl McpServer {
 
         let rows = tools::search_docs_pages(
             &self.state.db,
-            crate_name.as_deref(),
-            version.as_deref(),
-            path_prefix.as_deref(),
-            &query,
-            i64::from(limit.saturating_add(1)),
-            i64::from(offset),
+            &tools::DocsSearchParams {
+                crate_name: crate_name.as_deref(),
+                version: version.as_deref(),
+                path_prefix: path_prefix.as_deref(),
+                query: &query,
+                limit: i64::from(limit.saturating_add(1)),
+                offset: i64::from(offset),
+            },
         )
         .await
         .map_err(|e| format!("docs.search query failed: {e}"))?;

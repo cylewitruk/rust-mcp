@@ -2,17 +2,11 @@ use std::collections::BTreeSet;
 
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{CrateLicenseCheckRequest, CrateLicenseCheckResponse};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, LicensePolicyResult};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{build_crate_freshness_sources, normalize_optional, normalize_required};
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct CrateVersionLicenseRow {
-    pub(crate) version: String,
-    pub(crate) license_expression: Option<String>,
-}
 
 fn normalize_policy_list(values: Option<Vec<String>>) -> Vec<String> {
     let mut out = values
@@ -131,25 +125,16 @@ impl McpServer {
             .fetch_crate_context(&crate_name)
             .await?;
 
-        let latest_version_row = sqlx::query_as::<_, CrateVersionLicenseRow>(
-            "SELECT
-                version,
-                license_expression
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(ctx.crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest license version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                ctx.crate_row.name
-            )
-        })?;
+        let latest_version_row =
+            tools::fetch_latest_crate_license_for_crate(&self.state.db, ctx.crate_row.id)
+                .await
+                .map_err(|e| format!("latest license version lookup failed for {crate_name}: {e}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                        ctx.crate_row.name
+                    )
+                })?;
 
         let mut refresh_enqueued = ctx
             .freshness_outcome
@@ -160,24 +145,15 @@ impl McpServer {
             .clone();
 
         let selected_version = if let Some(version) = requested_version {
-            let selected = sqlx::query_as::<_, CrateVersionLicenseRow>(
-                "SELECT
-                    version,
-                    license_expression
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(ctx.crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
-            .await
-            .map_err(|e| {
-                format!(
-                    "selected version lookup failed for {}@{}: {e}",
-                    ctx.crate_row.name, version
-                )
-            })?;
+            let selected =
+                tools::fetch_crate_license_for_version(&self.state.db, ctx.crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed for {}@{}: {e}",
+                            ctx.crate_row.name, version
+                        )
+                    })?;
 
             if let Some(selected) = selected {
                 selected
@@ -190,30 +166,21 @@ impl McpServer {
                     refresh_job_id = Some(job_id);
                 }
 
-                sqlx::query_as::<_, CrateVersionLicenseRow>(
-                    "SELECT
-                        version,
-                        license_expression
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(ctx.crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        ctx.crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, ctx.crate_row.name
-                    )
-                })?
+                tools::fetch_crate_license_for_version(&self.state.db, ctx.crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed after backfill for {}@{}: {e}",
+                            ctx.crate_row.name, version
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "version '{}' for crate '{}' is not indexed locally (refresh \
+                             attempted)",
+                            version, ctx.crate_row.name
+                        )
+                    })?
             }
         } else {
             latest_version_row.clone()

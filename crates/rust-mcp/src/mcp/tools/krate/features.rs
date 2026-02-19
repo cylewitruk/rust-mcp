@@ -4,20 +4,13 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateFeatureFlag, CrateFeaturesRequest, CrateFeaturesResponse,
 };
-use serde_json::Value;
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, normalize_optional, normalize_required, value_to_string_vec,
 };
-
-#[derive(Debug, FromRow)]
-pub(crate) struct CrateFeatureRow {
-    pub(crate) feature_name: String,
-    pub(crate) enables: Value,
-}
 
 fn split_enable_targets(values: Vec<String>) -> (Vec<String>, Vec<String>) {
     let mut features = Vec::new();
@@ -98,37 +91,27 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let mut rows = sqlx::query_as::<_, CrateFeatureRow>(
-            "SELECT feature_name, enables
-             FROM crate_version_features
-             WHERE crate_version_id = $1
-             ORDER BY feature_name ASC",
-        )
-        .bind(resolution.selected_version.id)
-        .fetch_all(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!(
-                "feature flag query failed for {}@{}: {e}",
-                ctx.crate_row.name,
-                resolution
-                    .selected_version
-                    .version
-            )
-        })?;
+        let mut rows =
+            tools::list_crate_features_for_version(&self.state.db, resolution.selected_version.id)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "feature flag query failed for {}@{}: {e}",
+                        ctx.crate_row.name,
+                        resolution
+                            .selected_version
+                            .version
+                    )
+                })?;
 
         if rows.is_empty() {
             let _ = self
                 .sync_single_crate(&ctx.crate_row.name, false)
                 .await;
-            rows = sqlx::query_as::<_, CrateFeatureRow>(
-                "SELECT feature_name, enables
-                 FROM crate_version_features
-                 WHERE crate_version_id = $1
-                 ORDER BY feature_name ASC",
+            rows = tools::list_crate_features_for_version(
+                &self.state.db,
+                resolution.selected_version.id,
             )
-            .bind(resolution.selected_version.id)
-            .fetch_all(&self.state.db)
             .await
             .map_err(|e| {
                 format!(

@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{CrateApiRequest, CrateApiResponse, CrateApiSymbol};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 
+use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -33,18 +33,6 @@ impl CursorToken for CrateApiCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct ApiSurfaceRow {
-    pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) signature: Option<String>,
-    pub(crate) visibility: Option<String>,
-    pub(crate) source_path: String,
-    pub(crate) start_line: i32,
-    pub(crate) end_line: i32,
-    pub(crate) index_source: String,
 }
 
 fn normalize_kind_filters(input: Option<Vec<String>>) -> Vec<String> {
@@ -113,91 +101,32 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let has_rustdoc_symbols = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*)::BIGINT
-             FROM symbols
-             WHERE crate_version_id = $1
-               AND visibility = 'public'
-               AND index_source = 'rustdoc_json'",
+        let has_rustdoc_symbols = tools::count_rustdoc_public_symbols_for_version(
+            &self.state.db,
+            resolution.selected_version.id,
         )
-        .bind(resolution.selected_version.id)
-        .fetch_one(&self.state.db)
         .await
         .map_err(|e| format!("crate.api rustdoc source check failed: {e}"))?
             > 0;
         let preferred_source = if has_rustdoc_symbols { Some("rustdoc_json") } else { None };
 
-        let mut rows = if let Some(path_filter) = path_glob.as_deref() {
-            sqlx::query_as::<_, ApiSurfaceRow>(
-                "SELECT
-                    s.name,
-                    s.kind,
-                    s.signature,
-                    s.visibility,
-                    sf.path AS source_path,
-                    s.start_line,
-                    s.end_line,
-                    s.index_source
-                 FROM symbols s
-                 JOIN source_files sf ON sf.id = s.source_file_id
-                 WHERE s.crate_version_id = $1
-                   AND s.visibility = 'public'
-                   AND ($2::TEXT[] IS NULL OR s.kind = ANY($2))
-                                     AND ($3::TEXT IS NULL OR s.index_source = $3)
-                                     AND sf.path ILIKE $4 ESCAPE '\\'
-                 ORDER BY
-                    s.kind ASC,
-                    s.name ASC,
-                    sf.path ASC,
-                    s.start_line ASC,
-                    s.end_line ASC
-                 LIMIT $5
-                 OFFSET $6",
-            )
-            .bind(resolution.selected_version.id)
-            .bind(if kinds.is_empty() { None } else { Some(kinds.as_slice()) })
-            .bind(preferred_source)
-            .bind(path_glob_to_like(path_filter))
-            .bind(i64::from(pag.limit.saturating_add(1)))
-            .bind(i64::from(pag.offset))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.api query failed: {e}"))?
-        } else {
-            sqlx::query_as::<_, ApiSurfaceRow>(
-                "SELECT
-                    s.name,
-                    s.kind,
-                    s.signature,
-                    s.visibility,
-                    sf.path AS source_path,
-                    s.start_line,
-                    s.end_line,
-                    s.index_source
-                 FROM symbols s
-                 JOIN source_files sf ON sf.id = s.source_file_id
-                 WHERE s.crate_version_id = $1
-                   AND s.visibility = 'public'
-                   AND ($2::TEXT[] IS NULL OR s.kind = ANY($2))
-                                     AND ($3::TEXT IS NULL OR s.index_source = $3)
-                 ORDER BY
-                    s.kind ASC,
-                    s.name ASC,
-                    sf.path ASC,
-                    s.start_line ASC,
-                    s.end_line ASC
-                 LIMIT $4
-                 OFFSET $5",
-            )
-            .bind(resolution.selected_version.id)
-            .bind(if kinds.is_empty() { None } else { Some(kinds.as_slice()) })
-            .bind(preferred_source)
-            .bind(i64::from(pag.limit.saturating_add(1)))
-            .bind(i64::from(pag.offset))
-            .fetch_all(&self.state.db)
-            .await
-            .map_err(|e| format!("crate.api query failed: {e}"))?
-        };
+        let path_like = path_glob
+            .as_deref()
+            .map(path_glob_to_like);
+        let kind_filter = if kinds.is_empty() { None } else { Some(kinds.as_slice()) };
+        let mut rows = tools::list_public_api_symbols_for_version(
+            &self.state.db,
+            &tools::ApiSurfaceListParams {
+                crate_version_id: resolution.selected_version.id,
+                kinds: kind_filter,
+                preferred_source,
+                path_like: path_like.as_deref(),
+                limit: i64::from(pag.limit.saturating_add(1)),
+                offset: i64::from(pag.offset),
+            },
+        )
+        .await
+        .map_err(|e| format!("crate.api query failed: {e}"))?;
 
         let has_more = rows.len() > pag.limit as usize;
         if has_more {

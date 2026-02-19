@@ -2,33 +2,15 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateCompareRequest, CrateCompareResponse, CrateCompareSide,
 };
-use sqlx::FromRow;
 
+use crate::db::models::{CrateCompareCountsRow, CrateCompareVersionRow};
+use crate::db::tools;
 use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, ResponseFreshnessSource,
 };
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct CrateCompareVersionRow {
-    pub(crate) id: i64,
-    pub(crate) version: String,
-    pub(crate) rust_version: Option<String>,
-    pub(crate) published_at: Option<String>,
-    pub(crate) yanked: bool,
-    pub(crate) total_downloads: i64,
-    pub(crate) license_expression: Option<String>,
-}
-
-#[derive(Debug, Clone, FromRow)]
-pub(crate) struct CrateCompareCountsRow {
-    pub(crate) dependency_count: i64,
-    pub(crate) feature_count: i64,
-    pub(crate) advisory_count: i64,
-    pub(crate) dependent_count: i64,
-}
 
 #[derive(Debug)]
 struct CompareSnapshot {
@@ -188,55 +170,26 @@ impl McpServer {
             .fetch_crate_context(&crate_name)
             .await?;
 
-        let latest_version = sqlx::query_as::<_, CrateCompareVersionRow>(
-            "SELECT
-                id,
-                version,
-                rust_version,
-                published_at::TEXT AS published_at,
-                yanked,
-                total_downloads,
-                license_expression
-             FROM crate_versions
-             WHERE crate_id = $1
-             ORDER BY published_at DESC NULLS LAST, id DESC
-             LIMIT 1",
-        )
-        .bind(ctx.crate_row.id)
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
-        .ok_or_else(|| {
-            format!(
-                "crate '{}' has no indexed versions yet; run index.sync_crates first",
-                ctx.crate_row.name
-            )
-        })?;
-
-        let selected_version = if let Some(version) = requested_version {
-            let selected = sqlx::query_as::<_, CrateCompareVersionRow>(
-                "SELECT
-                    id,
-                    version,
-                    rust_version,
-                    published_at::TEXT AS published_at,
-                    yanked,
-                    total_downloads,
-                    license_expression
-                 FROM crate_versions
-                 WHERE crate_id = $1 AND version = $2
-                 LIMIT 1",
-            )
-            .bind(ctx.crate_row.id)
-            .bind(&version)
-            .fetch_optional(&self.state.db)
+        let latest_version = tools::fetch_compare_latest_version(&self.state.db, ctx.crate_row.id)
             .await
-            .map_err(|e| {
+            .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
+            .ok_or_else(|| {
                 format!(
-                    "selected version lookup failed for {}@{}: {e}",
-                    ctx.crate_row.name, version
+                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                    ctx.crate_row.name
                 )
             })?;
+
+        let selected_version = if let Some(version) = requested_version {
+            let selected =
+                tools::fetch_compare_version_by_name(&self.state.db, ctx.crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed for {}@{}: {e}",
+                            ctx.crate_row.name, version
+                        )
+                    })?;
 
             if let Some(selected) = selected {
                 selected
@@ -245,64 +198,35 @@ impl McpServer {
                     .backfill_missing_requested_version(&ctx.crate_row.name)
                     .await?;
 
-                sqlx::query_as::<_, CrateCompareVersionRow>(
-                    "SELECT
-                        id,
-                        version,
-                        rust_version,
-                        published_at::TEXT AS published_at,
-                        yanked,
-                        total_downloads,
-                        license_expression
-                     FROM crate_versions
-                     WHERE crate_id = $1 AND version = $2
-                     LIMIT 1",
-                )
-                .bind(ctx.crate_row.id)
-                .bind(&version)
-                .fetch_optional(&self.state.db)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "selected version lookup failed after backfill for {}@{}: {e}",
-                        ctx.crate_row.name, version
-                    )
-                })?
-                .ok_or_else(|| {
-                    format!(
-                        "version '{}' for crate '{}' is not indexed locally (refresh attempted)",
-                        version, ctx.crate_row.name
-                    )
-                })?
+                tools::fetch_compare_version_by_name(&self.state.db, ctx.crate_row.id, &version)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "selected version lookup failed after backfill for {}@{}: {e}",
+                            ctx.crate_row.name, version
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        format!(
+                            "version '{}' for crate '{}' is not indexed locally (refresh \
+                             attempted)",
+                            version, ctx.crate_row.name
+                        )
+                    })?
             }
         } else {
             latest_version.clone()
         };
 
-        let counts = sqlx::query_as::<_, CrateCompareCountsRow>(
-            "SELECT
-                (SELECT COUNT(*)::BIGINT
-                 FROM dependency_edges de
-                 WHERE de.from_version_id = $1) AS dependency_count,
-                (SELECT COUNT(*)::BIGINT
-                 FROM crate_version_features cvf
-                 WHERE cvf.crate_version_id = $1) AS feature_count,
-                (SELECT COUNT(*)::BIGINT
-                 FROM advisory_matches am
-                 WHERE am.crate_id = $2
-                   AND (am.version_id = $1 OR am.version_id IS NULL)) AS advisory_count,
-                (SELECT COUNT(DISTINCT cv_from.crate_id)::BIGINT
-                 FROM dependency_edges de2
-                 JOIN crate_versions cv_from ON cv_from.id = de2.from_version_id
-                 WHERE de2.to_crate_id = $2) AS dependent_count",
-        )
-        .bind(selected_version.id)
-        .bind(ctx.crate_row.id)
-        .fetch_one(&self.state.db)
-        .await
-        .map_err(|e| {
-            format!("crate.compare count aggregation failed for {}: {e}", ctx.crate_row.name)
-        })?;
+        let counts =
+            tools::fetch_compare_counts(&self.state.db, selected_version.id, ctx.crate_row.id)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "crate.compare count aggregation failed for {}: {e}",
+                        ctx.crate_row.name
+                    )
+                })?;
 
         Ok(CompareSnapshot {
             crate_row: ctx.crate_row,
