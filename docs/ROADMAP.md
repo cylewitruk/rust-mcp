@@ -50,7 +50,10 @@ The previously planned milestone set through M13 is complete, including:
 
 - [x] Add `crate.import_path` tool (best-known public import path resolution).
   - `crate.import_path` now resolves best-known public import paths and alternative matches from indexed symbol metadata.
-- [ ] Improve `crate.migration_path` heuristics beyond simple rename candidates.
+- [x] Improve `crate.migration_path` heuristics beyond simple rename candidates.
+  - `crate.migration_path` now scores replacement candidates using kind matching, token overlap, and signature compatibility (including normalized function-shape matching).
+  - Migration rationales now include richer guidance for signature and visibility changes, plus likely replacement suggestions for removed symbols.
+  - Added focused unit coverage for replacement-candidate scoring and rationale enrichment behavior.
 - [x] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
   - [x] Standardized `page`/`cursor`/`next_cursor` plus `has_more`/`truncated` metadata for `crate.search`, `source.search`, and `docs.search` (matching existing `symbol.search` behavior).
   - [x] Extended the same metadata contract to `crate.versions`, `crate.alternatives`, `crate.hotspots`, and `crate.usage_patterns`.
