@@ -8,7 +8,7 @@ use rmcp::model::{Meta, ProgressNotificationParam, ServerCapabilities, ServerInf
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use rust_mcp_types::types::common::PingRequest;
 use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 use tracing::warn;
 
 use super::indexing::handlers::{
@@ -121,21 +121,22 @@ impl McpServer {
         tokio::pin!(tool_future);
 
         let result = if let Some(token) = progress_token.clone() {
-            let heartbeat = sleep(Duration::from_secs(5));
-            tokio::pin!(heartbeat);
+            let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
+            heartbeat.tick().await; // consume the immediate first tick
 
-            tokio::select! {
-                result = &mut tool_future => result,
-                _ = &mut heartbeat => {
-                    let _ = client
-                        .notify_progress(ProgressNotificationParam {
-                            progress_token: token,
-                            progress: 0.5,
-                            total: None,
-                            message: Some(format!("{tool_name}: still running")),
-                        })
-                        .await;
-                    tool_future.await
+            loop {
+                tokio::select! {
+                    result = &mut tool_future => break result,
+                    _ = heartbeat.tick() => {
+                        let _ = client
+                            .notify_progress(ProgressNotificationParam {
+                                progress_token: token.clone(),
+                                progress: 0.5,
+                                total: None,
+                                message: Some(format!("{tool_name}: still running")),
+                            })
+                            .await;
+                    }
                 }
             }
         } else {
@@ -183,9 +184,11 @@ impl McpServer {
     )]
     async fn schema_get(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<ToolSchemasRequest>,
     ) -> Result<Json<ToolSchemasResponse>, String> {
-        self.instrument_tool("schema.get", async move {
+        self.instrument_tool_with_progress("schema.get", &meta, &client, async move {
             crate::contracts::tool_schemas_response(request.tool_name).map(Json)
         })
         .await
@@ -217,10 +220,17 @@ impl McpServer {
     )]
     async fn index_status(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
-        self.instrument_tool("index.status", self.handle_index_status(request))
-            .await
+        self.instrument_tool_with_progress(
+            "index.status",
+            &meta,
+            &client,
+            self.handle_index_status(request),
+        )
+        .await
     }
 
     #[tool(
@@ -248,10 +258,17 @@ impl McpServer {
     )]
     async fn crate_search(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
-        self.instrument_tool("crate.search", self.handle_crate_search(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.search",
+            &meta,
+            &client,
+            self.handle_crate_search(request),
+        )
+        .await
     }
 
     #[tool(
@@ -261,10 +278,17 @@ impl McpServer {
     )]
     async fn crate_intel(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
-        self.instrument_tool("crate.intel", self.handle_crate_intel(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.intel",
+            &meta,
+            &client,
+            self.handle_crate_intel(request),
+        )
+        .await
     }
 
     #[tool(
@@ -274,10 +298,17 @@ impl McpServer {
     )]
     async fn crate_features(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateFeaturesRequest>,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
-        self.instrument_tool("crate.features", self.handle_crate_features(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.features",
+            &meta,
+            &client,
+            self.handle_crate_features(request),
+        )
+        .await
     }
 
     #[tool(
@@ -287,10 +318,17 @@ impl McpServer {
     )]
     async fn crate_api_diff(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiDiffRequest>,
     ) -> Result<Json<CrateApiDiffResponse>, String> {
-        self.instrument_tool("crate.api_diff", self.handle_crate_api_diff(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.api_diff",
+            &meta,
+            &client,
+            self.handle_crate_api_diff(request),
+        )
+        .await
     }
 
     #[tool(
@@ -300,10 +338,17 @@ impl McpServer {
     )]
     async fn crate_api(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiRequest>,
     ) -> Result<Json<CrateApiResponse>, String> {
-        self.instrument_tool("crate.api", self.handle_crate_api(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.api",
+            &meta,
+            &client,
+            self.handle_crate_api(request),
+        )
+        .await
     }
 
     #[tool(
@@ -313,10 +358,17 @@ impl McpServer {
     )]
     async fn crate_type_info(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTypeInfoRequest>,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {
-        self.instrument_tool("crate.type_info", self.handle_crate_type_info(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.type_info",
+            &meta,
+            &client,
+            self.handle_crate_type_info(request),
+        )
+        .await
     }
 
     #[tool(
@@ -326,10 +378,17 @@ impl McpServer {
     )]
     async fn crate_trait_impls(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTraitImplsRequest>,
     ) -> Result<Json<CrateTraitImplsResponse>, String> {
-        self.instrument_tool("crate.trait_impls", self.handle_crate_trait_impls(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.trait_impls",
+            &meta,
+            &client,
+            self.handle_crate_trait_impls(request),
+        )
+        .await
     }
 
     #[tool(
@@ -339,10 +398,17 @@ impl McpServer {
     )]
     async fn crate_re_exports(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateReExportsRequest>,
     ) -> Result<Json<CrateReExportsResponse>, String> {
-        self.instrument_tool("crate.re_exports", self.handle_crate_re_exports(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.re_exports",
+            &meta,
+            &client,
+            self.handle_crate_re_exports(request),
+        )
+        .await
     }
 
     #[tool(
@@ -352,10 +418,17 @@ impl McpServer {
     )]
     async fn crate_import_path(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateImportPathRequest>,
     ) -> Result<Json<CrateImportPathResponse>, String> {
-        self.instrument_tool("crate.import_path", self.handle_crate_import_path(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.import_path",
+            &meta,
+            &client,
+            self.handle_crate_import_path(request),
+        )
+        .await
     }
 
     #[tool(
@@ -365,10 +438,17 @@ impl McpServer {
     )]
     async fn crate_error_types(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateErrorTypesRequest>,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {
-        self.instrument_tool("crate.error_types", self.handle_crate_error_types(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.error_types",
+            &meta,
+            &client,
+            self.handle_crate_error_types(request),
+        )
+        .await
     }
 
     #[tool(
@@ -378,10 +458,17 @@ impl McpServer {
     )]
     async fn crate_derive_macros(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateDeriveMacrosRequest>,
     ) -> Result<Json<CrateDeriveMacrosResponse>, String> {
-        self.instrument_tool("crate.derive_macros", self.handle_crate_derive_macros(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.derive_macros",
+            &meta,
+            &client,
+            self.handle_crate_derive_macros(request),
+        )
+        .await
     }
 
     #[tool(
@@ -391,10 +478,17 @@ impl McpServer {
     )]
     async fn crate_compare(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompareRequest>,
     ) -> Result<Json<CrateCompareResponse>, String> {
-        self.instrument_tool("crate.compare", self.handle_crate_compare(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.compare",
+            &meta,
+            &client,
+            self.handle_crate_compare(request),
+        )
+        .await
     }
 
     #[tool(
@@ -404,10 +498,17 @@ impl McpServer {
     )]
     async fn crate_compatibility(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityRequest>,
     ) -> Result<Json<CrateCompatibilityResponse>, String> {
-        self.instrument_tool("crate.compatibility", self.handle_crate_compatibility(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.compatibility",
+            &meta,
+            &client,
+            self.handle_crate_compatibility(request),
+        )
+        .await
     }
 
     #[tool(
@@ -417,10 +518,14 @@ impl McpServer {
     )]
     async fn crate_compatibility_matrix(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityMatrixRequest>,
     ) -> Result<Json<CrateCompatibilityMatrixResponse>, String> {
-        self.instrument_tool(
+        self.instrument_tool_with_progress(
             "crate.compatibility_matrix",
+            &meta,
+            &client,
             self.handle_crate_compatibility_matrix(request),
         )
         .await
@@ -433,10 +538,17 @@ impl McpServer {
     )]
     async fn crate_migration_path(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateMigrationPathRequest>,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {
-        self.instrument_tool("crate.migration_path", self.handle_crate_migration_path(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.migration_path",
+            &meta,
+            &client,
+            self.handle_crate_migration_path(request),
+        )
+        .await
     }
 
     #[tool(
@@ -446,10 +558,17 @@ impl McpServer {
     )]
     async fn crate_license_check(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateLicenseCheckRequest>,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {
-        self.instrument_tool("crate.license_check", self.handle_crate_license_check(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.license_check",
+            &meta,
+            &client,
+            self.handle_crate_license_check(request),
+        )
+        .await
     }
 
     #[tool(
@@ -459,10 +578,17 @@ impl McpServer {
     )]
     async fn crate_alternatives(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateAlternativesRequest>,
     ) -> Result<Json<CrateAlternativesResponse>, String> {
-        self.instrument_tool("crate.alternatives", self.handle_crate_alternatives(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.alternatives",
+            &meta,
+            &client,
+            self.handle_crate_alternatives(request),
+        )
+        .await
     }
 
     #[tool(
@@ -472,10 +598,17 @@ impl McpServer {
     )]
     async fn crate_versions(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateVersionsRequest>,
     ) -> Result<Json<CrateVersionsResponse>, String> {
-        self.instrument_tool("crate.versions", self.handle_crate_versions(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.versions",
+            &meta,
+            &client,
+            self.handle_crate_versions(request),
+        )
+        .await
     }
 
     #[tool(
@@ -485,10 +618,17 @@ impl McpServer {
     )]
     async fn crate_graph(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
-        self.instrument_tool("crate.graph", self.handle_crate_graph(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.graph",
+            &meta,
+            &client,
+            self.handle_crate_graph(request),
+        )
+        .await
     }
 
     #[tool(
@@ -498,10 +638,17 @@ impl McpServer {
     )]
     async fn crate_hotspots(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateHotspotsRequest>,
     ) -> Result<Json<CrateHotspotsResponse>, String> {
-        self.instrument_tool("crate.hotspots", self.handle_crate_hotspots(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.hotspots",
+            &meta,
+            &client,
+            self.handle_crate_hotspots(request),
+        )
+        .await
     }
 
     #[tool(
@@ -511,10 +658,17 @@ impl McpServer {
     )]
     async fn dependency_audit(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyAuditRequest>,
     ) -> Result<Json<DependencyAuditResponse>, String> {
-        self.instrument_tool("dependency.audit", self.handle_dependency_audit(request))
-            .await
+        self.instrument_tool_with_progress(
+            "dependency.audit",
+            &meta,
+            &client,
+            self.handle_dependency_audit(request),
+        )
+        .await
     }
 
     #[tool(
@@ -524,10 +678,17 @@ impl McpServer {
     )]
     async fn dependency_resolve(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyResolveRequest>,
     ) -> Result<Json<DependencyResolveResponse>, String> {
-        self.instrument_tool("dependency.resolve", self.handle_dependency_resolve(request))
-            .await
+        self.instrument_tool_with_progress(
+            "dependency.resolve",
+            &meta,
+            &client,
+            self.handle_dependency_resolve(request),
+        )
+        .await
     }
 
     #[tool(
@@ -537,10 +698,14 @@ impl McpServer {
     )]
     async fn dependency_feature_impact(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyFeatureImpactRequest>,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
-        self.instrument_tool(
+        self.instrument_tool_with_progress(
             "dependency.feature_impact",
+            &meta,
+            &client,
             self.handle_dependency_feature_impact(request),
         )
         .await
@@ -553,10 +718,17 @@ impl McpServer {
     )]
     async fn source_search(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceSearchRequest>,
     ) -> Result<Json<SourceSearchResponse>, String> {
-        self.instrument_tool("source.search", self.handle_source_search(request))
-            .await
+        self.instrument_tool_with_progress(
+            "source.search",
+            &meta,
+            &client,
+            self.handle_source_search(request),
+        )
+        .await
     }
 
     #[tool(
@@ -566,10 +738,17 @@ impl McpServer {
     )]
     async fn source_read(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceReadRequest>,
     ) -> Result<Json<SourceReadResponse>, String> {
-        self.instrument_tool("source.read", self.handle_source_read(request))
-            .await
+        self.instrument_tool_with_progress(
+            "source.read",
+            &meta,
+            &client,
+            self.handle_source_read(request),
+        )
+        .await
     }
 
     #[tool(
@@ -579,10 +758,17 @@ impl McpServer {
     )]
     async fn source_context(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceContextRequest>,
     ) -> Result<Json<SourceContextResponse>, String> {
-        self.instrument_tool("source.context", self.handle_source_context(request))
-            .await
+        self.instrument_tool_with_progress(
+            "source.context",
+            &meta,
+            &client,
+            self.handle_source_context(request),
+        )
+        .await
     }
 
     #[tool(
@@ -591,10 +777,17 @@ impl McpServer {
     )]
     async fn symbol_search(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<SymbolSearchRequest>,
     ) -> Result<Json<SymbolSearchResponse>, String> {
-        self.instrument_tool("symbol.search", self.handle_symbol_search(request))
-            .await
+        self.instrument_tool_with_progress(
+            "symbol.search",
+            &meta,
+            &client,
+            self.handle_symbol_search(request),
+        )
+        .await
     }
 
     #[tool(
@@ -604,10 +797,17 @@ impl McpServer {
     )]
     async fn docs_search(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<DocsSearchRequest>,
     ) -> Result<Json<DocsSearchResponse>, String> {
-        self.instrument_tool("docs.search", self.handle_docs_search(request))
-            .await
+        self.instrument_tool_with_progress(
+            "docs.search",
+            &meta,
+            &client,
+            self.handle_docs_search(request),
+        )
+        .await
     }
 
     #[tool(
@@ -617,10 +817,17 @@ impl McpServer {
     )]
     async fn crate_usage_patterns(
         &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateUsagePatternsRequest>,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {
-        self.instrument_tool("crate.usage_patterns", self.handle_crate_usage_patterns(request))
-            .await
+        self.instrument_tool_with_progress(
+            "crate.usage_patterns",
+            &meta,
+            &client,
+            self.handle_crate_usage_patterns(request),
+        )
+        .await
     }
 }
 

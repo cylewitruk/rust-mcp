@@ -75,7 +75,9 @@ The previously planned milestone set through M13 is complete, including:
   - [x] Concurrent requests for the same unindexed crate coalesce via `enqueue_or_get_refresh_job_id` deduplication and shared `watch` channels.
   - [x] Fixed pre-existing bug in `enqueue_or_get_refresh_job_id` (`fetch_one` → `fetch_optional` for the existence check).
   - [x] Integration tests: happy-path on-demand indexing, nonexistent-crate error, concurrent coalescing.
-  - [ ] Follow-up: add MCP progress notifications (`notifications/progress` SSE) during on-demand waits by upgrading tool handler signatures to accept `meta: Meta, client: Peer<RoleServer>`.
+  - [x] Follow-up: add MCP progress notifications (`notifications/progress` SSE) during on-demand waits by upgrading tool handler signatures to accept `meta: Meta, client: Peer<RoleServer>`.
+    - All 33 instrumented tools now use `instrument_tool_with_progress` with `meta: Meta` and `client: Peer<RoleServer>` parameters.
+    - Heartbeat improved from single-shot 5s pulse to periodic 5s interval for sustained client feedback during long on-demand waits.
   - [ ] Follow-up: extend on-demand indexing to version-level (`backfill_missing_requested_version`) and source/rustdoc scopes.
 
 ## P2: Indexing and Operations
