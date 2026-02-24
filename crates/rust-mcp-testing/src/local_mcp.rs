@@ -279,6 +279,24 @@ impl LocalMcpHttpHarness {
             bail!("MCP request `{method}` returned JSON-RPC error payload: {parsed}");
         }
 
+        // Detect tool-level errors: rmcp wraps `Err(String)` as
+        // `result.isError: true` with error text in `result.content`.
+        if let Some(result) = parsed.get("result")
+            && result
+                .get("isError")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        {
+            let message = result
+                .get("content")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("text"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("<no error text>");
+            bail!("MCP request `{method}` returned tool-level error: {message}");
+        }
+
         Ok(parsed)
     }
 }

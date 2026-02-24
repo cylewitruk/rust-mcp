@@ -1,4 +1,6 @@
-use rust_mcp_testing::fixtures::materialize_workspace_rustdoc_fixture_zst;
+use rust_mcp_testing::fixtures::{
+    materialize_workspace_rustdoc_fixture_zst, materialize_workspace_rustdoc_fixtures_zst,
+};
 
 use super::{
     Value, common, json, mock_index_sync_context, mock_index_sync_context_with_rustdoc_dir,
@@ -6,8 +8,10 @@ use super::{
 };
 
 const TOKIO_RUSTDOC_FIXTURE: &str = "tokio_1.49.0_x86_64-unknown-linux-gnu_latest.json.zst";
+const TOKIO_RUSTDOC_FIXTURE_148: &str = "tokio_1.48.0_x86_64-unknown-linux-gnu_latest.json.zst";
 const TOKIO_CRATE_NAME: &str = "tokio";
 const TOKIO_VERSION: &str = "1.49.0";
+const TOKIO_VERSION_148: &str = "1.48.0";
 
 #[tokio::test]
 async fn index_refresh_rustdoc_json_scope_ingests_docs_rs_payload() {
@@ -451,4 +455,114 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
             definition_path
         );
     }
+}
+
+/// Exercises the full rustdoc indexing pipeline with two real tokio versions
+/// from the workspace `rustdoc-json/` fixtures, including compat patching for
+/// older format_versions, and verifies `crate.api_diff` across the pair.
+#[tokio::test]
+async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
+    let fixture_dir = materialize_workspace_rustdoc_fixtures_zst(&[
+        (TOKIO_RUSTDOC_FIXTURE_148, TOKIO_CRATE_NAME, TOKIO_VERSION_148),
+        (TOKIO_RUSTDOC_FIXTURE, TOKIO_CRATE_NAME, TOKIO_VERSION),
+    ])
+    .expect("failed to materialize multi-version tokio rustdoc fixtures");
+
+    let context = mock_index_sync_context_with_rustdoc_dir(Some(
+        fixture_dir
+            .path()
+            .to_path_buf(),
+    ))
+    .await
+    .expect("failed to build rustdoc index context");
+
+    let tokio_v1_48 = seed_crate_release(
+        &context.state.db,
+        TOKIO_CRATE_NAME,
+        TOKIO_VERSION_148,
+        10_000_000,
+        Some("2026-01-01T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed tokio 1.48.0 release");
+    let tokio_v1_49 = seed_crate_release(
+        &context.state.db,
+        TOKIO_CRATE_NAME,
+        TOKIO_VERSION,
+        11_000_000,
+        Some("2026-02-01T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed tokio 1.49.0 release");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "index.refresh",
+            json!({
+                "scope": "rustdoc_json",
+                "crate_name": TOKIO_CRATE_NAME,
+                "page": 1,
+                "per_page": 10
+            }),
+        )
+        .await
+        .expect("index.refresh rustdoc_json call failed");
+    let payload = common::structured_content(&response);
+
+    assert!(matches!(
+        payload
+            .get("status")
+            .and_then(Value::as_str),
+        Some("completed" | "completed_with_errors")
+    ));
+
+    let tokio_148_symbols = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)::BIGINT FROM symbols WHERE crate_version_id = $1 AND index_source = \
+         'rustdoc_json'",
+    )
+    .bind(tokio_v1_48.version_id)
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to count tokio 1.48.0 rustdoc symbols");
+    let tokio_149_symbols = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*)::BIGINT FROM symbols WHERE crate_version_id = $1 AND index_source = \
+         'rustdoc_json'",
+    )
+    .bind(tokio_v1_49.version_id)
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to count tokio 1.49.0 rustdoc symbols");
+
+    assert!(
+        tokio_148_symbols > 0,
+        "tokio 1.48.0 rustdoc symbols were not indexed\nrefresh response: {payload:#}",
+    );
+    assert!(
+        tokio_149_symbols > 0,
+        "tokio 1.49.0 rustdoc symbols were not indexed\nrefresh response: {payload:#}",
+    );
+
+    let diff_response = context
+        .mcp
+        .call_tool(
+            "crate.api_diff",
+            json!({
+                "crate_name": TOKIO_CRATE_NAME,
+                "from_version": TOKIO_VERSION_148,
+                "to_version": TOKIO_VERSION,
+                "limit": 50
+            }),
+        )
+        .await
+        .expect("crate.api_diff call failed after rustdoc indexing");
+    let diff_payload = common::structured_content(&diff_response);
+
+    assert!(
+        diff_payload
+            .get("changes")
+            .and_then(Value::as_array)
+            .is_some_and(|changes| !changes.is_empty()),
+        "expected api_diff changes from indexed rustdoc versions"
+    );
 }

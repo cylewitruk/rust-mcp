@@ -93,6 +93,40 @@ pub fn materialize_rustdoc_fixture_zst(
     Ok(RustdocFixtureDir { path: dir })
 }
 
+/// Decompresses multiple `.json.zst` rustdoc fixtures from the workspace
+/// `rustdoc-json/` directory into a single temporary directory.
+///
+/// Each entry is a `(file_name, crate_name, version)` tuple.  The output
+/// filenames follow the `<crate>-<version>.json` convention.
+pub fn materialize_workspace_rustdoc_fixtures_zst(
+    entries: &[(&str, &str, &str)],
+) -> Result<RustdocFixtureDir> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("rust-mcp-rustdoc-zst-multi-{nanos}"));
+    std::fs::create_dir_all(&dir).with_context(|| {
+        format!("failed to create materialized rustdoc fixture directory {}", dir.display())
+    })?;
+
+    for &(file_name, crate_name, version) in entries {
+        let fixture_path = workspace_rustdoc_fixture_path(file_name)?;
+        let compressed = std::fs::read(&fixture_path).with_context(|| {
+            format!("failed to read compressed rustdoc fixture {}", fixture_path.display())
+        })?;
+        let decoded = zstd::stream::decode_all(Cursor::new(compressed)).with_context(|| {
+            format!("failed to decompress zstd rustdoc fixture {}", fixture_path.display())
+        })?;
+        let output_path = dir.join(format!("{crate_name}-{version}.json"));
+        std::fs::write(&output_path, decoded).with_context(|| {
+            format!("failed to write materialized rustdoc fixture {}", output_path.display())
+        })?;
+    }
+
+    Ok(RustdocFixtureDir { path: dir })
+}
+
 /// Inserts or updates a crate row with default metadata and returns the crate
 /// id.
 pub async fn seed_crate(pool: &PgPool, name: &str) -> Result<i64> {

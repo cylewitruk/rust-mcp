@@ -9,6 +9,7 @@ autotests = false
 [features]
 integration-tests = ["testing"]
 e2e-tests = ["testing"]
+live-tests = ["testing"]
 testing = []
 
 [dependencies]
@@ -37,6 +38,7 @@ tracing = { workspace = true }
 rustdoc-types = { workspace = true }
 rust-mcp-types = { workspace = true }
 tracing-subscriber = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 rust-mcp-testing = { workspace = true }
@@ -45,6 +47,11 @@ rust-mcp-testing = { workspace = true }
 name = "integration"
 path = "tests/integration/mod.rs"
 required-features = ["integration-tests"]
+
+[[test]]
+name = "live"
+path = "tests/live/mod.rs"
+required-features = ["live-tests"]
 
 [[test]]
 name = "e2e_http"

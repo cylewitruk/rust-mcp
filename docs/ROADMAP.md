@@ -62,8 +62,21 @@ The previously planned milestone set through M13 is complete, including:
   - `schema.get` now exposes per-tool request/response JSON Schemas over MCP.
   - HTTP endpoints now expose the same schema catalog at `/schemas` and `/schemas/{tool_name}`.
   - `SCHEMA_EXPORT_DIR` now writes `tool-schemas.json` plus per-tool artifacts at startup.
-- [ ] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running rust-mcp HTTP instance.
-  - _**Background:** As `rust-mcp` is designed to run as a single instance/server in Docker, MCP clients which do not support remote/HTTP(S) MCP server configurations will not be able to use it. The major players (Claude Code, Codex, Copilot) all support remote server configurations, so this is a compatibility-maximizing point to reach a broader userbase._
+- [x] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running rust-mcp HTTP instance.
+  - Added `rust-mcp-stdio` crate with MCP stdio framing, Streamable HTTP forwarding, session header propagation, and JSON/SSE response passthrough.
+  - Adapter behavior is tool-agnostic pass-through, so all tools exposed by the upstream `rust-mcp` HTTP server are supported.
+
+## P1: On-Demand Indexing
+
+- [ ] Transparent on-demand crate indexing so MCP clients never need to call `index.*` tools explicitly.
+  - **Problem:** Today, a client must call `index.sync_crates` to fetch crate metadata, then `index.refresh` to index sources/rustdoc, before query tools like `crate.api_diff` or `crate.type_info` return useful data. This is ceremony that leaks implementation details to the client.
+  - **Goal:** When a tool handler discovers a requested crate or version isn't indexed, the server should sync and index it inline before returning the response — no client-side orchestration required. The `index.*` tools remain available as explicit controls (force re-index, bulk sync, status inspection) but are no longer prerequisites.
+  - **Design considerations:**
+    - Tool handlers need a shared "ensure indexed" primitive that checks local DB state, fetches from crates.io if missing, and triggers source/rustdoc indexing for the requested version(s).
+    - First-request latency will be higher (crates.io fetch + indexing), so responses should signal when data was freshly indexed vs. served from cache.
+    - Concurrent requests for the same unindexed crate should coalesce rather than racing.
+    - The background refresh worker still handles periodic re-indexing and staleness; on-demand indexing handles the cold-start path.
+    - Rate limiting and backpressure against crates.io/docs.rs must be respected even under on-demand pressure.
 
 ## P2: Indexing and Operations
 

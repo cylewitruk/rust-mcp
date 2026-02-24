@@ -1161,6 +1161,11 @@ pub async fn insert_indexed_extraction_batch(
         counts.symbols += 1;
     }
 
+    // syn parsing does not evaluate #[cfg] attributes, so conditional
+    // compilation can produce multiple items with the same (type_name, kind)
+    // in a single file.  DO NOTHING keeps the first definition and skips
+    // duplicates — good enough for the gap-filler role syn data plays until
+    // authoritative rustdoc JSON is available for the crate version.
     for extracted_type in &extraction.types {
         sqlx::query(
             "INSERT INTO crate_types (
@@ -1187,7 +1192,10 @@ pub async fn insert_indexed_extraction_batch(
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, NOW(), $12, $13, $14, $15, $16, $17, $18, $19
-             )",
+             )
+             ON CONFLICT (crate_version_id, source_file_id, type_name, kind)
+                WHERE index_source != 'rustdoc_json'
+             DO NOTHING",
         )
         .bind(crate_version_id)
         .bind(source_file_id)

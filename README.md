@@ -182,12 +182,109 @@ Important environment variables:
 - `RUSTDOC_JSON_DIR` (optional pre-generated rustdoc JSON files)
 - `SCHEMA_EXPORT_DIR` (optional startup export of tool schema artifacts)
 
+`rust-mcp-stdio` adapter variables:
+
+- `MCP_URL` (default `http://127.0.0.1:43173/mcp`)
+- `MCP_CONNECT_TIMEOUT_SECS` (default `10`)
+- `MCP_REQUEST_TIMEOUT_SECS` (default `120`)
+- `MCP_AUTO_BOOTSTRAP_SESSION` (default `true`; auto-runs upstream `initialize` + `notifications/initialized` for session-required requests when no session exists)
+
 ## Transport
 
 - Supported in this binary: Streamable HTTP at `/mcp`
-- Not implemented in this binary: stdio transport
-- If a client only supports stdio process launch, run a separate stdio-to-HTTP proxy binary against this server instance.
+- Not implemented in this binary: stdio transport (handled by separate adapter)
+- `rust-mcp-stdio` is a dedicated stdio-to-HTTP MCP adapter binary that proxies MCP JSON-RPC messages to a configured `MCP_URL`.
+- Tool support in `rust-mcp-stdio` is pass-through, so all tools exposed by the target `rust-mcp` HTTP instance are available without per-tool adapter code.
+- Example stdio adapter launch:
+
+```bash
+cargo run -p rust-mcp-stdio -- --mcp-url http://127.0.0.1:43173/mcp
+```
+
 - In non-strict mode, JSON-only Accept headers are rewritten for compatibility and include an RFC `Warning` response header.
+
+## Client Configuration Examples
+
+Most MCP clients support one of these two patterns:
+
+### Direct HTTP(S) MCP server
+
+Use this when your client supports remote MCP endpoints directly.
+
+```json
+{
+  "mcpServers": {
+    "rust-mcp-http": {
+      "url": "http://127.0.0.1:43173/mcp"
+    }
+  }
+}
+```
+
+For TLS deployments, switch to HTTPS:
+
+```json
+{
+  "mcpServers": {
+    "rust-mcp-https": {
+      "url": "https://mcp.example.com/mcp"
+    }
+  }
+}
+```
+
+### `stdio` adapter (`rust-mcp-stdio`)
+
+Use this when your client only supports launching MCP servers over stdio.
+
+```json
+{
+  "mcpServers": {
+    "rust-mcp-stdio": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "-p",
+        "rust-mcp-stdio",
+        "--",
+        "--mcp-url",
+        "http://127.0.0.1:43173/mcp"
+      ],
+      "env": {
+        "MCP_PREFLIGHT_SCHEMA": "true"
+      }
+    }
+  }
+}
+```
+
+HTTPS works the same with stdio by changing `--mcp-url`:
+
+```json
+{
+  "mcpServers": {
+    "rust-mcp-stdio": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "-p",
+        "rust-mcp-stdio",
+        "--",
+        "--mcp-url",
+        "https://mcp.example.com/mcp"
+      ]
+    }
+  }
+}
+```
+
+### Popular client setup
+
+For popular clients (Copilot Chat in VS Code, Claude Code CLI/VS Code, Codex CLI/VS Code, Gemini CLI, Cursor), see:
+
+- [docs/CLIENT_CONFIGURATION.md](docs/CLIENT_CONFIGURATION.md)
+
+That guide keeps client-specific setup out of this README and covers both direct HTTP(S) MCP and `stdio` adapter variants.
 
 ## Development
 
@@ -200,6 +297,19 @@ just test
 just e2e-test
 just up
 just down
+```
+
+Opt-in live integration tests (real upstreams, no mock crates.io/docs.rs):
+
+```bash
+RUST_MCP_RUN_LIVE_E2E=1 \
+cargo --locked nextest run -p rust-mcp --features integration-tests --test integration live_unmocked
+```
+
+To include local cargo registry indexing coverage, also set:
+
+```bash
+export RUST_MCP_LIVE_CARGO_REGISTRY_DIR="$HOME/.cargo/registry/src"
 ```
 
 ## Known Limitations

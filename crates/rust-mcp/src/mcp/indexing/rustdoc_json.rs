@@ -67,6 +67,18 @@ fn file_sha256_hex(content: &[u8]) -> String {
     out
 }
 
+/// Returns `true` when the filename ends in `.json` or `.json.zst`.
+fn is_rustdoc_json_file(path: &Path) -> bool {
+    let name = match path
+        .file_name()
+        .and_then(OsStr::to_str)
+    {
+        Some(n) => n.to_ascii_lowercase(),
+        None => return false,
+    };
+    name.ends_with(".json") || name.ends_with(".json.zst")
+}
+
 fn walk_json_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut pending = vec![root.to_path_buf()];
     let mut files = Vec::<PathBuf>::new();
@@ -86,12 +98,7 @@ fn walk_json_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 
             if file_type.is_dir() {
                 pending.push(path);
-            } else if file_type.is_file()
-                && path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
-            {
+            } else if file_type.is_file() && is_rustdoc_json_file(&path) {
                 files.push(path);
             }
         }
@@ -101,21 +108,34 @@ fn walk_json_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+/// Extract the logical stem from a rustdoc JSON filename, stripping `.json`
+/// and `.json.zst` suffixes so that the caller always gets the bare name.
+fn rustdoc_logical_stem(path: &Path) -> Option<String> {
+    let name = path
+        .file_name()?
+        .to_string_lossy();
+    name.strip_suffix(".json.zst")
+        .or_else(|| name.strip_suffix(".json"))
+        .map(|base| base.to_string())
+}
+
 fn crate_from_stem(stem: &str) -> (String, Option<String>) {
     let normalized = stem.trim();
     if normalized.is_empty() {
         return (String::new(), None);
     }
 
-    let segments = normalized
+    // Strategy 1: split on `-` and join the tail (handles pre-release versions
+    // like `my-crate-1.0.0-alpha.1`).
+    let dash_segments = normalized
         .split('-')
         .collect::<Vec<_>>();
-    if segments.len() >= 2 {
-        for split_index in 1..segments.len() {
-            let version_candidate = segments[split_index..].join("-");
+    if dash_segments.len() >= 2 {
+        for split_index in 1..dash_segments.len() {
+            let version_candidate = dash_segments[split_index..].join("-");
             let semver_candidate = version_candidate.trim_start_matches('v');
             if Version::parse(semver_candidate).is_ok() {
-                let crate_name = segments[..split_index].join("-");
+                let crate_name = dash_segments[..split_index].join("-");
                 if !crate_name.is_empty() {
                     return (crate_name, Some(version_candidate));
                 }
@@ -123,7 +143,49 @@ fn crate_from_stem(stem: &str) -> (String, Option<String>) {
         }
     }
 
+    // Strategy 2: split on `_` and take a single segment as the version.
+    // Handles nightly toolchain output like
+    // `tokio_1.48.0_x86_64-unknown-linux-gnu_latest`. Semver never contains
+    // `_`, so each segment is tested individually.
+    let underscore_segments = normalized
+        .split('_')
+        .collect::<Vec<_>>();
+    if underscore_segments.len() >= 2 {
+        for split_index in 1..underscore_segments.len() {
+            let version_candidate = underscore_segments[split_index];
+            let semver_candidate = version_candidate.trim_start_matches('v');
+            if Version::parse(semver_candidate).is_ok() {
+                let crate_name = underscore_segments[..split_index].join("_");
+                if !crate_name.is_empty() {
+                    return (crate_name, Some(version_candidate.to_string()));
+                }
+            }
+        }
+    }
+
     (normalized.to_string(), None)
+}
+
+/// Read a local rustdoc JSON file, transparently decompressing `.json.zst`.
+fn read_local_rustdoc_file(path: &Path) -> Result<String, String> {
+    let raw = std::fs::read(path)
+        .map_err(|e| format!("failed to read local rustdoc JSON file {}: {e}", path.display()))?;
+
+    let bytes = if path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|n| n.ends_with(".zst"))
+    {
+        zstd::decode_all(raw.as_slice()).map_err(|e| {
+            format!("failed to decompress zstd rustdoc file {}: {e}", path.display())
+        })?
+    } else {
+        raw
+    };
+
+    String::from_utf8(bytes).map_err(|e| {
+        format!("invalid UTF-8 in rustdoc JSON file {} (local fallback): {e}", path.display())
+    })
 }
 
 fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
@@ -146,19 +208,63 @@ fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
     format!("rustdoc-json/{relative}")
 }
 
+/// Extracts the `format_version` field from raw rustdoc JSON content without
+/// fully deserializing the document.
+fn extract_format_version(content: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("format_version")
+                .and_then(serde_json::Value::as_u64)
+        })
+}
+
+/// Attempts to deserialize a rustdoc JSON payload whose `format_version` is
+/// older than our compiled `rustdoc-types` crate by patching known schema
+/// differences into a `serde_json::Value` tree, then converting to `Crate`.
+///
+/// Known patches:
+/// - **56 → 57**: `ExternalCrate::path` (a `PathBuf`) was added as a required
+///   field.  We inject `"path": ""` into each entry.
+fn try_compat_deserialize(content: &str) -> Option<RustdocCrate> {
+    let mut doc: serde_json::Value = serde_json::from_str(content).ok()?;
+
+    let fv = doc
+        .get("format_version")
+        .and_then(serde_json::Value::as_u64)?;
+
+    // Nothing to patch for current or future versions.
+    if fv >= u64::from(rustdoc_types::FORMAT_VERSION) {
+        return None;
+    }
+
+    // Patch: 56 → 57 — add missing `path` to each `external_crates` entry.
+    if fv < 57
+        && let Some(external_crates) = doc
+            .get_mut("external_crates")
+            .and_then(serde_json::Value::as_object_mut)
+    {
+        for entry in external_crates.values_mut() {
+            if let Some(obj) = entry.as_object_mut() {
+                obj.entry("path")
+                    .or_insert(serde_json::Value::String(String::new()));
+            }
+        }
+    }
+
+    // Future format_version patches go here (if fv < 58 { ... }).
+
+    serde_json::from_value(doc).ok()
+}
+
 fn format_rustdoc_parse_error(
     candidate: &RustdocSyncCandidateRow,
     source_path: &str,
     content: &str,
     parse_error: &serde_json::Error,
 ) -> String {
-    let format_version = serde_json::from_str::<serde_json::Value>(content)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("format_version")
-                .and_then(serde_json::Value::as_u64)
-        });
+    let format_version = extract_format_version(content);
 
     match format_version {
         Some(version) => format!(
@@ -1304,19 +1410,41 @@ impl McpServer {
         content: &str,
         outcome: &mut RustdocJsonRefreshOutcome,
     ) -> Result<(), String> {
-        let krate = serde_json::from_str::<RustdocCrate>(content)
-            .map_err(|error| format_rustdoc_parse_error(candidate, source_path, content, &error))?;
+        let krate = match serde_json::from_str::<RustdocCrate>(content) {
+            Ok(krate) => krate,
+            Err(error) => {
+                // If the payload has an older format_version, try to patch
+                // known schema differences and re-deserialize before giving up.
+                if let Some(patched) = try_compat_deserialize(content) {
+                    tracing::info!(
+                        crate_name = %candidate.crate_name,
+                        version = %candidate.version,
+                        source = %source_path,
+                        expected_format_version = rustdoc_types::FORMAT_VERSION,
+                        "recovered older-format rustdoc JSON via compat patching",
+                    );
+                    patched
+                } else {
+                    return Err(format_rustdoc_parse_error(
+                        candidate,
+                        source_path,
+                        content,
+                        &error,
+                    ));
+                }
+            }
+        };
 
         if krate.format_version != rustdoc_types::FORMAT_VERSION {
-            return Err(format!(
-                "failed to parse rustdoc JSON payload for {}@{} from {}: payload \
-                 format_version={} is not supported (expected={})",
-                candidate.crate_name,
-                candidate.version,
-                source_path,
-                krate.format_version,
-                rustdoc_types::FORMAT_VERSION,
-            ));
+            tracing::warn!(
+                crate_name = %candidate.crate_name,
+                version = %candidate.version,
+                source = %source_path,
+                payload_format_version = krate.format_version,
+                expected_format_version = rustdoc_types::FORMAT_VERSION,
+                "rustdoc JSON format_version mismatch; ingesting anyway since \
+                 deserialization succeeded",
+            );
         }
 
         let resolved_crate_name = krate
@@ -1442,10 +1570,7 @@ impl McpServer {
                     let mut local_candidates = files
                         .into_iter()
                         .filter_map(|path| {
-                            let stem = path
-                                .file_stem()?
-                                .to_string_lossy()
-                                .to_string();
+                            let stem = rustdoc_logical_stem(&path)?;
                             let (candidate_crate, candidate_version) = crate_from_stem(&stem);
                             if candidate_crate.is_empty() {
                                 return None;
@@ -1526,33 +1651,24 @@ impl McpServer {
                 if let Some(local_candidate) = local_candidate {
                     let local_source_path = synthetic_rustdoc_path(root_dir, &local_candidate.path);
 
-                    match std::fs::read(&local_candidate.path) {
-                        Ok(payload_bytes) => match String::from_utf8(payload_bytes) {
-                            Ok(payload) => {
-                                match self
-                                    .ingest_rustdoc_json_document(
-                                        &candidate,
-                                        &local_source_path,
-                                        &payload,
-                                        &mut outcome,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        local_ingested = true;
-                                    }
-                                    Err(error) => source_errors.push(error),
+                    match read_local_rustdoc_file(&local_candidate.path) {
+                        Ok(payload) => {
+                            match self
+                                .ingest_rustdoc_json_document(
+                                    &candidate,
+                                    &local_source_path,
+                                    &payload,
+                                    &mut outcome,
+                                )
+                                .await
+                            {
+                                Ok(()) => {
+                                    local_ingested = true;
                                 }
+                                Err(error) => source_errors.push(error),
                             }
-                            Err(error) => source_errors.push(format!(
-                                "invalid UTF-8 in rustdoc JSON file {} (local fallback): {error}",
-                                local_candidate.path.display()
-                            )),
-                        },
-                        Err(error) => source_errors.push(format!(
-                            "failed to read local rustdoc JSON file {}: {error}",
-                            local_candidate.path.display()
-                        )),
+                        }
+                        Err(error) => source_errors.push(error),
                     }
                 } else {
                     source_errors.push(format!(
@@ -2235,5 +2351,90 @@ mod tests {
         assert_eq!(visibility_string(&RustdocVisibility::Public), Some("public".to_string()));
         assert_eq!(visibility_string(&RustdocVisibility::Default), Some("private".to_string()));
         assert_eq!(visibility_string(&RustdocVisibility::Crate), Some("pub(crate)".to_string()));
+    }
+
+    // ---- compat deserialization tests ----
+
+    /// Builds a v57-shaped JSON Value with external_crates populated, then
+    /// strips the fields that were added in v57 and downgrades
+    /// `format_version` to simulate a v56 payload.
+    fn build_v56_json() -> String {
+        let mut krate = build_fixture_crate();
+        // Add external crate entries so there's something to patch.
+        krate.external_crates.insert(
+            1,
+            rustdoc_types::ExternalCrate {
+                name: "std".into(),
+                html_root_url: Some("https://doc.rust-lang.org/stable/".into()),
+                path: PathBuf::from("/fake/libstd.rlib"),
+            },
+        );
+        krate.external_crates.insert(
+            2,
+            rustdoc_types::ExternalCrate {
+                name: "serde".into(),
+                html_root_url: None,
+                path: PathBuf::from("/fake/libserde.rlib"),
+            },
+        );
+
+        let mut doc: serde_json::Value =
+            serde_json::to_value(&krate).expect("fixture should serialize");
+
+        // Downgrade to v56: remove `path` from every external_crates entry.
+        doc["format_version"] = serde_json::json!(56);
+        if let Some(ext) = doc
+            .get_mut("external_crates")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            for entry in ext.values_mut() {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.remove("path");
+                }
+            }
+        }
+
+        serde_json::to_string(&doc).expect("fixture should re-serialize")
+    }
+
+    #[test]
+    fn try_compat_deserialize_recovers_v56_payload() {
+        let v56_json = build_v56_json();
+
+        // Strict deserialization must fail (missing `path` field).
+        assert!(
+            serde_json::from_str::<RustdocCrate>(&v56_json).is_err(),
+            "v56 payload should not deserialize with strict v57 types"
+        );
+
+        // Compat patching should succeed.
+        let krate = try_compat_deserialize(&v56_json)
+            .expect("try_compat_deserialize should recover v56 payload");
+
+        assert_eq!(krate.format_version, 56);
+        assert_eq!(krate.external_crates.len(), 2);
+        assert_eq!(krate.external_crates[&1].name, "std");
+        assert_eq!(krate.external_crates[&2].name, "serde");
+        // Patched `path` should be the default empty PathBuf.
+        assert_eq!(krate.external_crates[&1].path, PathBuf::new());
+    }
+
+    #[test]
+    fn try_compat_deserialize_returns_none_for_current_version() {
+        let krate = build_fixture_crate();
+        let json = serde_json::to_string(&krate).expect("fixture should serialize");
+
+        // Current format_version should not trigger compat patching.
+        assert!(
+            try_compat_deserialize(&json).is_none(),
+            "should return None for current format_version"
+        );
+    }
+
+    #[test]
+    fn try_compat_deserialize_returns_none_for_garbage() {
+        assert!(try_compat_deserialize("not json at all").is_none());
+        assert!(try_compat_deserialize("{}").is_none());
+        assert!(try_compat_deserialize(r#"{"format_version": 57}"#).is_none());
     }
 }
