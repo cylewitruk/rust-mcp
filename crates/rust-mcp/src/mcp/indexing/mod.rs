@@ -1,3 +1,4 @@
+pub(crate) mod coordinator;
 pub(crate) mod freshness;
 pub(crate) mod handlers;
 pub(crate) mod local_cache;

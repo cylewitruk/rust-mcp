@@ -8,6 +8,7 @@ use tokio::time::sleep;
 
 use crate::config::Config;
 use crate::db::tools;
+use crate::mcp::indexing::coordinator::IndexingCoordinator;
 
 /// Shared application state used by HTTP and MCP handlers.
 #[derive(Debug, Clone)]
@@ -20,6 +21,9 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// Shared outbound rate limiters by remote source.
     pub outbound_rate_limiters: Arc<OutboundRateLimiters>,
+    /// Bridges tool handlers waiting for on-demand indexing with the
+    /// background refresh worker.
+    pub(crate) indexing_coordinator: Arc<IndexingCoordinator>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -111,12 +115,14 @@ impl AppState {
             .build()?;
 
         let outbound_rate_limiters = Arc::new(OutboundRateLimiters::new(&config));
+        let indexing_coordinator = Arc::new(IndexingCoordinator::new());
 
         Ok(Self {
             config,
             db,
             http,
             outbound_rate_limiters,
+            indexing_coordinator,
         })
     }
 

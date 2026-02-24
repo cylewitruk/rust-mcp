@@ -371,6 +371,9 @@ mod tests {
 
         let state = AppState {
             outbound_rate_limiters: Arc::new(crate::state::OutboundRateLimiters::new(&config)),
+            indexing_coordinator: Arc::new(
+                crate::mcp::indexing::coordinator::IndexingCoordinator::new(),
+            ),
             config,
             db: pool.clone(),
             http: reqwest::Client::new(),

@@ -1,5 +1,6 @@
 use crate::db::models::{CrateCoreRow, CrateVersionSelectionRow};
 use crate::db::tools;
+use crate::mcp::indexing::coordinator::JobOutcome;
 use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::server::McpServer;
 
@@ -18,8 +19,49 @@ pub(crate) struct VersionResolution {
 }
 
 impl McpServer {
+    /// Ensures the named crate is indexed locally. If it is not present in
+    /// the database, enqueues a high-priority on-demand indexing job via the
+    /// refresh worker and waits for completion (up to the coordinator
+    /// timeout).
+    async fn ensure_crate_indexed(&self, crate_name: &str) -> Result<(), String> {
+        let exists = tools::fetch_crate_core_by_name(&self.state.db, crate_name)
+            .await
+            .map_err(|e| format!("crate existence check failed for {crate_name}: {e}"))?;
+
+        if exists.is_some() {
+            return Ok(());
+        }
+
+        tracing::info!(crate_name, "crate not indexed locally — triggering on-demand indexing");
+
+        let job_id = self
+            .state
+            .indexing_coordinator
+            .enqueue_on_demand(&self.state.db, crate_name)
+            .await?;
+
+        match self
+            .state
+            .indexing_coordinator
+            .wait_for_job(job_id)
+            .await
+        {
+            Ok(JobOutcome::Completed) => Ok(()),
+            Ok(JobOutcome::Failed(msg)) => {
+                Err(format!("on-demand indexing failed for '{crate_name}': {msg}"))
+            }
+            Ok(JobOutcome::Pending) => Err(format!(
+                "unexpected pending state after waiting for on-demand indexing of '{crate_name}'"
+            )),
+            Err(timeout_msg) => Err(timeout_msg),
+        }
+    }
+
     /// Look up a crate by name, fetch its latest version, run the freshness
     /// check, and re-fetch the latest version if the check detected changes.
+    ///
+    /// If the crate is not yet indexed locally, triggers on-demand indexing
+    /// via the refresh worker before proceeding.
     ///
     /// This consolidates the crate-core-lookup + latest-version-lookup +
     /// ensure-freshness + conditional-re-fetch sequence used by most crate
@@ -28,11 +70,15 @@ impl McpServer {
         &self,
         crate_name: &str,
     ) -> Result<CrateContext, String> {
+        // On-demand indexing: ensure the crate is present before querying.
+        self.ensure_crate_indexed(crate_name)
+            .await?;
+
         let crate_row = tools::fetch_crate_core_by_name(&self.state.db, crate_name)
             .await
             .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
-                format!("crate '{crate_name}' is not indexed locally; run index.sync_crates first")
+                format!("crate '{crate_name}' could not be indexed; it may not exist on crates.io")
             })?;
 
         let latest_version = tools::fetch_latest_crate_version(&self.state.db, crate_row.id)

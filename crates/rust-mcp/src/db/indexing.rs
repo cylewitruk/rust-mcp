@@ -640,7 +640,7 @@ pub async fn enqueue_or_get_refresh_job_id(
     include_dependencies: bool,
     payload: Value,
 ) -> Result<i64, sqlx::Error> {
-    if let Some(existing_id) = sqlx::query_scalar::<_, Option<i64>>(
+    if let Some(existing_id) = sqlx::query_scalar::<_, i64>(
         "SELECT id
          FROM refresh_jobs
          WHERE crate_name = $1 AND scope = $2 AND status IN ('pending', 'running')
@@ -649,7 +649,7 @@ pub async fn enqueue_or_get_refresh_job_id(
     )
     .bind(crate_name)
     .bind(scope)
-    .fetch_one(db)
+    .fetch_optional(db)
     .await?
     {
         return Ok(existing_id);

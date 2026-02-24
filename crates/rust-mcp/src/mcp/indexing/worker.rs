@@ -7,6 +7,7 @@ use crate::db::indexing::{
     claim_next_refresh_job, fetch_refresh_job_gauge_counts, mark_crate_refresh_error,
     mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
 };
+use crate::mcp::indexing::coordinator::JobOutcome;
 use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{sync_page, sync_per_page};
@@ -82,7 +83,13 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 continue;
             }
         }) else {
-            sleep(Duration::from_secs(2)).await;
+            // No pending jobs — wait for a wake signal from the
+            // coordinator (on-demand request) or fall back to the
+            // 2-second poll interval.
+            tokio::select! {
+                () = state.indexing_coordinator.notified() => {},
+                () = sleep(Duration::from_secs(2)) => {},
+            }
             continue;
         };
 
@@ -155,6 +162,9 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 if let Err(error) = mark_refresh_job_finished(&state.db, job.id).await {
                     error!(job_id = job.id, %error, "failed to mark refresh job finished");
                 }
+                state
+                    .indexing_coordinator
+                    .signal_completion(job.id, JobOutcome::Completed);
             }
             Err(error_message) => {
                 let terminal = job.attempts >= MAX_ATTEMPTS;
@@ -177,6 +187,13 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 {
                     error!(job_id = job.id, %error, "failed to persist crate refresh error");
                 }
+
+                // Signal waiting tool handlers immediately (even for
+                // non-terminal failures — handlers should not wait across
+                // retries).
+                state
+                    .indexing_coordinator
+                    .signal_completion(job.id, JobOutcome::Failed(error_message.clone()));
 
                 if !terminal {
                     warn!(

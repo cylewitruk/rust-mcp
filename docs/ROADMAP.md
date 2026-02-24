@@ -1,7 +1,7 @@
 # ROADMAP
 
 Status: Active  
-Last updated: 2026-02-17
+Last updated: 2026-02-24
 
 This file tracks only open work and future direction.
 
@@ -68,15 +68,15 @@ The previously planned milestone set through M13 is complete, including:
 
 ## P1: On-Demand Indexing
 
-- [ ] Transparent on-demand crate indexing so MCP clients never need to call `index.*` tools explicitly.
-  - **Problem:** Today, a client must call `index.sync_crates` to fetch crate metadata, then `index.refresh` to index sources/rustdoc, before query tools like `crate.api_diff` or `crate.type_info` return useful data. This is ceremony that leaks implementation details to the client.
-  - **Goal:** When a tool handler discovers a requested crate or version isn't indexed, the server should sync and index it inline before returning the response — no client-side orchestration required. The `index.*` tools remain available as explicit controls (force re-index, bulk sync, status inspection) but are no longer prerequisites.
-  - **Design considerations:**
-    - Tool handlers need a shared "ensure indexed" primitive that checks local DB state, fetches from crates.io if missing, and triggers source/rustdoc indexing for the requested version(s).
-    - First-request latency will be higher (crates.io fetch + indexing), so responses should signal when data was freshly indexed vs. served from cache.
-    - Concurrent requests for the same unindexed crate should coalesce rather than racing.
-    - The background refresh worker still handles periodic re-indexing and staleness; on-demand indexing handles the cold-start path.
-    - Rate limiting and backpressure against crates.io/docs.rs must be respected even under on-demand pressure.
+- [x] Transparent on-demand crate indexing so MCP clients never need to call `index.*` tools explicitly.
+  - [x] Added `IndexingCoordinator` (`mcp/indexing/coordinator.rs`) with `tokio::sync::Notify` for worker wake-up and `tokio::sync::watch` channels for per-job completion signaling.
+  - [x] `fetch_crate_context()` now calls `ensure_crate_indexed()` before the DB lookup — all crate tools gain on-demand indexing transparently with no signature changes.
+  - [x] Refresh worker idle loop replaced with `select!{notified, sleep(2s)}` so on-demand jobs are picked up immediately.
+  - [x] Concurrent requests for the same unindexed crate coalesce via `enqueue_or_get_refresh_job_id` deduplication and shared `watch` channels.
+  - [x] Fixed pre-existing bug in `enqueue_or_get_refresh_job_id` (`fetch_one` → `fetch_optional` for the existence check).
+  - [x] Integration tests: happy-path on-demand indexing, nonexistent-crate error, concurrent coalescing.
+  - [ ] Follow-up: add MCP progress notifications (`notifications/progress` SSE) during on-demand waits by upgrading tool handler signatures to accept `meta: Meta, client: Peer<RoleServer>`.
+  - [ ] Follow-up: extend on-demand indexing to version-level (`backfill_missing_requested_version`) and source/rustdoc scopes.
 
 ## P2: Indexing and Operations
 

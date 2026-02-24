@@ -629,8 +629,9 @@ impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Local Rust dependency intelligence MCP server. Use index.sync_crates to ingest \
-                 crates.io data, then crate.search and crate.intel for local fast lookup."
+                "Local Rust dependency intelligence MCP server. Crates are indexed on-demand when \
+                 first requested. Use crate.search and crate.intel for fast lookup. The index.* \
+                 tools are available for explicit bulk sync and status inspection."
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()

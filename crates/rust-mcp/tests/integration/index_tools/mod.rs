@@ -560,6 +560,7 @@ async fn mock_rustdoc_json_gzip(
 }
 
 mod failure_paths;
+mod on_demand;
 mod rustdoc_refresh;
 mod status_sync;
 mod workers;
