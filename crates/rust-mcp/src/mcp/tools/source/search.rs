@@ -150,6 +150,26 @@ impl McpServer {
         let (offset, limit, effective_page) =
             (pagination.offset, pagination.limit, pagination.effective_page);
 
+        // On-demand source indexing when searching within a specific crate.
+        if let Some(ref cn) = crate_name
+            && let Ok(Some(cr)) = tools::fetch_crate_core_by_name(&self.state.db, cn).await
+        {
+            let ver = match version.as_deref() {
+                Some(v) => tools::fetch_crate_version_by_name(&self.state.db, cr.id, v)
+                    .await
+                    .ok()
+                    .flatten(),
+                None => tools::fetch_latest_crate_version(&self.state.db, cr.id)
+                    .await
+                    .ok()
+                    .flatten(),
+            };
+            if let Some(ver) = ver {
+                self.ensure_source_indexed(cn, ver.id)
+                    .await?;
+            }
+        }
+
         let path_like = path_glob
             .as_deref()
             .map(path_glob_to_like);
@@ -281,6 +301,9 @@ impl McpServer {
                         )
                     })?;
 
+            self.ensure_source_indexed(&crate_name, crate_version.id)
+                .await?;
+
             tools::fetch_source_read_for_crate_version_path(
                 &self.state.db,
                 &crate_name,
@@ -293,6 +316,14 @@ impl McpServer {
             })?
             .ok_or_else(|| format!("source file not found for {crate_name}@{version}:{path}"))?
         } else {
+            // Best-effort on-demand source indexing for the latest version.
+            if let Ok(Some(cr)) = tools::fetch_crate_core_by_name(&self.state.db, &crate_name).await
+                && let Ok(Some(lv)) = tools::fetch_latest_crate_version(&self.state.db, cr.id).await
+            {
+                self.ensure_source_indexed(&crate_name, lv.id)
+                    .await?;
+            }
+
             tools::fetch_source_read_latest_for_crate_path(&self.state.db, &crate_name, &path)
                 .await
                 .map_err(|e| format!("source.read lookup failed for {crate_name}:{path}: {e}"))?

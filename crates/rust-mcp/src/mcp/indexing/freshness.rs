@@ -5,6 +5,7 @@ use crate::db::indexing::{
     mark_crate_freshness_checked, mark_crate_probe_failed,
 };
 use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
+use crate::mcp::indexing::coordinator::JobOutcome;
 use crate::mcp::server::McpServer;
 
 #[derive(Debug, Default)]
@@ -136,9 +137,31 @@ impl McpServer {
         &self,
         crate_name: &str,
     ) -> Result<Option<String>, String> {
-        self.sync_single_crate(crate_name, false)
-            .await?;
         let job_id = self
+            .state
+            .indexing_coordinator
+            .enqueue_on_demand(&self.state.db, crate_name, "crate")
+            .await?;
+
+        match self
+            .state
+            .indexing_coordinator
+            .wait_for_job(job_id)
+            .await
+        {
+            Ok(JobOutcome::Completed) => {}
+            Ok(JobOutcome::Failed(msg)) => {
+                return Err(format!("on-demand version backfill failed for '{crate_name}': {msg}"));
+            }
+            Ok(JobOutcome::Pending) => {
+                return Err(format!(
+                    "unexpected pending state after version backfill for '{crate_name}'"
+                ));
+            }
+            Err(timeout_msg) => return Err(timeout_msg),
+        }
+
+        let deep_job_id = self
             .enqueue_refresh_job(
                 crate_name,
                 "crate_deep_refresh",
@@ -147,6 +170,6 @@ impl McpServer {
                 json!({"trigger": "missing_requested_version"}),
             )
             .await?;
-        Ok(Some(job_id))
+        Ok(Some(deep_job_id))
     }
 }

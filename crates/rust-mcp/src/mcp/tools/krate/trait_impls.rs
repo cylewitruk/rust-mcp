@@ -245,6 +245,9 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+            .await?;
+
         let impl_rows = tools::list_crate_impl_rows_for_filters(
             &self.state.db,
             resolution.selected_version.id,

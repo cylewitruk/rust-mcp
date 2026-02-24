@@ -24,6 +24,35 @@ pub async fn run_readiness_probe(db: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Returns true if at least one source file is indexed for the given crate
+/// version.
+pub async fn has_source_files_for_version(
+    db: &PgPool,
+    crate_version_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM source_files WHERE crate_version_id = $1)",
+    )
+    .bind(crate_version_id)
+    .fetch_one(db)
+    .await
+}
+
+/// Returns true if at least one rustdoc-backed symbol is indexed for the given
+/// crate version.
+pub async fn has_rustdoc_symbols_for_version(
+    db: &PgPool,
+    crate_version_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM symbols WHERE crate_version_id = $1 AND index_source = \
+         'rustdoc_json')",
+    )
+    .bind(crate_version_id)
+    .fetch_one(db)
+    .await
+}
+
 /// Loads a non-expired query cache value by key/source.
 pub async fn fetch_query_cache_value(
     db: &PgPool,

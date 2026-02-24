@@ -78,7 +78,13 @@ The previously planned milestone set through M13 is complete, including:
   - [x] Follow-up: add MCP progress notifications (`notifications/progress` SSE) during on-demand waits by upgrading tool handler signatures to accept `meta: Meta, client: Peer<RoleServer>`.
     - All 33 instrumented tools now use `instrument_tool_with_progress` with `meta: Meta` and `client: Peer<RoleServer>` parameters.
     - Heartbeat improved from single-shot 5s pulse to periodic 5s interval for sustained client feedback during long on-demand waits.
-  - [ ] Follow-up: extend on-demand indexing to version-level (`backfill_missing_requested_version`) and source/rustdoc scopes.
+  - [x] Follow-up: extend on-demand indexing to version-level (`backfill_missing_requested_version`) and source/rustdoc scopes.
+    - `enqueue_on_demand` now accepts a `scope` parameter (crate, local_cache, rustdoc_json) instead of hardcoding `"crate"`.
+    - `backfill_missing_requested_version` reworked from inline `sync_single_crate` to coordinator enqueue+wait for consistency and observability.
+    - Added `ensure_source_indexed` and `ensure_rustdoc_indexed` best-effort helpers in `queries.rs` — failures are logged as warnings but do not error out tool calls.
+    - Source tools (`source.search`, `source.read`, `source.context`) now trigger on-demand `local_cache` indexing when source files are missing for a version.
+    - Rustdoc-backed tools (`crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.api_diff`, `crate.api`, `crate.error_types`) now trigger on-demand `rustdoc_json` indexing when rustdoc symbols are missing.
+    - `crate.derive_macros` triggers on-demand source indexing (uses syn parsing, not rustdoc).
 
 ## P2: Indexing and Operations
 

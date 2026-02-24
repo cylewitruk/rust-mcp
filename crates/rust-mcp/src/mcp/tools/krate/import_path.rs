@@ -82,6 +82,9 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+            .await?;
+
         let symbol_rows = tools::list_import_path_matches(
             &self.state.db,
             resolution.selected_version.id,

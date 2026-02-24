@@ -37,7 +37,7 @@ impl McpServer {
         let job_id = self
             .state
             .indexing_coordinator
-            .enqueue_on_demand(&self.state.db, crate_name)
+            .enqueue_on_demand(&self.state.db, crate_name, "crate")
             .await?;
 
         match self
@@ -184,5 +184,123 @@ impl McpServer {
             refresh_enqueued,
             refresh_job_id,
         })
+    }
+
+    /// Best-effort on-demand source file indexing for a crate version.
+    ///
+    /// If source files are already indexed, returns immediately. Otherwise
+    /// enqueues a `local_cache` scope job via the coordinator and waits.
+    /// Failures are logged but do **not** propagate — the caller proceeds
+    /// with whatever data is available.
+    pub(crate) async fn ensure_source_indexed(
+        &self,
+        crate_name: &str,
+        crate_version_id: i64,
+    ) -> Result<(), String> {
+        let has_source = tools::has_source_files_for_version(&self.state.db, crate_version_id)
+            .await
+            .map_err(|e| format!("source file existence check failed for {crate_name}: {e}"))?;
+
+        if has_source {
+            return Ok(());
+        }
+
+        tracing::info!(
+            crate_name,
+            crate_version_id,
+            "no source files indexed — triggering on-demand local_cache indexing"
+        );
+
+        let job_id = self
+            .state
+            .indexing_coordinator
+            .enqueue_on_demand(&self.state.db, crate_name, "local_cache")
+            .await?;
+
+        match self
+            .state
+            .indexing_coordinator
+            .wait_for_job(job_id)
+            .await
+        {
+            Ok(JobOutcome::Completed) => {}
+            Ok(JobOutcome::Failed(msg)) => {
+                tracing::warn!(
+                    crate_name,
+                    %msg,
+                    "on-demand source indexing failed (best-effort)"
+                );
+            }
+            Ok(JobOutcome::Pending) => {
+                tracing::warn!(
+                    crate_name,
+                    "unexpected pending state after on-demand source indexing wait"
+                );
+            }
+            Err(timeout_msg) => {
+                tracing::warn!(crate_name, %timeout_msg, "on-demand source indexing timed out");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Best-effort on-demand rustdoc JSON indexing for a crate version.
+    ///
+    /// If rustdoc-backed symbols are already indexed, returns immediately.
+    /// Otherwise enqueues a `rustdoc_json` scope job via the coordinator and
+    /// waits. Failures are logged but do **not** propagate — the caller
+    /// proceeds with syn-only data.
+    pub(crate) async fn ensure_rustdoc_indexed(
+        &self,
+        crate_name: &str,
+        crate_version_id: i64,
+    ) -> Result<(), String> {
+        let has_rustdoc = tools::has_rustdoc_symbols_for_version(&self.state.db, crate_version_id)
+            .await
+            .map_err(|e| format!("rustdoc symbol existence check failed for {crate_name}: {e}"))?;
+
+        if has_rustdoc {
+            return Ok(());
+        }
+
+        tracing::info!(
+            crate_name,
+            crate_version_id,
+            "no rustdoc symbols indexed — triggering on-demand rustdoc_json indexing"
+        );
+
+        let job_id = self
+            .state
+            .indexing_coordinator
+            .enqueue_on_demand(&self.state.db, crate_name, "rustdoc_json")
+            .await?;
+
+        match self
+            .state
+            .indexing_coordinator
+            .wait_for_job(job_id)
+            .await
+        {
+            Ok(JobOutcome::Completed) => {}
+            Ok(JobOutcome::Failed(msg)) => {
+                tracing::warn!(
+                    crate_name,
+                    %msg,
+                    "on-demand rustdoc indexing failed (best-effort)"
+                );
+            }
+            Ok(JobOutcome::Pending) => {
+                tracing::warn!(
+                    crate_name,
+                    "unexpected pending state after on-demand rustdoc indexing wait"
+                );
+            }
+            Err(timeout_msg) => {
+                tracing::warn!(crate_name, %timeout_msg, "on-demand rustdoc indexing timed out");
+            }
+        }
+
+        Ok(())
     }
 }

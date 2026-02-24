@@ -183,6 +183,9 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
+        self.ensure_source_indexed(&crate_name, resolution.selected_version.id)
+            .await?;
+
         let source_rows = tools::list_rust_source_files_for_version(
             &self.state.db,
             resolution.selected_version.id,

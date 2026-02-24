@@ -285,6 +285,11 @@ impl McpServer {
                     )
                 })?;
 
+        self.ensure_rustdoc_indexed(&crate_name, from_version_row.id)
+            .await?;
+        self.ensure_rustdoc_indexed(&crate_name, to_version_row.id)
+            .await?;
+
         let from_symbols =
             tools::list_api_diff_symbols_for_version(&self.state.db, from_version_row.id)
                 .await

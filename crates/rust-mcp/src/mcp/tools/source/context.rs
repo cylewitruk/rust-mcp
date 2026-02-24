@@ -181,6 +181,9 @@ impl McpServer {
             latest_version.clone()
         };
 
+        self.ensure_source_indexed(&crate_name, selected_version.id)
+            .await?;
+
         let row = tools::fetch_source_read_for_crate_version_path(
             &self.state.db,
             &crate_row.name,

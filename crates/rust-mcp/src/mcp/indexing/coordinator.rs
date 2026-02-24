@@ -53,24 +53,25 @@ impl IndexingCoordinator {
         }
     }
 
-    /// Enqueue a high-priority on-demand crate indexing job and register a
-    /// completion waiter. Returns the raw job ID for subsequent
+    /// Enqueue a high-priority on-demand indexing job for the given scope and
+    /// register a completion waiter. Returns the raw job ID for subsequent
     /// [`wait_for_job`](Self::wait_for_job) calls.
     pub(crate) async fn enqueue_on_demand(
         &self,
         db: &PgPool,
         crate_name: &str,
+        scope: &str,
     ) -> Result<i64, String> {
         let job_id = enqueue_or_get_refresh_job_id(
             db,
             crate_name,
-            "crate",
+            scope,
             1, // highest priority
             false,
-            json!({"trigger": "on_demand"}),
+            json!({"trigger": "on_demand", "scope": scope}),
         )
         .await
-        .map_err(|e| format!("failed to enqueue on-demand index job for '{crate_name}': {e}"))?;
+        .map_err(|e| format!("failed to enqueue on-demand {scope} job for '{crate_name}': {e}"))?;
 
         // Register waiter — idempotent; coalesced jobs reuse the same ID.
         {

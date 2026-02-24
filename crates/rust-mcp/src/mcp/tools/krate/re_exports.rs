@@ -198,6 +198,9 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+            .await?;
+
         let rustdoc_re_exports = tools::list_rustdoc_re_exports(
             &self.state.db,
             resolution.selected_version.id,
