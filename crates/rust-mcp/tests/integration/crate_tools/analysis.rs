@@ -1,6 +1,300 @@
 use super::{Value, common, json, seed_crate_version, seed_source_file, seed_symbol};
 
 #[tokio::test]
+async fn crate_usage_patterns_returns_seeded_symbol_matches() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.usage_patterns",
+            json!({
+                "crate_name": "serde",
+                "symbol_name": "from_str",
+                "limit": 10
+            }),
+        )
+        .await
+        .expect("crate.usage_patterns call failed");
+    let payload = common::structured_content(&response);
+
+    assert!(
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_hotspots_detects_unsafe_in_seeded_source() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/hotspots.rs",
+        Some("rust"),
+        "pub unsafe fn read(ptr: *const u8) -> u8 { unsafe { *ptr } }",
+    )
+    .await
+    .expect("failed to seed hotspot source file");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.hotspots",
+            json!({
+                "crate_name": "serde_json",
+                "include_unsafe": true,
+                "include_concurrency": false
+            }),
+        )
+        .await
+        .expect("crate.hotspots call failed");
+    let payload = common::structured_content(&response);
+
+    let hotspots = payload
+        .get("hotspots")
+        .and_then(Value::as_array)
+        .expect("hotspots should be an array");
+    assert!(
+        hotspots
+            .iter()
+            .any(|hotspot| {
+                hotspot
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    == Some("unsafe")
+            })
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_migration_path_reports_removed_symbol() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let previous_version_id = seed_crate_version(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .crate_id,
+        "1.0.144",
+        580_000_000,
+        Some("2025-12-31T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed previous crate version");
+    let previous_source_id = seed_source_file(
+        &context.state.db,
+        previous_version_id,
+        "src/lib.rs",
+        Some("rust"),
+        "pub fn parse_legacy() -> bool { true }",
+    )
+    .await
+    .expect("failed to seed previous version source file");
+    seed_symbol(
+        &context.state.db,
+        previous_version_id,
+        previous_source_id,
+        "parse_legacy",
+        "function",
+        1,
+        1,
+    )
+    .await
+    .expect("failed to seed previous version symbol");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.migration_path",
+            json!({
+                "crate_name": "serde_json",
+                "from_version": "1.0.144",
+                "to_version": "1.0.145"
+            }),
+        )
+        .await
+        .expect("crate.migration_path call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("breaking_changes_detected")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let actions = payload
+        .get("migration_actions")
+        .and_then(Value::as_array)
+        .expect("migration_actions should be an array");
+    assert!(actions.iter().any(|action| {
+        action
+            .get("affected_symbol")
+            .and_then(Value::as_str)
+            == Some("parse_legacy")
+    }));
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_derive_macros_parses_proc_macro_source() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/macros.rs",
+        Some("rust"),
+        "use proc_macro::TokenStream;\n#[proc_macro_derive(MyDerive, attributes(my_attr))]\npub \
+         fn my_derive(_input: TokenStream) -> TokenStream { TokenStream::new() \
+         }\n#[proc_macro_attribute]\npub fn my_attr(_attr: TokenStream, item: TokenStream) -> \
+         TokenStream { item }\n#[proc_macro]\npub fn my_macro(_input: TokenStream) -> TokenStream \
+         { TokenStream::new() }",
+    )
+    .await
+    .expect("failed to seed macro source");
+
+    let response = context
+        .mcp
+        .call_tool("crate.derive_macros", json!({"crate_name": "serde_json"}))
+        .await
+        .expect("crate.derive_macros call failed");
+    let payload = common::structured_content(&response);
+
+    let derive_macros = payload
+        .get("derive_macros")
+        .and_then(Value::as_array)
+        .expect("derive_macros should be an array");
+    assert!(
+        derive_macros
+            .iter()
+            .any(|entry| {
+                entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    == Some("MyDerive")
+            })
+    );
+    assert!(
+        payload
+            .get("attribute_macros")
+            .and_then(Value::as_array)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("function_like_macros")
+            .and_then(Value::as_array)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() {
     let context = common::seeded_mcp_context()
         .await

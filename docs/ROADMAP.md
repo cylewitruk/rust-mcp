@@ -1,6 +1,6 @@
 # ROADMAP
 
-Status: Active  
+Status: Active
 Last updated: 2026-02-24
 
 This file tracks only open work and future direction.
@@ -86,6 +86,28 @@ The previously planned milestone set through M13 is complete, including:
     - Rustdoc-backed tools (`crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.api_diff`, `crate.api`, `crate.error_types`) now trigger on-demand `rustdoc_json` indexing when rustdoc symbols are missing.
     - `crate.derive_macros` triggers on-demand source indexing (uses syn parsing, not rustdoc).
 
+## P1: Protocol and Reliability
+
+- [ ] Audit and close MCP protocol version gap (negotiated: `2025-03-26`, latest published: `2025-11-25`).
+  - Newer MCP clients may expect features or behaviors from later spec revisions.
+  - Requires reviewing the spec changelog between the two versions, updating protocol constants, and adjusting transport/session handling if needed.
+- [ ] Replace `.expect()` calls in signal handler setup (`app.rs`) with proper error propagation.
+  - `ctrl_c()` and `signal(SignalKind::terminate())` both use `.expect()` today, which panics on failure rather than reporting a clean startup error.
+
+## P1: First-Touch Latency
+
+- [ ] Reduce first-interaction latency for on-demand rustdoc indexing.
+  - On-demand `rustdoc_json` jobs currently block tool responses for up to 45s (coordinator timeout). Tools that trigger both crate + rustdoc on-demand can see 130–180s wall time on first touch.
+  - Options to evaluate: configurable pre-warm list at startup, returning syn-only data immediately with a "rustdoc enrichment in progress" indicator, adding `_meta.estimated_wait` to progress notifications.
+    - `_meta.estimated_wait` should be based on statistics stored by the indexing process to give accurate results.
+
+## P1: Test Coverage
+
+- [x] Add standalone integration tests for untested crate tools.
+  - [x] Added standalone tests for `crate.type_info`, `crate.trait_impls`, `crate.error_types`, `crate.versions`, `crate.usage_patterns`, `crate.hotspots`, `crate.migration_path`, `crate.derive_macros`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.license_check`, `crate.alternatives`, and `schema.get`.
+  - [x] All 13 previously combo-only tools now have isolated test functions; combo tests retained for cross-tool workflow coverage.
+  - Updated coverage: ~35/35 tools have direct standalone or focused-pair test cases.
+
 ## P2: Indexing and Operations
 
 - [ ] Optional container-side rustdoc JSON generation workflow (nightly, bounded/isolated execution).
@@ -93,6 +115,11 @@ The previously planned milestone set through M13 is complete, including:
 - [ ] Background refresh fairness/backpressure tuning for large local registries.
 - [ ] More granular per-source/per-tool SLO metrics and alertable counters.
 - [ ] CI split for faster feedback: lint, integration, and e2e lanes with artifact reuse.
+
+## P2: Deployment Hardening
+
+- [ ] Verify `MCP_HTTP_BIND` default (`127.0.0.1`) works correctly with Docker port mapping; document override to `0.0.0.0` for custom compose files.
+- [ ] Add production troubleshooting guide (DB connection failures, outbound firewall issues, rustdoc 404s for old versions, first-run expectations).
 
 ## P2: Optional Advanced Intelligence
 

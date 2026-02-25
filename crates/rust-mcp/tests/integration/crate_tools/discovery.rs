@@ -154,6 +154,76 @@ async fn crate_graph_dependencies_contains_seeded_edges() {
 }
 
 #[tokio::test]
+async fn crate_versions_returns_seeded_timeline() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool("crate.versions", json!({"crate_name": "serde_json", "limit": 10}))
+        .await
+        .expect("crate.versions call failed");
+    let payload = common::structured_content(&response);
+
+    let versions = payload
+        .get("versions")
+        .and_then(Value::as_array)
+        .expect("versions should be an array");
+    assert!(!versions.is_empty());
+    assert_eq!(
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        versions.len()
+    );
+    assert!(
+        versions
+            .iter()
+            .any(|version| {
+                version
+                    .get("is_latest")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            })
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn crate_api_and_versions_report_seeded_symbol_timeline() {
     let context = common::seeded_mcp_context()
         .await

@@ -1,6 +1,189 @@
 use super::{Value, common, json};
 
 #[tokio::test]
+async fn crate_compatibility_resolves_seeded_pair() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.compatibility",
+            json!({
+                "left_crate": "serde_json",
+                "left_version": "1.0.145",
+                "right_crate": "serde",
+                "right_version": "1.0.228",
+                "check_features": true
+            }),
+        )
+        .await
+        .expect("crate.compatibility call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("resolvable")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_best_calls")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_compatibility_matrix_tests_seeded_version_pair() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.compatibility_matrix",
+            json!({
+                "left_crate": "serde_json",
+                "right_crate": "serde",
+                "left_versions": ["1.0.145"],
+                "right_versions": ["1.0.228"],
+                "check_features": true
+            }),
+        )
+        .await
+        .expect("crate.compatibility_matrix call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("pairs_tested")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .get("compatible_pairs")
+            .and_then(Value::as_array)
+            .map(|pairs| pairs.len()),
+        Some(1)
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_license_check_returns_policy_for_seeded_crate() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool("crate.license_check", json!({"crate_name": "serde_json"}))
+        .await
+        .expect("crate.license_check call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("policy_result")
+            .and_then(Value::as_str),
+        Some("unknown")
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_best_calls")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn crate_alternatives_returns_expected_shape() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool("crate.alternatives", json!({"crate_name": "serde_json", "limit": 5}))
+        .await
+        .expect("crate.alternatives call failed");
+    let payload = common::structured_content(&response);
+
+    assert!(
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1
+    );
+    assert_eq!(
+        payload
+            .get("page")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("next_cursor")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
     let context = common::seeded_mcp_context()
         .await
