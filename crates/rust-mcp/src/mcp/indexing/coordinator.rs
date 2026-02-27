@@ -20,6 +20,26 @@ use crate::db::indexing::enqueue_or_get_refresh_job_id;
 /// Maximum time a tool handler will wait for an on-demand indexing job.
 const ON_DEMAND_TIMEOUT: Duration = Duration::from_secs(45);
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Job priority levels (lower = higher urgency)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Interactive on-demand requests from tool handlers.
+pub(crate) const PRIORITY_ON_DEMAND: i32 = 1;
+/// Follow-up deep refresh after a missing-version backfill.
+pub(crate) const PRIORITY_BACKFILL: i32 = 5;
+/// Background freshness-triggered deep refresh.
+pub(crate) const PRIORITY_FRESHNESS: i32 = 10;
+/// Pre-warm list crates indexed first at startup.
+pub(crate) const PRIORITY_PRE_WARM: i32 = 25;
+/// Crates discovered via the periodic registry scan.
+pub(crate) const PRIORITY_DISCOVERY: i32 = 50;
+/// Proactive source/rustdoc enrichment enqueued after a crate job succeeds.
+pub(crate) const PRIORITY_PROACTIVE_ENRICH: i32 = 75;
+/// Default / explicitly scheduled refresh jobs.
+#[allow(dead_code)]
+pub(crate) const PRIORITY_DEFAULT: i32 = 100;
+
 /// Terminal outcome of a tracked indexing job.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum JobOutcome {
@@ -66,7 +86,7 @@ impl IndexingCoordinator {
             db,
             crate_name,
             scope,
-            1, // highest priority
+            PRIORITY_ON_DEMAND,
             false,
             json!({"trigger": "on_demand", "scope": scope}),
         )
@@ -155,6 +175,15 @@ impl IndexingCoordinator {
     /// poll-interval sleep.
     pub(crate) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
         self.worker_notify.notified()
+    }
+
+    /// Wake the refresh worker without registering a completion waiter.
+    /// Used by background tasks (e.g. registry discovery) that enqueue jobs
+    /// via [`enqueue_or_get_refresh_job_id`] directly and do not wait for
+    /// the result.
+    pub(crate) fn notify_worker(&self) {
+        self.worker_notify
+            .notify_one();
     }
 }
 

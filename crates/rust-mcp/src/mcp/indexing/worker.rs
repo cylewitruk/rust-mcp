@@ -1,13 +1,15 @@
 use metrics::gauge;
 use serde::Deserialize;
+use serde_json::json;
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
 use crate::db::indexing::{
-    claim_next_refresh_job, fetch_refresh_job_gauge_counts, mark_crate_refresh_error,
+    claim_next_refresh_job, enqueue_or_get_refresh_job_id, fetch_refresh_job_gauge_counts,
+    fetch_refresh_job_scope_pending_counts, mark_crate_refresh_error,
     mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
 };
-use crate::mcp::indexing::coordinator::JobOutcome;
+use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
 use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{sync_page, sync_per_page};
@@ -71,6 +73,23 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
             gauge!("rust_mcp_refresh_jobs_pending").set(counts.pending_jobs as f64);
             gauge!("rust_mcp_refresh_jobs_running").set(counts.running_jobs as f64);
             gauge!("rust_mcp_refresh_jobs_failed").set(counts.failed_jobs as f64);
+
+            // Ratio of background (discovery/enrichment) jobs to total pending.
+            // 0.0 when the queue is empty; 1.0 when all pending work is background.
+            let ratio = if counts.pending_jobs > 0 {
+                counts.background_pending_jobs as f64 / counts.pending_jobs as f64
+            } else {
+                0.0
+            };
+            gauge!("rust_mcp_refresh_jobs_background_ratio").set(ratio);
+        }
+
+        // Per-scope pending breakdown — emitted separately to avoid a single
+        // query returning too many columns.
+        if let Ok(scope_counts) = fetch_refresh_job_scope_pending_counts(&state.db).await {
+            for (scope, count) in scope_counts {
+                gauge!("rust_mcp_refresh_jobs_scope_pending", "scope" => scope).set(count as f64);
+            }
         }
 
         let next_job = claim_next_refresh_job(&state.db).await;
@@ -165,6 +184,24 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 state
                     .indexing_coordinator
                     .signal_completion(job.id, JobOutcome::Completed);
+
+                // After a successful crate-metadata job, proactively enqueue
+                // source and rustdoc enrichment at lower priority so they are
+                // ready before any client asks. enqueue_or_get_refresh_job_id
+                // is idempotent — safe to call unconditionally.
+                if job.scope == "crate" || job.scope == "crate_deep_refresh" {
+                    for enrichment_scope in ["local_cache", "rustdoc_json"] {
+                        let _ = enqueue_or_get_refresh_job_id(
+                            &state.db,
+                            &job.crate_name,
+                            enrichment_scope,
+                            PRIORITY_PROACTIVE_ENRICH,
+                            false,
+                            json!({"trigger": "proactive_enrich"}),
+                        )
+                        .await;
+                    }
+                }
             }
             Err(error_message) => {
                 let terminal = job.attempts >= MAX_ATTEMPTS;

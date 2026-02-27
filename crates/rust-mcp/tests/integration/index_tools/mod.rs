@@ -16,7 +16,10 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use rust_mcp::config::{Config, LogFormat};
 use rust_mcp::http;
-use rust_mcp::mcp::{run_refresh_worker_for_tests, run_startup_rustdoc_json_refresh_for_tests};
+use rust_mcp::mcp::{
+    run_refresh_worker_for_tests, run_registry_scan_for_tests,
+    run_startup_rustdoc_json_refresh_for_tests,
+};
 use rust_mcp::state::AppState;
 use rust_mcp_testing::fixtures::seed_crate_release;
 use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
@@ -64,6 +67,9 @@ fn test_config(
         rust_log: "warn".to_string(),
         log_format: LogFormat::Pretty,
         mcp_strict_accept: true,
+        registry_scan_interval_secs: 0,
+        registry_scan_batch_limit: 0,
+        pre_warm_crates: String::new(),
     }
 }
 
@@ -559,6 +565,7 @@ async fn mock_rustdoc_json_gzip(
     StatusCode::NOT_FOUND.into_response()
 }
 
+mod discovery;
 mod failure_paths;
 mod on_demand;
 mod rustdoc_refresh;

@@ -37,6 +37,9 @@ pub(crate) fn test_config(database_url: String) -> Config {
         rust_log: "warn".to_string(),
         log_format: LogFormat::Pretty,
         mcp_strict_accept: true,
+        registry_scan_interval_secs: 0,
+        registry_scan_batch_limit: 0,
+        pre_warm_crates: String::new(),
     }
 }
 

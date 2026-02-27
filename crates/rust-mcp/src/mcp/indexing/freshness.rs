@@ -5,7 +5,7 @@ use crate::db::indexing::{
     mark_crate_freshness_checked, mark_crate_probe_failed,
 };
 use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
-use crate::mcp::indexing::coordinator::JobOutcome;
+use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_BACKFILL, PRIORITY_FRESHNESS};
 use crate::mcp::server::McpServer;
 
 #[derive(Debug, Default)]
@@ -115,7 +115,7 @@ impl McpServer {
             .enqueue_refresh_job(
                 crate_name,
                 "crate_deep_refresh",
-                10,
+                PRIORITY_FRESHNESS,
                 true,
                 json!({"trigger": "ttl_expired_changed"}),
             )
@@ -165,7 +165,7 @@ impl McpServer {
             .enqueue_refresh_job(
                 crate_name,
                 "crate_deep_refresh",
-                5,
+                PRIORITY_BACKFILL,
                 true,
                 json!({"trigger": "missing_requested_version"}),
             )

@@ -536,6 +536,9 @@ pub struct RefreshJobGaugeCountsRow {
     pub running_jobs: i64,
     /// Failed refresh jobs.
     pub failed_jobs: i64,
+    /// Pending jobs that are background-priority (discovery / proactive
+    /// enrichment; priority ≥ 50). Used to compute the background ratio gauge.
+    pub background_pending_jobs: i64,
 }
 
 /// Row returned when claiming the next refresh job.

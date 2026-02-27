@@ -59,6 +59,7 @@ pub async fn run() -> Result<()> {
 
     tokio::spawn(mcp::run_refresh_worker(state.clone()));
     tokio::spawn(mcp::run_startup_rustdoc_json_refresh(state.clone()));
+    tokio::spawn(mcp::run_registry_discovery(state.clone()));
 
     let app = http::router(state, config);
     axum::serve(listener, app)

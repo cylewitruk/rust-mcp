@@ -29,6 +29,9 @@ pub(crate) mod env_vars {
     pub(crate) const SCHEMA_EXPORT_DIR: &str = "SCHEMA_EXPORT_DIR";
     pub(crate) const RUST_LOG: &str = "RUST_LOG";
     pub(crate) const LOG_FORMAT: &str = "LOG_FORMAT";
+    pub(crate) const REGISTRY_SCAN_INTERVAL_SECS: &str = "REGISTRY_SCAN_INTERVAL_SECS";
+    pub(crate) const REGISTRY_SCAN_BATCH_LIMIT: &str = "REGISTRY_SCAN_BATCH_LIMIT";
+    pub(crate) const PRE_WARM_CRATES: &str = "PRE_WARM_CRATES";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -153,6 +156,19 @@ pub struct Config {
     /// Output format for logs.
     #[arg(long, env = env_vars::LOG_FORMAT, value_enum, default_value_t = LogFormat::Pretty)]
     pub log_format: LogFormat,
+
+    /// Seconds between periodic registry discovery scans. 0 = disabled.
+    #[arg(long, env = env_vars::REGISTRY_SCAN_INTERVAL_SECS, default_value_t = 600)]
+    pub registry_scan_interval_secs: u64,
+
+    /// Max new crate jobs to enqueue per discovery scan run. 0 = unlimited.
+    #[arg(long, env = env_vars::REGISTRY_SCAN_BATCH_LIMIT, default_value_t = 0)]
+    pub registry_scan_batch_limit: u32,
+
+    /// Comma-separated list of crate names to index first at startup before
+    /// the general registry scan.
+    #[arg(long, env = env_vars::PRE_WARM_CRATES, default_value = "")]
+    pub pre_warm_crates: String,
 }
 
 impl Config {

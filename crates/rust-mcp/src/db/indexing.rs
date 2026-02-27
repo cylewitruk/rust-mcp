@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -939,17 +939,39 @@ pub async fn mark_crate_freshness_checked(
 }
 
 /// Loads refresh queue gauge counters used by the worker loop.
+///
+/// The `background_pending_jobs` field counts pending jobs with
+/// `priority >= 50` (i.e. `PRIORITY_DISCOVERY` and above — background
+/// discovery/enrichment work as opposed to on-demand requests).
 pub async fn fetch_refresh_job_gauge_counts(
     db: &PgPool,
 ) -> Result<RefreshJobGaugeCountsRow, sqlx::Error> {
     sqlx::query_as::<_, RefreshJobGaugeCountsRow>(
         "SELECT
-            COUNT(*) FILTER (WHERE status = 'pending')::BIGINT AS pending_jobs,
-            COUNT(*) FILTER (WHERE status = 'running')::BIGINT AS running_jobs,
-            COUNT(*) FILTER (WHERE status = 'failed')::BIGINT AS failed_jobs
+            COUNT(*) FILTER (WHERE status = 'pending')::BIGINT            AS pending_jobs,
+            COUNT(*) FILTER (WHERE status = 'running')::BIGINT            AS running_jobs,
+            COUNT(*) FILTER (WHERE status = 'failed')::BIGINT             AS failed_jobs,
+            COUNT(*) FILTER (WHERE status = 'pending'
+                                 AND priority >= 50)::BIGINT              AS \
+         background_pending_jobs
          FROM refresh_jobs",
     )
     .fetch_one(db)
+    .await
+}
+
+/// Returns the count of pending refresh jobs grouped by `scope`.
+/// Only scopes with at least one pending job are included.
+pub async fn fetch_refresh_job_scope_pending_counts(
+    db: &PgPool,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, i64)>(
+        "SELECT scope, COUNT(*)::BIGINT
+         FROM refresh_jobs
+         WHERE status = 'pending'
+         GROUP BY scope",
+    )
+    .fetch_all(db)
     .await
 }
 
@@ -1399,6 +1421,20 @@ pub async fn prune_stale_source_file_index_rows(
     }
 
     Ok(())
+}
+
+/// Returns the set of all crate names currently in the database.
+///
+/// Used by the registry discovery scanner to identify which crates have
+/// already been indexed and can be skipped.
+pub async fn fetch_known_crate_names(db: &PgPool) -> Result<HashSet<String>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT name FROM crates")
+        .fetch_all(db)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(name,)| name)
+        .collect())
 }
 
 /// Deletes stale source file rows for a crate version.

@@ -1,7 +1,7 @@
 # ROADMAP
 
 Status: Active
-Last updated: 2026-02-24
+Last updated: 2026-02-27
 
 This file tracks only open work and future direction.
 
@@ -86,6 +86,27 @@ The previously planned milestone set through M13 is complete, including:
     - Rustdoc-backed tools (`crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.api_diff`, `crate.api`, `crate.error_types`) now trigger on-demand `rustdoc_json` indexing when rustdoc symbols are missing.
     - `crate.derive_macros` triggers on-demand source indexing (uses syn parsing, not rustdoc).
 
+## P1: Proactive Registry Discovery and Background Indexing
+
+- [x] Startup registry scan: on boot, walk the mounted cargo registry (`$CARGO_REGISTRY_DIR/src/`) and enqueue indexing jobs for any crate/version directories not yet present in the DB.
+  - `mcp/indexing/discovery.rs` added with `run_registry_scan` and `run_registry_discovery`.
+  - Bounded by `REGISTRY_SCAN_BATCH_LIMIT` (default: 0 = unlimited); feeds directly into the `IndexingCoordinator` job queue.
+- [x] Periodic background discovery: configurable-interval scan via `REGISTRY_SCAN_INTERVAL_SECS` (default: 600s; 0 = disabled after startup scan).
+  - Stat-level directory listing (`std::fs::read_dir`) — no file parsing, minimal I/O pressure.
+  - `run_registry_discovery` spawned as a third background task from `app.rs` alongside the existing refresh worker and rustdoc startup sync.
+- [x] Proactive source and rustdoc enrichment: after any successful `crate`/`crate_deep_refresh` job, the worker automatically enqueues `local_cache` and `rustdoc_json` follow-up jobs at `PRIORITY_PROACTIVE_ENRICH` (75).
+  - `enqueue_or_get_refresh_job_id` is idempotent — safe to call unconditionally on every crate job completion.
+  - Interactive on-demand requests (`PRIORITY_ON_DEMAND` = 1) are never starved.
+- [x] Configurable pre-warm list: `PRE_WARM_CRATES` env var (comma-separated) enqueues named crates at `PRIORITY_PRE_WARM` (25) before the general registry scan begins.
+- [x] Named priority constants (`PRIORITY_ON_DEMAND` through `PRIORITY_DEFAULT`) added to `coordinator.rs`; magic literals in `freshness.rs` and `coordinator.rs` migrated to use them.
+- [x] Observability: expose discovery/enrichment queue depth, scan duration, and jobs-ahead-of-demand ratio via existing Prometheus metrics.
+  - `rust_mcp_refresh_jobs_scope_pending{scope=…}` — per-scope pending queue depth (labeled gauge, worker loop).
+  - `rust_mcp_refresh_jobs_background_ratio` — fraction of pending jobs that are background priority (≥ `PRIORITY_DISCOVERY`); 0.0 when idle.
+  - `rust_mcp_discovery_scan_duration_ms` — histogram of per-scan wall-clock time.
+  - `rust_mcp_discovery_scans_total` — cumulative count of completed scans.
+  - `rust_mcp_discovery_jobs_enqueued_total` — cumulative jobs enqueued by discovery.
+  - `rust_mcp_discovery_scan_errors_total` — incremented when a scan aborts early (registry unreadable or DB unavailable).
+
 ## P1: Protocol and Reliability
 
 - [ ] Audit and close MCP protocol version gap (negotiated: `2025-03-26`, latest published: `2025-11-25`).
@@ -112,7 +133,8 @@ The previously planned milestone set through M13 is complete, including:
 
 - [ ] Optional container-side rustdoc JSON generation workflow (nightly, bounded/isolated execution).
   - _**Background:** docs.rs does not have rustdoc-json built for all versions of all crates yet. Many crate [versions] published prior to May, 2025-ish are not available for download._
-- [ ] Background refresh fairness/backpressure tuning for large local registries.
+  - Depends on P1: Proactive Registry Discovery — local rustdoc builds should be triggered automatically for discovered versions that lack docs.rs artifacts, not only on-demand.
+- [ ] Background refresh fairness/backpressure tuning for large local registries (builds on P1: Proactive Registry Discovery).
 - [ ] More granular per-source/per-tool SLO metrics and alertable counters.
 - [ ] CI split for faster feedback: lint, integration, and e2e lanes with artifact reuse.
 
