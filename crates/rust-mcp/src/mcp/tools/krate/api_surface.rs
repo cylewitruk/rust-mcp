@@ -65,7 +65,8 @@ fn allowed_kind_filters(values: Vec<String>) -> Vec<String> {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_api(
+    /// Handles the `crate.api` tool call.
+    pub async fn handle_crate_api(
         &self,
         request: CrateApiRequest,
     ) -> Result<Json<CrateApiResponse>, String> {

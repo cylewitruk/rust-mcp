@@ -77,7 +77,8 @@ fn expand_feature_dependencies(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_dependency_feature_impact(
+    /// Handles the `dependency.feature_impact` tool call.
+    pub async fn handle_dependency_feature_impact(
         &self,
         request: DependencyFeatureImpactRequest,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {

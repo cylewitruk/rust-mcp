@@ -237,7 +237,8 @@ impl McpServer {
         })
     }
 
-    pub(crate) async fn handle_crate_compare(
+    /// Handles the `crate.compare` tool call.
+    pub async fn handle_crate_compare(
         &self,
         request: CrateCompareRequest,
     ) -> Result<Json<CrateCompareResponse>, String> {

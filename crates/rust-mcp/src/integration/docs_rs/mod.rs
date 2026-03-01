@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::io::Read as _;
 
 use flate2::read::GzDecoder;
+use tracing::debug;
 
 use crate::state::{AppState, OutboundSource};
 
@@ -44,6 +45,7 @@ impl<'a> DocsRsClient<'a> {
             .acquire_outbound_slot(OutboundSource::DocsRs)
             .await;
         let url = self.url(path);
+        debug!(url = %url, "docs.rs fetch page HTML request");
         let response = self
             .state
             .http
@@ -73,6 +75,7 @@ impl<'a> DocsRsClient<'a> {
             .acquire_outbound_slot(OutboundSource::DocsRs)
             .await;
         let url = self.rustdoc_json_url(crate_name, version);
+        debug!(%crate_name, %version, url = %url, "docs.rs fetch rustdoc JSON request");
         let response = self
             .state
             .http

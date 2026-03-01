@@ -4,6 +4,7 @@ use reqwest::StatusCode;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use tracing::debug;
 
 use crate::state::{AppState, OutboundSource};
 
@@ -127,6 +128,7 @@ impl<'a> CratesIoClient<'a> {
             .acquire_outbound_slot(OutboundSource::CratesIo)
             .await;
         let url = self.url(path);
+        debug!(url = %url, "crates.io GET JSON request");
         let response = self
             .state
             .http
@@ -176,6 +178,7 @@ impl<'a> CratesIoClient<'a> {
             .acquire_outbound_slot(OutboundSource::CratesIo)
             .await;
         let url = self.url(&format!("api/v1/crates/{crate_name}/{version}/readme"));
+        debug!(%crate_name, %version, url = %url, "crates.io fetch readme request");
         let response = self
             .state
             .http
@@ -184,7 +187,10 @@ impl<'a> CratesIoClient<'a> {
             .await
             .map_err(|e| format!("readme request failed for {crate_name}@{version}: {e}"))?;
 
-        if response.status() == StatusCode::NOT_FOUND {
+        // 404 = no readme uploaded; 403 = S3 returns AccessDenied for
+        // missing objects behind the crates.io redirect.  Both mean "no readme".
+        if response.status() == StatusCode::NOT_FOUND || response.status() == StatusCode::FORBIDDEN
+        {
             return Ok(None);
         }
 
@@ -229,6 +235,7 @@ impl<'a> CratesIoClient<'a> {
         crate_name: &str,
         version: &str,
     ) -> Result<Vec<CratesIoDependency>, String> {
+        debug!(%crate_name, %version, "crates.io fetch dependencies request");
         let path = format!("api/v1/crates/{crate_name}/{version}/dependencies");
         let response: CratesIoDependenciesResponse = self
             .get_json(&path, &[])

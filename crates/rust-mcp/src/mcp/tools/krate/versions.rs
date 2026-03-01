@@ -46,7 +46,8 @@ fn adoption_signal(downloads: i64, yanked: bool) -> String {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_versions(
+    /// Handles the `crate.versions` tool call.
+    pub async fn handle_crate_versions(
         &self,
         request: CrateVersionsRequest,
     ) -> Result<Json<CrateVersionsResponse>, String> {

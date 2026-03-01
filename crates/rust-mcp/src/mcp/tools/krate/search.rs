@@ -72,7 +72,8 @@ impl McpServer {
         .await
     }
 
-    pub(crate) async fn handle_crate_search(
+    /// Handles the `crate.search` tool call.
+    pub async fn handle_crate_search(
         &self,
         request: CrateSearchRequest,
     ) -> Result<Json<CrateSearchResponse>, String> {

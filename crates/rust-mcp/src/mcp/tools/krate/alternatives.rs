@@ -219,7 +219,8 @@ fn score_candidate(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_alternatives(
+    /// Handles the `crate.alternatives` tool call.
+    pub async fn handle_crate_alternatives(
         &self,
         request: CrateAlternativesRequest,
     ) -> Result<Json<CrateAlternativesResponse>, String> {

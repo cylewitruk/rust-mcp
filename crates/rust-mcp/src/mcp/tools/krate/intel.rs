@@ -13,7 +13,8 @@ use crate::mcp::utils::{
 };
 
 impl McpServer {
-    pub(crate) async fn handle_crate_intel(
+    /// Handles the `crate.intel` tool call.
+    pub async fn handle_crate_intel(
         &self,
         request: CrateIntelRequest,
     ) -> Result<Json<CrateIntelResponse>, String> {

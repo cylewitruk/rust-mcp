@@ -120,7 +120,8 @@ fn matches_error_heuristic(name: &str) -> bool {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_error_types(
+    /// Handles the `crate.error_types` tool call.
+    pub async fn handle_crate_error_types(
         &self,
         request: CrateErrorTypesRequest,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {

@@ -16,7 +16,7 @@ use super::crates_io_fixtures::{
     SEEDED_CRATE_VERSION,
 };
 
-pub(super) const SEEDED_RUSTDOC_PATH: &str = "rustdoc-json/docs.rs/demo-crate-1.2.3.json";
+pub const SEEDED_RUSTDOC_PATH: &str = "rustdoc-json/docs.rs/demo-crate-1.2.3.json";
 
 fn build_rustdoc_fixture(
     crate_name: &str,
@@ -111,7 +111,7 @@ fn build_rustdoc_fixture(
     }
 }
 
-pub(super) async fn mock_rustdoc_json_gzip(
+pub async fn mock_rustdoc_json_gzip(
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
     let rustdoc = match (crate_name.as_str(), version.as_str()) {

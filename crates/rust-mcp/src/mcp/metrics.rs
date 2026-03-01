@@ -2,7 +2,8 @@ use super::server::McpServer;
 use crate::db::tools;
 
 impl McpServer {
-    pub(crate) async fn record_tool_invocation(
+    /// Persists a tool invocation record to the database for metrics tracking.
+    pub async fn record_tool_invocation(
         &self,
         tool_name: &str,
         success: bool,

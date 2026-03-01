@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use anyhow::{Context as _, Result};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tokio::net::TcpListener;
@@ -61,38 +63,50 @@ pub async fn run() -> Result<()> {
     tokio::spawn(mcp::run_startup_rustdoc_json_refresh(state.clone()));
     tokio::spawn(mcp::run_registry_discovery(state.clone()));
 
+    let shutdown = make_shutdown_signal().context("failed to install shutdown signal handlers")?;
+
     let app = http::router(state, config);
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown)
         .await
         .context("HTTP server exited unexpectedly")?;
 
     Ok(())
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
+/// Installs OS signal handlers and returns a future that resolves on the first
+/// shutdown signal received.
+///
+/// SIGTERM stream creation is fallible and is eagerly installed so that any
+/// failure surfaces as a startup error rather than a panic inside the serve
+/// loop. Ctrl+C is handled through an async future; errors from it are logged
+/// as warnings rather than propagated, since the OS error can only be observed
+/// after the future is polled.
+fn make_shutdown_signal() -> std::io::Result<impl Future<Output = ()> + Send + 'static> {
     #[cfg(unix)]
-    let terminate = async {
+    let mut sigterm = {
         use tokio::signal::unix::{SignalKind, signal};
-
-        let mut stream =
-            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
-        stream.recv().await;
+        signal(SignalKind::terminate())?
     };
 
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    Ok(async move {
+        let ctrl_c = async {
+            if let Err(error) = tokio::signal::ctrl_c().await {
+                warn!(%error, "Ctrl+C signal error; Ctrl+C will not trigger graceful shutdown");
+            }
+        };
 
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-    }
+        #[cfg(unix)]
+        let terminate = async move { sigterm.recv().await };
 
-    info!("shutdown signal received");
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            () = ctrl_c => {}
+            _ = terminate => {}
+        }
+
+        info!("shutdown signal received");
+    })
 }

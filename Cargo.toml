@@ -5,14 +5,14 @@ members = [
 ]
 
 [workspace.dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 axum = { version = "0.8.8", features = ["json"] }
 base64 = "0.22.1"
-clap = { version = "4.5.59", features = ["derive", "env"] }
+clap = { version = "4.5.60", features = ["derive", "env"] }
 flate2 = { version = "1.1.5", default-features = false, features = ["rust_backend"] }
 metrics = "0.24.3"
 metrics-exporter-prometheus = { version = "0.18.1", features = ["http-listener"] }
-rmcp = { version = "0.16.0", features = ["transport-streamable-http-server"] }
+rmcp = { version = "0.17.0", features = ["transport-streamable-http-server"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 quote = "1.0.44"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -20,7 +20,7 @@ serde_json = "1.0.149"
 semver = "1.0.27"
 sha2 = "0.10.9"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "migrate"] }
-syn = { version = "2.0.116", features = ["full"] }
+syn = { version = "2.0.117", features = ["full"] }
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal"] }
 toml = "0.9.8"
@@ -30,7 +30,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json"] }
 rustdoc-types = "0.57.0"
 zstd = "0.13.3"
-testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
+testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
 rust-mcp-types = { path = "crates/rust-mcp-types" }
 rust-mcp-testing = { path = "crates/rust-mcp-testing" }
 

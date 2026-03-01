@@ -5,11 +5,8 @@ use super::server::McpServer;
 use crate::db::tools;
 
 impl McpServer {
-    pub(crate) async fn query_cache_get(
-        &self,
-        source: &str,
-        key: &str,
-    ) -> Result<Option<Value>, String> {
+    /// Reads a cached query result, returning `None` on cache miss.
+    pub async fn query_cache_get(&self, source: &str, key: &str) -> Result<Option<Value>, String> {
         let value = tools::fetch_query_cache_value(&self.state.db, key, source)
             .await
             .map_err(|e| format!("query cache read failed for {source}:{key}: {e}"))?;
@@ -23,7 +20,8 @@ impl McpServer {
         Ok(value)
     }
 
-    pub(crate) async fn query_cache_put(
+    /// Writes a query result into the cache with the given TTL.
+    pub async fn query_cache_put(
         &self,
         source: &str,
         key: &str,

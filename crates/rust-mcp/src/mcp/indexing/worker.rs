@@ -64,7 +64,8 @@ fn jittered_retry_delay_seconds(job_id: i64, attempts: i32) -> i64 {
     jittered.clamp(1, 600)
 }
 
-pub(crate) async fn run_refresh_worker(state: AppState) {
+/// Runs the durable background refresh worker loop.
+pub async fn run_refresh_worker(state: AppState) {
     const MAX_ATTEMPTS: i32 = 3;
 
     loop {
@@ -112,6 +113,15 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
             continue;
         };
 
+        info!(
+            job_id = job.id,
+            crate_name = %job.crate_name,
+            scope = %job.scope,
+            attempt = job.attempts,
+            "processing refresh job"
+        );
+
+        let job_started = std::time::Instant::now();
         let server = McpServer::new(state.clone());
         let payload =
             serde_json::from_value::<RefreshJobPayload>(job.payload.clone()).unwrap_or_default();
@@ -176,8 +186,17 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
             }
         };
 
+        let elapsed = job_started.elapsed();
+
         match result {
             Ok(()) => {
+                info!(
+                    job_id = job.id,
+                    crate_name = %job.crate_name,
+                    scope = %job.scope,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    "refresh job completed"
+                );
                 if let Err(error) = mark_refresh_job_finished(&state.db, job.id).await {
                     error!(job_id = job.id, %error, "failed to mark refresh job finished");
                 }
@@ -191,7 +210,7 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                 // is idempotent — safe to call unconditionally.
                 if job.scope == "crate" || job.scope == "crate_deep_refresh" {
                     for enrichment_scope in ["local_cache", "rustdoc_json"] {
-                        let _ = enqueue_or_get_refresh_job_id(
+                        if let Err(error) = enqueue_or_get_refresh_job_id(
                             &state.db,
                             &job.crate_name,
                             enrichment_scope,
@@ -199,7 +218,15 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                             false,
                             json!({"trigger": "proactive_enrich"}),
                         )
-                        .await;
+                        .await
+                        {
+                            warn!(
+                                crate_name = %job.crate_name,
+                                enrichment_scope,
+                                %error,
+                                "failed to enqueue proactive enrichment job"
+                            );
+                        }
                     }
                 }
             }
@@ -232,11 +259,20 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
                     .indexing_coordinator
                     .signal_completion(job.id, JobOutcome::Failed(error_message.clone()));
 
-                if !terminal {
+                if terminal {
+                    error!(
+                        job_id = job.id,
+                        crate_name = %job.crate_name,
+                        attempt = job.attempts,
+                        error = %error_message,
+                        "refresh job permanently failed after max attempts"
+                    );
+                } else {
                     warn!(
                         job_id = job.id,
                         crate_name = %job.crate_name,
                         attempt = job.attempts,
+                        error = %error_message,
                         "refresh job failed, queued for retry"
                     );
                 }
@@ -245,14 +281,13 @@ pub(crate) async fn run_refresh_worker(state: AppState) {
     }
 }
 
-pub(crate) async fn run_startup_rustdoc_json_refresh(state: AppState) {
+/// Runs a one-shot rustdoc JSON sync at startup with default page size.
+pub async fn run_startup_rustdoc_json_refresh(state: AppState) {
     run_startup_rustdoc_json_refresh_with_page_size(state, 100).await;
 }
 
-pub(crate) async fn run_startup_rustdoc_json_refresh_with_page_size(
-    state: AppState,
-    per_page: u32,
-) {
+/// Runs a one-shot rustdoc JSON sync at startup with a custom page size.
+pub async fn run_startup_rustdoc_json_refresh_with_page_size(state: AppState, per_page: u32) {
     let page_size = sync_per_page(Some(per_page));
     let server = McpServer::new(state);
 

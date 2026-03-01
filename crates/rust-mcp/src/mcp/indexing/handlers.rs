@@ -6,6 +6,7 @@ pub use rust_mcp_types::types::index::{
     IndexSyncCratesResponse,
 };
 use serde_json::Value;
+use tracing::{debug, info};
 
 use crate::db::indexing::{
     enqueue_or_get_refresh_job_id, fetch_index_coverage_counts, fetch_index_failures_by_scope,
@@ -23,11 +24,15 @@ use crate::mcp::utils::{
     sync_per_page,
 };
 
+/// Outcome of syncing a single crate's metadata from crates.io.
 #[derive(Debug)]
-pub(crate) struct SyncCrateOutcome {
-    pub(crate) versions_synced: usize,
-    pub(crate) dependencies_synced: usize,
-    pub(crate) selected_version: Option<String>,
+pub struct SyncCrateOutcome {
+    /// Number of crate versions that were persisted.
+    pub versions_synced: usize,
+    /// Number of dependency edges that were persisted.
+    pub dependencies_synced: usize,
+    /// The primary version selected for detailed indexing, if any.
+    pub selected_version: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -68,17 +73,28 @@ impl McpServer {
             })
     }
 
-    pub(crate) async fn sync_single_crate(
+    /// Fetches and persists a single crate's metadata, versions, and
+    /// dependencies from crates.io.
+    pub async fn sync_single_crate(
         &self,
         crate_name: &str,
         include_dependencies: bool,
     ) -> Result<SyncCrateOutcome, String> {
+        info!(%crate_name, "syncing crate metadata from crates.io");
+
         let crates_io = CratesIoClient::new(&self.state);
         let detail = crates_io
             .fetch_crate_detail(crate_name)
             .await?;
 
         let selected_version = Self::pick_primary_version(&detail);
+        debug!(
+            %crate_name,
+            selected_version = selected_version.as_deref().unwrap_or("none"),
+            total_versions = detail.versions.len(),
+            "selected primary version"
+        );
+
         let readme = if let Some(version) = selected_version.as_deref() {
             crates_io
                 .fetch_readme(crate_name, version)
@@ -86,6 +102,12 @@ impl McpServer {
         } else {
             None
         };
+        debug!(
+            %crate_name,
+            version = selected_version.as_deref().unwrap_or("none"),
+            has_readme = readme.is_some(),
+            "fetched readme"
+        );
 
         let dependencies = if include_dependencies {
             if let Some(version) = selected_version.as_deref() {
@@ -138,6 +160,14 @@ impl McpServer {
         .await
         .map_err(|e| format!("failed to persist sync for {crate_name}: {e}"))?;
 
+        info!(
+            %crate_name,
+            selected_version = selected_version.as_deref().unwrap_or("none"),
+            versions_synced = persisted.versions_synced,
+            dependencies_synced = persisted.dependencies_synced,
+            "crate sync persisted"
+        );
+
         Ok(SyncCrateOutcome {
             versions_synced: persisted.versions_synced,
             dependencies_synced: persisted.dependencies_synced,
@@ -145,7 +175,9 @@ impl McpServer {
         })
     }
 
-    pub(crate) async fn enqueue_refresh_job(
+    /// Enqueues a refresh job for the given crate and scope at the specified
+    /// priority.
+    pub async fn enqueue_refresh_job(
         &self,
         crate_name: &str,
         scope: &str,
@@ -167,7 +199,8 @@ impl McpServer {
         Ok(format!("refresh-job-{job_id}"))
     }
 
-    pub(crate) async fn handle_index_sync_crates(
+    /// Handles the `index.sync_crates` tool call.
+    pub async fn handle_index_sync_crates(
         &self,
         request: IndexSyncCratesRequest,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
@@ -250,7 +283,8 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn handle_index_status(
+    /// Handles the `index.status` tool call.
+    pub async fn handle_index_status(
         &self,
         _request: IndexStatusRequest,
     ) -> Result<Json<IndexStatusResponse>, String> {
@@ -359,7 +393,8 @@ impl McpServer {
         Ok(Some(clamped as u32))
     }
 
-    pub(crate) async fn handle_index_refresh(
+    /// Handles the `index.refresh` tool call.
+    pub async fn handle_index_refresh(
         &self,
         request: IndexRefreshRequest,
     ) -> Result<Json<IndexRefreshResponse>, String> {

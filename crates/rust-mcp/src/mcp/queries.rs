@@ -5,16 +5,22 @@ use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::server::McpServer;
 
 /// Outcome of looking up a crate, its latest version, and checking freshness.
-pub(crate) struct CrateContext {
+pub struct CrateContext {
+    /// Core crate metadata row.
     pub crate_row: CrateCoreRow,
+    /// The latest non-yanked version of the crate.
     pub latest_version: CrateVersionSelectionRow,
+    /// Result of the freshness check triggered by this interaction.
     pub freshness_outcome: InteractionRefreshOutcome,
 }
 
 /// Outcome of resolving a specific or latest version, with backfill tracking.
-pub(crate) struct VersionResolution {
+pub struct VersionResolution {
+    /// The resolved crate version row.
     pub selected_version: CrateVersionSelectionRow,
+    /// Whether a backfill refresh was enqueued for a missing version.
     pub refresh_enqueued: bool,
+    /// The job ID of the enqueued backfill refresh, if any.
     pub refresh_job_id: Option<String>,
 }
 
@@ -66,10 +72,7 @@ impl McpServer {
     /// This consolidates the crate-core-lookup + latest-version-lookup +
     /// ensure-freshness + conditional-re-fetch sequence used by most crate
     /// tools.
-    pub(crate) async fn fetch_crate_context(
-        &self,
-        crate_name: &str,
-    ) -> Result<CrateContext, String> {
+    pub async fn fetch_crate_context(&self, crate_name: &str) -> Result<CrateContext, String> {
         // On-demand indexing: ensure the crate is present before querying.
         self.ensure_crate_indexed(crate_name)
             .await?;
@@ -124,7 +127,7 @@ impl McpServer {
     /// If the requested version is missing, triggers a backfill and retries.
     ///
     /// Returns the resolved version row plus whether a refresh was enqueued.
-    pub(crate) async fn resolve_version_or_latest(
+    pub async fn resolve_version_or_latest(
         &self,
         ctx: &CrateContext,
         requested_version: Option<&str>,
@@ -192,7 +195,7 @@ impl McpServer {
     /// enqueues a `local_cache` scope job via the coordinator and waits.
     /// Failures are logged but do **not** propagate — the caller proceeds
     /// with whatever data is available.
-    pub(crate) async fn ensure_source_indexed(
+    pub async fn ensure_source_indexed(
         &self,
         crate_name: &str,
         crate_version_id: i64,
@@ -251,7 +254,7 @@ impl McpServer {
     /// Otherwise enqueues a `rustdoc_json` scope job via the coordinator and
     /// waits. Failures are logged but do **not** propagate — the caller
     /// proceeds with syn-only data.
-    pub(crate) async fn ensure_rustdoc_indexed(
+    pub async fn ensure_rustdoc_indexed(
         &self,
         crate_name: &str,
         crate_version_id: i64,

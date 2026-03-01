@@ -164,7 +164,8 @@ fn normalize_target_path(crate_name: &str, target_path: &str) -> String {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_re_exports(
+    /// Handles the `crate.re_exports` tool call.
+    pub async fn handle_crate_re_exports(
         &self,
         request: CrateReExportsRequest,
     ) -> Result<Json<CrateReExportsResponse>, String> {

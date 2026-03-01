@@ -8,12 +8,13 @@ use super::models::{
     CrateCompareCountsRow, CrateCompareVersionRow, CrateCoreRow, CrateDependencyRow,
     CrateDependentRow, CrateTypeInfoRow, CrateUsageSourceRow, CrateVersionHistoryRow,
     CrateVersionLicenseRow, CrateVersionSelectionRow, CrateVersionTimelineRow, DependencyCrateRow,
-    DependencyResolveEdgeRow, DependencyVersionRow, DocsSearchRow, ErrorTypeImplRow,
-    ErrorTypeReturnRow, ErrorTypeTypeRow, FeatureImpactDependencyRow, FeatureImpactFeatureRow,
-    GraphDependencyTraversalRow, GraphDependentTraversalRow, GraphLatestVersionRow,
-    HotspotSourceFileRow, ImportPathRow, ReExportSourceRow, ReExportSymbolKindRow,
-    RustdocReExportRow, SourceContextImplLookupRow, SourceContextLineLookupRow,
-    SourceContextTypeLookupRow, SourceReadRow, SourceSearchRow, SymbolSearchRow,
+    DependencyResolveEdgeRow, DependencyVersionRow, DeprecatedItemRow, DocsSearchRow,
+    ErrorTypeImplRow, ErrorTypeReturnRow, ErrorTypeTypeRow, FeatureImpactDependencyRow,
+    FeatureImpactFeatureRow, GraphDependencyTraversalRow, GraphDependentTraversalRow,
+    GraphLatestVersionRow, HotspotSourceFileRow, ImportPathRow, ReExportSourceRow,
+    ReExportSymbolKindRow, RustdocReExportRow, SourceContextImplLookupRow,
+    SourceContextLineLookupRow, SourceContextTypeLookupRow, SourceReadRow, SourceSearchRow,
+    SymbolSearchRow,
 };
 
 /// Executes a lightweight readiness probe against PostgreSQL.
@@ -2043,4 +2044,46 @@ pub async fn search_symbol_hits(
     qb.build_query_as::<SymbolSearchRow>()
         .fetch_all(db)
         .await
+}
+
+/// Lists all deprecated symbols and types for a crate version.
+///
+/// Unions rows from `symbols` and `crate_types` where either `deprecated_since`
+/// or `deprecated_note` is non-null, ordered by name then kind.
+pub async fn list_deprecated_items(
+    db: &PgPool,
+    crate_version_id: i64,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<DeprecatedItemRow>, sqlx::Error> {
+    sqlx::query_as::<_, DeprecatedItemRow>(
+        "SELECT
+             s.name,
+             s.kind,
+             s.deprecated_since,
+             s.deprecated_note,
+             s.canonical_path,
+             s.index_source
+         FROM symbols s
+         WHERE s.crate_version_id = $1
+           AND (s.deprecated_since IS NOT NULL OR s.deprecated_note IS NOT NULL)
+         UNION ALL
+         SELECT
+             ct.type_name AS name,
+             ct.kind,
+             ct.deprecated_since,
+             ct.deprecated_note,
+             ct.canonical_path,
+             ct.index_source
+         FROM crate_types ct
+         WHERE ct.crate_version_id = $1
+           AND (ct.deprecated_since IS NOT NULL OR ct.deprecated_note IS NOT NULL)
+         ORDER BY name ASC, kind ASC
+         LIMIT $2 OFFSET $3",
+    )
+    .bind(crate_version_id)
+    .bind(limit.max(1))
+    .bind(offset.max(0))
+    .fetch_all(db)
+    .await
 }

@@ -7,4 +7,6 @@
 #[path = "../common.rs"]
 mod common;
 
+mod crates_io;
+mod discovery;
 mod index;

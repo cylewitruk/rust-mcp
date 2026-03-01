@@ -4,34 +4,61 @@ use std::path::PathBuf;
 use clap::{Parser, ValueEnum};
 
 /// Canonical environment variable names used by server config.
-pub(crate) mod env_vars {
-    pub(crate) const MCP_HTTP_BIND: &str = "MCP_HTTP_BIND";
-    pub(crate) const MCP_SSE_KEEP_ALIVE_SECS: &str = "MCP_SSE_KEEP_ALIVE_SECS";
-    pub(crate) const MCP_SSE_RETRY_MS: &str = "MCP_SSE_RETRY_MS";
-    pub(crate) const MCP_STRICT_ACCEPT: &str = "MCP_STRICT_ACCEPT";
-    pub(crate) const DATABASE_URL: &str = "DATABASE_URL";
-    pub(crate) const CRATES_IO_BASE_URL: &str = "CRATES_IO_BASE_URL";
-    pub(crate) const CRATES_IO_USER_AGENT: &str = "CRATES_IO_USER_AGENT";
-    pub(crate) const CRATES_IO_TIMEOUT_SECS: &str = "CRATES_IO_TIMEOUT_SECS";
-    pub(crate) const CRATES_IO_MIN_INTERVAL_MS: &str = "CRATES_IO_MIN_INTERVAL_MS";
-    pub(crate) const DOCS_RS_BASE_URL: &str = "DOCS_RS_BASE_URL";
-    pub(crate) const DOCS_RS_MIN_INTERVAL_MS: &str = "DOCS_RS_MIN_INTERVAL_MS";
-    pub(crate) const OSV_MIN_INTERVAL_MS: &str = "OSV_MIN_INTERVAL_MS";
-    pub(crate) const DATABASE_MIN_CONNECTIONS: &str = "DATABASE_MIN_CONNECTIONS";
-    pub(crate) const DATABASE_MAX_CONNECTIONS: &str = "DATABASE_MAX_CONNECTIONS";
-    pub(crate) const MAX_CONCURRENT_REQUESTS: &str = "MAX_CONCURRENT_REQUESTS";
-    pub(crate) const PROMETHEUS_BIND: &str = "PROMETHEUS_BIND";
-    pub(crate) const AUTO_MIGRATE: &str = "AUTO_MIGRATE";
-    pub(crate) const CARGO_REGISTRY_DIR: &str = "CARGO_REGISTRY_DIR";
-    pub(crate) const MCP_DATA_DIR: &str = "MCP_DATA_DIR";
-    pub(crate) const RUSTSEC_DB_DIR: &str = "RUSTSEC_DB_DIR";
-    pub(crate) const RUSTDOC_JSON_DIR: &str = "RUSTDOC_JSON_DIR";
-    pub(crate) const SCHEMA_EXPORT_DIR: &str = "SCHEMA_EXPORT_DIR";
-    pub(crate) const RUST_LOG: &str = "RUST_LOG";
-    pub(crate) const LOG_FORMAT: &str = "LOG_FORMAT";
-    pub(crate) const REGISTRY_SCAN_INTERVAL_SECS: &str = "REGISTRY_SCAN_INTERVAL_SECS";
-    pub(crate) const REGISTRY_SCAN_BATCH_LIMIT: &str = "REGISTRY_SCAN_BATCH_LIMIT";
-    pub(crate) const PRE_WARM_CRATES: &str = "PRE_WARM_CRATES";
+pub mod env_vars {
+    /// HTTP bind address.
+    pub const MCP_HTTP_BIND: &str = "MCP_HTTP_BIND";
+    /// SSE keep-alive interval in seconds.
+    pub const MCP_SSE_KEEP_ALIVE_SECS: &str = "MCP_SSE_KEEP_ALIVE_SECS";
+    /// SSE retry delay in milliseconds.
+    pub const MCP_SSE_RETRY_MS: &str = "MCP_SSE_RETRY_MS";
+    /// Strict MCP Accept-header enforcement flag.
+    pub const MCP_STRICT_ACCEPT: &str = "MCP_STRICT_ACCEPT";
+    /// PostgreSQL connection string.
+    pub const DATABASE_URL: &str = "DATABASE_URL";
+    /// crates.io API base URL.
+    pub const CRATES_IO_BASE_URL: &str = "CRATES_IO_BASE_URL";
+    /// User-Agent header for outbound crates.io requests.
+    pub const CRATES_IO_USER_AGENT: &str = "CRATES_IO_USER_AGENT";
+    /// HTTP timeout for crates.io requests in seconds.
+    pub const CRATES_IO_TIMEOUT_SECS: &str = "CRATES_IO_TIMEOUT_SECS";
+    /// Minimum interval between crates.io requests in milliseconds.
+    pub const CRATES_IO_MIN_INTERVAL_MS: &str = "CRATES_IO_MIN_INTERVAL_MS";
+    /// docs.rs base URL.
+    pub const DOCS_RS_BASE_URL: &str = "DOCS_RS_BASE_URL";
+    /// Minimum interval between docs.rs requests in milliseconds.
+    pub const DOCS_RS_MIN_INTERVAL_MS: &str = "DOCS_RS_MIN_INTERVAL_MS";
+    /// Minimum interval between OSV requests in milliseconds.
+    pub const OSV_MIN_INTERVAL_MS: &str = "OSV_MIN_INTERVAL_MS";
+    /// Minimum database pool connections.
+    pub const DATABASE_MIN_CONNECTIONS: &str = "DATABASE_MIN_CONNECTIONS";
+    /// Maximum database pool connections.
+    pub const DATABASE_MAX_CONNECTIONS: &str = "DATABASE_MAX_CONNECTIONS";
+    /// Maximum concurrent inbound HTTP requests.
+    pub const MAX_CONCURRENT_REQUESTS: &str = "MAX_CONCURRENT_REQUESTS";
+    /// Prometheus metrics exporter bind address.
+    pub const PROMETHEUS_BIND: &str = "PROMETHEUS_BIND";
+    /// Whether to auto-run SQL migrations on startup.
+    pub const AUTO_MIGRATE: &str = "AUTO_MIGRATE";
+    /// Path to the mounted cargo registry directory.
+    pub const CARGO_REGISTRY_DIR: &str = "CARGO_REGISTRY_DIR";
+    /// Server local data directory.
+    pub const MCP_DATA_DIR: &str = "MCP_DATA_DIR";
+    /// Optional path to a local RustSec advisory-db checkout.
+    pub const RUSTSEC_DB_DIR: &str = "RUSTSEC_DB_DIR";
+    /// Optional directory for pre-generated rustdoc JSON files.
+    pub const RUSTDOC_JSON_DIR: &str = "RUSTDOC_JSON_DIR";
+    /// Optional directory for exporting tool schema artifacts.
+    pub const SCHEMA_EXPORT_DIR: &str = "SCHEMA_EXPORT_DIR";
+    /// Tracing filter (RUST_LOG style).
+    pub const RUST_LOG: &str = "RUST_LOG";
+    /// Log output format.
+    pub const LOG_FORMAT: &str = "LOG_FORMAT";
+    /// Seconds between periodic registry discovery scans.
+    pub const REGISTRY_SCAN_INTERVAL_SECS: &str = "REGISTRY_SCAN_INTERVAL_SECS";
+    /// Max new crate jobs per discovery scan.
+    pub const REGISTRY_SCAN_BATCH_LIMIT: &str = "REGISTRY_SCAN_BATCH_LIMIT";
+    /// Comma-separated crate names to pre-warm at startup.
+    pub const PRE_WARM_CRATES: &str = "PRE_WARM_CRATES";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.

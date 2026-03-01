@@ -918,3 +918,151 @@ async fn crate_api_diff_prefers_rustdoc_rows_when_dual_source_symbols_exist() {
         "expected dual_source signature_changed entry: {payload}"
     );
 }
+
+#[tokio::test]
+async fn crate_deprecated_returns_seeded_deprecated_items() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let source_file_id = seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/deprecated.rs",
+        Some("rust"),
+        "#[deprecated(since = \"1.0.100\", note = \"use new_parse instead\")]\npub fn old_parse() \
+         -> bool { false }\n#[deprecated]\npub struct OldConfig {}",
+    )
+    .await
+    .expect("failed to seed deprecated source file");
+
+    // Seed a deprecated symbol.
+    sqlx::query(
+        "INSERT INTO symbols (
+            crate_version_id,
+            source_file_id,
+            name,
+            kind,
+            signature,
+            visibility,
+            start_line,
+            end_line,
+            index_source,
+            deprecated_since,
+            deprecated_note
+         ) VALUES (
+            $1, $2, 'old_parse', 'function', 'pub fn old_parse() -> bool', 'public', 1, 1,
+            'fixture', '1.0.100', 'use new_parse instead'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed deprecated symbol");
+
+    // Seed a deprecated type.
+    sqlx::query(
+        "INSERT INTO crate_types (
+            crate_version_id,
+            source_file_id,
+            type_name,
+            kind,
+            visibility,
+            generic_params,
+            fields,
+            variants,
+            start_line,
+            end_line,
+            index_source,
+            deprecated_since,
+            deprecated_note
+         ) VALUES (
+            $1, $2, 'OldConfig', 'struct', 'public', $3::JSONB, $4::JSONB, $5::JSONB, 3, 3,
+            'fixture', NULL, 'use Config instead'
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .bind(json!([]))
+    .bind(json!([]))
+    .bind(json!([]))
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed deprecated crate_type");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate.deprecated",
+            json!({
+                "crate_name": "serde_json",
+                "limit": 50
+            }),
+        )
+        .await
+        .expect("crate.deprecated call failed");
+    let payload = common::structured_content(&response);
+
+    let count = payload
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    assert!(count >= 2, "expected at least 2 deprecated items, got {count}: {payload}");
+
+    let items = payload
+        .get("deprecated_items")
+        .and_then(Value::as_array)
+        .expect("deprecated_items should be an array");
+
+    assert!(
+        items.iter().any(|item| {
+            item.get("name")
+                .and_then(Value::as_str)
+                == Some("old_parse")
+                && item
+                    .get("deprecated_note")
+                    .and_then(Value::as_str)
+                    == Some("use new_parse instead")
+        }),
+        "expected old_parse with deprecation note in items: {items:?}"
+    );
+    assert!(
+        items.iter().any(|item| {
+            item.get("name")
+                .and_then(Value::as_str)
+                == Some("OldConfig")
+        }),
+        "expected OldConfig in deprecated items: {items:?}"
+    );
+
+    assert!(
+        payload
+            .get("has_more")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence")
+            .is_some()
+    );
+    assert!(
+        payload
+            .get("confidence_assessment")
+            .is_some()
+    );
+}

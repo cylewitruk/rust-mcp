@@ -112,7 +112,8 @@ fn evaluate_policy(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_license_check(
+    /// Handles the `crate.license_check` tool call.
+    pub async fn handle_crate_license_check(
         &self,
         request: CrateLicenseCheckRequest,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {

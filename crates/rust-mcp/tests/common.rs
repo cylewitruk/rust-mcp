@@ -11,7 +11,7 @@ use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 use serde_json::Value;
 
-pub(crate) fn test_config(database_url: String) -> Config {
+pub fn test_config(database_url: String) -> Config {
     Config {
         http_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
         mcp_sse_keep_alive_secs: 15,

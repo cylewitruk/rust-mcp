@@ -211,7 +211,7 @@ async fn rust_mcp_container_negotiates_initialize_for_all_recognized_protocol_ve
     let rust_mcp = start_ready_rust_mcp().await;
     let client = reqwest::Client::new();
 
-    let requested_versions = ["2024-11-05", "2025-03-26", "2025-06-18"];
+    let requested_versions = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
 
     for (index, requested_protocol_version) in requested_versions
         .into_iter()

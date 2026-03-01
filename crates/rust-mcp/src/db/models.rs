@@ -1012,3 +1012,15 @@ pub struct DependencyResolveEdgeRow {
     pub optional: bool,
     pub features: Value,
 }
+
+/// One deprecated item row used by `crate.deprecated`.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct DeprecatedItemRow {
+    pub name: String,
+    pub kind: String,
+    pub deprecated_since: Option<String>,
+    pub deprecated_note: Option<String>,
+    pub canonical_path: Option<String>,
+    pub index_source: String,
+}

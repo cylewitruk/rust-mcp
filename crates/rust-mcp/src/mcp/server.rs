@@ -4,8 +4,11 @@ use std::time::Instant;
 use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{Meta, ProgressNotificationParam, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    Meta, ProgressNotificationParam, ProtocolVersion, ServerCapabilities, ServerInfo,
+};
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
+use rust_mcp_types::protocol::SUPPORTED_MCP_PROTOCOL_VERSION;
 use rust_mcp_types::types::common::PingRequest;
 use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
 use tokio::time::Duration;
@@ -30,6 +33,7 @@ use super::tools::krate::compatibility::{
     CrateCompatibilityMatrixRequest, CrateCompatibilityMatrixResponse, CrateCompatibilityRequest,
     CrateCompatibilityResponse,
 };
+use super::tools::krate::deprecated::{CrateDeprecatedRequest, CrateDeprecatedResponse};
 use super::tools::krate::derive_macros::{CrateDeriveMacrosRequest, CrateDeriveMacrosResponse};
 use super::tools::krate::error_types::{CrateErrorTypesRequest, CrateErrorTypesResponse};
 use super::tools::krate::features::{CrateFeaturesRequest, CrateFeaturesResponse};
@@ -50,13 +54,16 @@ use super::tools::source::search::{SourceSearchRequest, SourceSearchResponse};
 use super::tools::symbol::{SymbolSearchRequest, SymbolSearchResponse};
 use crate::state::AppState;
 
+/// MCP protocol server that registers and dispatches tool calls.
 #[derive(Debug, Clone)]
 pub struct McpServer {
-    pub(crate) state: AppState,
+    /// Shared application state.
+    pub state: AppState,
     tool_router: ToolRouter<Self>,
 }
 
 impl McpServer {
+    /// Creates a new server instance with tool routes initialized.
     pub fn new(state: AppState) -> Self {
         Self {
             state,
@@ -452,6 +459,26 @@ impl McpServer {
     }
 
     #[tool(
+        name = "crate.deprecated",
+        description = "Return all deprecated symbols and types in a crate version, with \
+                       deprecation notes and suggested replacements where available."
+    )]
+    async fn crate_deprecated(
+        &self,
+        meta: Meta,
+        client: Peer<RoleServer>,
+        Parameters(request): Parameters<CrateDeprecatedRequest>,
+    ) -> Result<Json<CrateDeprecatedResponse>, String> {
+        self.instrument_tool_with_progress(
+            "crate.deprecated",
+            &meta,
+            &client,
+            self.handle_crate_deprecated(request),
+        )
+        .await
+    }
+
+    #[tool(
         name = "crate.derive_macros",
         description = "Return indexed proc-macro exports (derive, attribute, and function-like) \
                        for a crate version."
@@ -834,7 +861,17 @@ impl McpServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
+        // Construct ProtocolVersion from the canonical constant.  The inner field of
+        // ProtocolVersion is private (rmcp crate), so we go through serde; unknown
+        // version strings are accepted and wrapped in Cow::Owned by the Deserialize
+        // impl.
+        let protocol_version = serde_json::from_value::<ProtocolVersion>(
+            serde_json::Value::String(SUPPORTED_MCP_PROTOCOL_VERSION.to_string()),
+        )
+        .unwrap_or(ProtocolVersion::V_2025_06_18);
+
         ServerInfo {
+            protocol_version,
             instructions: Some(
                 "Local Rust dependency intelligence MCP server. Crates are indexed on-demand when \
                  first requested. Use crate.search and crate.intel for fast lookup. The index.* \

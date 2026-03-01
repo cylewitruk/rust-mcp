@@ -5,15 +5,18 @@ use serde_json::Value;
 
 use super::models::{CrateSearchRow, ResponseFreshnessSource};
 
-pub(crate) const DEFAULT_SYNC_QUERY: &str = "rust";
+/// Default search query used for crate sync operations.
+pub const DEFAULT_SYNC_QUERY: &str = "rust";
 
-pub(crate) fn normalize_optional(value: Option<String>) -> Option<String> {
+/// Trims and returns `None` for empty or whitespace-only strings.
+pub fn normalize_optional(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
 }
 
-pub(crate) fn normalize_required(value: String, field: &str) -> Result<String, String> {
+/// Trims whitespace and returns an error if the result is empty.
+pub fn normalize_required(value: String, field: &str) -> Result<String, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(format!("{field} must not be empty"));
@@ -21,37 +24,43 @@ pub(crate) fn normalize_required(value: String, field: &str) -> Result<String, S
     Ok(trimmed.to_string())
 }
 
-pub(crate) fn search_limit(value: Option<u32>) -> u32 {
+/// Clamps a crate search result limit (default 10, range 1..=50).
+pub fn search_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(10)
         .clamp(1, 50)
 }
 
-pub(crate) fn source_search_limit(value: Option<u32>) -> u32 {
+/// Clamps a source search result limit (default 20, range 1..=100).
+pub fn source_search_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(20)
         .clamp(1, 100)
 }
 
-pub(crate) fn symbol_search_limit(value: Option<u32>) -> u32 {
+/// Clamps a symbol search result limit (default 25, range 1..=200).
+pub fn symbol_search_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(25)
         .clamp(1, 200)
 }
 
-pub(crate) fn docs_search_limit(value: Option<u32>) -> u32 {
+/// Clamps a docs search result limit (default 25, range 1..=200).
+pub fn docs_search_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(25)
         .clamp(1, 200)
 }
 
-pub(crate) fn source_read_end_line(value: Option<u32>) -> u32 {
+/// Clamps a source-read end line (default 200, range 1..=2000).
+pub fn source_read_end_line(value: Option<u32>) -> u32 {
     value
         .unwrap_or(200)
         .clamp(1, 2_000)
 }
 
-pub(crate) fn path_glob_to_like(glob: &str) -> String {
+/// Converts a file-path glob pattern to a SQL `LIKE` expression.
+pub fn path_glob_to_like(glob: &str) -> String {
     let mut escaped = String::with_capacity(glob.len() + 8);
     for ch in glob.chars() {
         match ch {
@@ -67,117 +76,138 @@ pub(crate) fn path_glob_to_like(glob: &str) -> String {
     escaped
 }
 
-pub(crate) fn version_limit(value: Option<u32>) -> u32 {
+/// Clamps a version listing limit (default 100, range 1..=500).
+pub fn version_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)
         .clamp(1, 500)
 }
 
-pub(crate) fn dependents_limit(value: Option<u32>) -> u32 {
+/// Clamps a dependents listing limit (default 25, range 1..=200).
+pub fn dependents_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(25)
         .clamp(1, 200)
 }
 
-pub(crate) fn sync_page(value: Option<u32>) -> u32 {
+/// Resolves a sync page number (default 1, minimum 1).
+pub fn sync_page(value: Option<u32>) -> u32 {
     value.unwrap_or(1).max(1)
 }
 
-pub(crate) fn sync_per_page(value: Option<u32>) -> u32 {
+/// Clamps a sync per-page size (default 25, range 1..=100).
+pub fn sync_per_page(value: Option<u32>) -> u32 {
     value
         .unwrap_or(25)
         .clamp(1, 100)
 }
 
-pub(crate) fn graph_depth(value: Option<u32>) -> u32 {
+/// Clamps a dependency graph traversal depth (default 1, range 1..=4).
+pub fn graph_depth(value: Option<u32>) -> u32 {
     value.unwrap_or(1).clamp(1, 4)
 }
 
-pub(crate) fn api_diff_limit(value: Option<u32>) -> u32 {
+/// Clamps an API diff entry limit (default 500, range 1..=2000).
+pub fn api_diff_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(500)
         .clamp(1, 2_000)
 }
 
-pub(crate) fn alternatives_limit(value: Option<u32>) -> u32 {
+/// Clamps an alternatives listing limit (default 10, range 1..=50).
+pub fn alternatives_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(10)
         .clamp(1, 50)
 }
 
-pub(crate) fn hotspots_limit(value: Option<u32>) -> u32 {
+/// Clamps a hotspots listing limit (default 100, range 1..=500).
+pub fn hotspots_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)
         .clamp(1, 500)
 }
 
-pub(crate) fn crate_api_limit(value: Option<u32>) -> u32 {
+/// Clamps a crate API surface listing limit (default 200, range 1..=1000).
+pub fn crate_api_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(200)
         .clamp(1, 1_000)
 }
 
-pub(crate) fn trait_impls_limit(value: Option<u32>) -> u32 {
+/// Clamps a trait implementations listing limit (default 200, range 1..=1000).
+pub fn trait_impls_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(200)
         .clamp(1, 1_000)
 }
 
-pub(crate) fn dependency_resolve_limit(value: Option<u32>) -> u32 {
+/// Clamps a dependency resolution listing limit (default 100, range 1..=1000).
+pub fn dependency_resolve_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)
         .clamp(1, 1_000)
 }
 
-pub(crate) fn compatibility_matrix_version_limit(value: Option<u32>) -> u32 {
+/// Clamps a compatibility matrix version limit (default 5, range 1..=20).
+pub fn compatibility_matrix_version_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(5)
         .clamp(1, 20)
 }
 
-pub(crate) fn compatibility_matrix_max_pairs(value: Option<u32>) -> u32 {
+/// Clamps a compatibility matrix pair limit (default 25, range 1..=200).
+pub fn compatibility_matrix_max_pairs(value: Option<u32>) -> u32 {
     value
         .unwrap_or(25)
         .clamp(1, 200)
 }
 
-pub(crate) fn usage_patterns_limit(value: Option<u32>) -> u32 {
+/// Clamps a usage-patterns listing limit (default 20, range 1..=200).
+pub fn usage_patterns_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(20)
         .clamp(1, 200)
 }
 
-pub(crate) fn re_exports_limit(value: Option<u32>) -> u32 {
+/// Clamps a re-exports listing limit (default 200, range 1..=1000).
+pub fn re_exports_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(200)
         .clamp(1, 1_000)
 }
 
-pub(crate) fn import_path_limit(value: Option<u32>) -> u32 {
+/// Clamps an import-path listing limit (default 10, range 1..=100).
+pub fn import_path_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(10)
         .clamp(1, 100)
 }
 
-pub(crate) fn error_types_limit(value: Option<u32>) -> u32 {
+/// Clamps an error-types listing limit (default 100, range 1..=500).
+pub fn error_types_limit(value: Option<u32>) -> u32 {
     value
         .unwrap_or(100)
         .clamp(1, 500)
 }
 
-pub(crate) fn feature_impact_heavy_threshold(value: Option<u32>) -> u32 {
+/// Clamps the heavy-feature threshold for feature-impact analysis (default 5,
+/// range 1..=100).
+pub fn feature_impact_heavy_threshold(value: Option<u32>) -> u32 {
     value
         .unwrap_or(5)
         .clamp(1, 100)
 }
 
-pub(crate) fn readme_limit(value: Option<u32>) -> usize {
+/// Clamps a readme character limit (default 25000, range 500..=200000).
+pub fn readme_limit(value: Option<u32>) -> usize {
     value
         .unwrap_or(25_000)
         .clamp(500, 200_000) as usize
 }
 
-pub(crate) fn dedupe_strings(mut values: Vec<String>) -> Vec<String> {
+/// Trims, deduplicates, and sorts a list of strings.
+pub fn dedupe_strings(mut values: Vec<String>) -> Vec<String> {
     values = values
         .into_iter()
         .map(|v| v.trim().to_string())
@@ -188,7 +218,8 @@ pub(crate) fn dedupe_strings(mut values: Vec<String>) -> Vec<String> {
     values
 }
 
-pub(crate) fn value_to_string_vec(value: &Value) -> Vec<String> {
+/// Extracts string elements from a JSON array, ignoring non-string values.
+pub fn value_to_string_vec(value: &Value) -> Vec<String> {
     match value {
         Value::Array(items) => items
             .iter()
@@ -199,10 +230,9 @@ pub(crate) fn value_to_string_vec(value: &Value) -> Vec<String> {
     }
 }
 
-pub(crate) fn truncate_optional_text(
-    value: Option<String>,
-    max_chars: usize,
-) -> (Option<String>, bool) {
+/// Truncates optional text to `max_chars`, returning whether truncation
+/// occurred.
+pub fn truncate_optional_text(value: Option<String>, max_chars: usize) -> (Option<String>, bool) {
     let Some(text) = value else {
         return (None, false);
     };
@@ -216,7 +246,8 @@ pub(crate) fn truncate_optional_text(
     (Some(truncated), was_truncated)
 }
 
-pub(crate) fn match_reasons(
+/// Determines which fields of a crate search row match the given query/filter.
+pub fn match_reasons(
     row: &CrateSearchRow,
     query: Option<&str>,
     category: Option<&str>,
@@ -289,20 +320,23 @@ pub(crate) fn match_reasons(
 
 /// Trait implemented by all cursor token structs.
 /// Provides common validation (version check, limit > 0).
-pub(crate) trait CursorToken: Serialize + DeserializeOwned {
+pub trait CursorToken: Serialize + DeserializeOwned {
+    /// Token schema version (must be 1 for current cursors).
     fn version(&self) -> u8;
+    /// Number of items per page.
     fn limit(&self) -> u32;
+    /// Zero-based item offset.
     fn offset(&self) -> u32;
 }
 
 /// Decode a cursor token from its base64url-encoded string representation.
 /// Validates version == 1 and limit > 0.
-pub(crate) fn decode_cursor<T: CursorToken>(token: &str) -> Result<T, String> {
+pub fn decode_cursor<T: CursorToken>(token: &str) -> Result<T, String> {
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(token)
-        .map_err(|_| "cursor is invalid".to_string())?;
-    let decoded =
-        serde_json::from_slice::<T>(&bytes).map_err(|_| "cursor is invalid".to_string())?;
+        .map_err(|e| format!("cursor is invalid (base64 decode failed: {e})"))?;
+    let decoded = serde_json::from_slice::<T>(&bytes)
+        .map_err(|e| format!("cursor is invalid (deserialization failed: {e})"))?;
 
     if decoded.version() != 1 {
         return Err("cursor version is not supported".to_string());
@@ -315,7 +349,7 @@ pub(crate) fn decode_cursor<T: CursorToken>(token: &str) -> Result<T, String> {
 }
 
 /// Encode a cursor token to its base64url string representation.
-pub(crate) fn encode_cursor<T: CursorToken>(token: &T) -> Result<String, String> {
+pub fn encode_cursor<T: CursorToken>(token: &T) -> Result<String, String> {
     let bytes =
         serde_json::to_vec(token).map_err(|e| format!("cursor serialization failed: {e}"))?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
@@ -327,9 +361,12 @@ pub(crate) fn encode_cursor<T: CursorToken>(token: &T) -> Result<String, String>
 
 /// Resolved pagination parameters for a tool query.
 #[derive(Debug)]
-pub(crate) struct PaginationParams {
+pub struct PaginationParams {
+    /// Zero-based item offset into the result set.
     pub offset: u32,
+    /// Maximum items to return.
     pub limit: u32,
+    /// One-based page number corresponding to the offset.
     pub effective_page: u32,
 }
 
@@ -339,7 +376,7 @@ pub(crate) struct PaginationParams {
 /// that the caller's `requested_limit` matches (if the caller provided an
 /// explicit limit). Otherwise computes offset from `page` and
 /// `requested_limit`.
-pub(crate) fn resolve_pagination<T: CursorToken>(
+pub fn resolve_pagination<T: CursorToken>(
     cursor_token: Option<&T>,
     explicit_limit_provided: bool,
     requested_limit: u32,
@@ -368,9 +405,12 @@ pub(crate) fn resolve_pagination<T: CursorToken>(
 // ---------------------------------------------------------------------------
 
 /// Result of applying a pagination limit to a result set.
-pub(crate) struct PaginatedResult<T> {
+pub struct PaginatedResult<T> {
+    /// Items for the current page.
     pub items: Vec<T>,
+    /// Whether additional pages exist beyond the current one.
     pub has_more: bool,
+    /// Opaque cursor token for fetching the next page, if any.
     pub next_cursor: Option<String>,
 }
 
@@ -379,7 +419,7 @@ pub(crate) struct PaginatedResult<T> {
 ///
 /// `build_next_token` is called only when `has_more` is true, receiving
 /// the next offset. It should return a cursor token struct for encoding.
-pub(crate) fn apply_pagination_limit<T, C: CursorToken>(
+pub fn apply_pagination_limit<T, C: CursorToken>(
     mut items: Vec<T>,
     limit: u32,
     offset: u32,
@@ -403,7 +443,7 @@ pub(crate) fn apply_pagination_limit<T, C: CursorToken>(
 
 /// Build the standard two-entry freshness source array used by crate-scoped
 /// tools.
-pub(crate) fn build_crate_freshness_sources(
+pub fn build_crate_freshness_sources(
     local_checked_at: Option<String>,
     crates_io_status: &str,
 ) -> Vec<ResponseFreshnessSource> {
@@ -791,14 +831,22 @@ mod tests {
     #[test]
     fn cursor_decode_bad_base64() {
         let result = decode_cursor::<TestCursorToken>("!!!not-base64!!!");
-        assert_eq!(result.unwrap_err(), "cursor is invalid");
+        let err = result.unwrap_err();
+        assert!(
+            err.starts_with("cursor is invalid (base64 decode failed:"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
     fn cursor_decode_bad_json() {
         let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not json");
         let result = decode_cursor::<TestCursorToken>(&encoded);
-        assert_eq!(result.unwrap_err(), "cursor is invalid");
+        let err = result.unwrap_err();
+        assert!(
+            err.starts_with("cursor is invalid (deserialization failed:"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

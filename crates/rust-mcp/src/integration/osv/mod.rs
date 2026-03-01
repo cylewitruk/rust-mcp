@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::json;
+use tracing::debug;
 
 use crate::state::{AppState, OutboundSource};
 
@@ -75,6 +76,7 @@ impl<'a> OsvDevClient<'a> {
         self.state
             .acquire_outbound_slot(OutboundSource::Osv)
             .await;
+        debug!(%crate_name, url = OSV_QUERY_URL, "OSV query request");
         let response = self
             .state
             .http

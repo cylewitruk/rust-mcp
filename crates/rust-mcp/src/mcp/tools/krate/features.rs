@@ -4,6 +4,7 @@ use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateFeatureFlag, CrateFeaturesRequest, CrateFeaturesResponse,
 };
+use tracing::warn;
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
@@ -77,7 +78,8 @@ fn transitive_feature_enables(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_features(
+    /// Handles the `crate.features` tool call.
+    pub async fn handle_crate_features(
         &self,
         request: CrateFeaturesRequest,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
@@ -105,9 +107,16 @@ impl McpServer {
                 })?;
 
         if rows.is_empty() {
-            let _ = self
+            if let Err(error) = self
                 .sync_single_crate(&ctx.crate_row.name, false)
-                .await;
+                .await
+            {
+                warn!(
+                    crate_name = %ctx.crate_row.name,
+                    %error,
+                    "best-effort crate refresh failed while fetching features"
+                );
+            }
             rows = tools::list_crate_features_for_version(
                 &self.state.db,
                 resolution.selected_version.id,

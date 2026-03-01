@@ -35,14 +35,21 @@ struct IndexedCacheEntry {
     files: Vec<IndexedSourceFile>,
 }
 
+/// Outcome of a local cargo registry source cache refresh.
 #[derive(Debug, Default)]
-pub(crate) struct LocalCacheRefreshOutcome {
-    pub(crate) scanned_versions: usize,
-    pub(crate) scanned_files: usize,
-    pub(crate) upserted_files: usize,
-    pub(crate) deleted_files: usize,
-    pub(crate) touched_versions: Vec<String>,
-    pub(crate) errors: Vec<String>,
+pub struct LocalCacheRefreshOutcome {
+    /// Number of crate versions whose source directories were scanned.
+    pub scanned_versions: usize,
+    /// Total number of source files encountered during the scan.
+    pub scanned_files: usize,
+    /// Number of source files inserted or updated in the database.
+    pub upserted_files: usize,
+    /// Number of stale source files removed from the database.
+    pub deleted_files: usize,
+    /// List of `crate@version` strings that were touched during the refresh.
+    pub touched_versions: Vec<String>,
+    /// Errors encountered during the refresh, one per failed operation.
+    pub errors: Vec<String>,
 }
 
 fn extension_language(path: &Path) -> Option<String> {
@@ -648,7 +655,8 @@ fn extract_rust_symbols(content: &str) -> Result<IndexedExtractionBatch, String>
 }
 
 impl McpServer {
-    pub(crate) async fn sync_local_source_cache(
+    /// Refreshes the local source file cache from the cargo registry directory.
+    pub async fn sync_local_source_cache(
         &self,
         crate_name: Option<String>,
         query: Option<String>,
@@ -745,6 +753,12 @@ impl McpServer {
             let Some(mapped) = version_map.get(&dir_name) else {
                 continue;
             };
+
+            tracing::info!(
+                crate_name = %mapped.crate_name,
+                version = %mapped.version,
+                "indexing source files from local cargo registry"
+            );
 
             let files = match scan_cache_version_dir(&version_dir, path_contains.as_deref()) {
                 Ok(files) => files,
@@ -857,6 +871,14 @@ impl McpServer {
             outcome
                 .touched_versions
                 .push(format!("{}@{}", entry.crate_name, entry.version));
+
+            tracing::debug!(
+                crate_name = %entry.crate_name,
+                version = %entry.version,
+                files = seen_paths.len(),
+                deleted,
+                "source file indexing complete for crate version"
+            );
         }
 
         Ok(outcome)

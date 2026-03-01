@@ -6,8 +6,6 @@ services:
       dockerfile: Dockerfile
     container_name: rust-mcp-server
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
     environment:
       OUTBOUND_FIREWALL: ${OUTBOUND_FIREWALL:-true}
       OUTBOUND_ALLOWLIST: ${OUTBOUND_ALLOWLIST:-crates.io,static.crates.io,docs.rs,api.osv.dev}

@@ -25,24 +25,24 @@ const ON_DEMAND_TIMEOUT: Duration = Duration::from_secs(45);
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Interactive on-demand requests from tool handlers.
-pub(crate) const PRIORITY_ON_DEMAND: i32 = 1;
+pub const PRIORITY_ON_DEMAND: i32 = 1;
 /// Follow-up deep refresh after a missing-version backfill.
-pub(crate) const PRIORITY_BACKFILL: i32 = 5;
+pub const PRIORITY_BACKFILL: i32 = 5;
 /// Background freshness-triggered deep refresh.
-pub(crate) const PRIORITY_FRESHNESS: i32 = 10;
+pub const PRIORITY_FRESHNESS: i32 = 10;
 /// Pre-warm list crates indexed first at startup.
-pub(crate) const PRIORITY_PRE_WARM: i32 = 25;
+pub const PRIORITY_PRE_WARM: i32 = 25;
 /// Crates discovered via the periodic registry scan.
-pub(crate) const PRIORITY_DISCOVERY: i32 = 50;
+pub const PRIORITY_DISCOVERY: i32 = 50;
 /// Proactive source/rustdoc enrichment enqueued after a crate job succeeds.
-pub(crate) const PRIORITY_PROACTIVE_ENRICH: i32 = 75;
+pub const PRIORITY_PROACTIVE_ENRICH: i32 = 75;
 /// Default / explicitly scheduled refresh jobs.
 #[allow(dead_code)]
-pub(crate) const PRIORITY_DEFAULT: i32 = 100;
+pub const PRIORITY_DEFAULT: i32 = 100;
 
 /// Terminal outcome of a tracked indexing job.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum JobOutcome {
+pub enum JobOutcome {
     /// Job has not completed yet.
     Pending,
     /// Job finished successfully.
@@ -54,8 +54,8 @@ pub(crate) enum JobOutcome {
 
 /// In-process coordinator that bridges tool-handler waiters with the
 /// background refresh worker.
-#[derive(Debug)]
-pub(crate) struct IndexingCoordinator {
+#[derive(Debug, Default)]
+pub struct IndexingCoordinator {
     /// Wakes the worker when a high-priority on-demand job is enqueued.
     worker_notify: Notify,
     /// Per-job completion channels, keyed by `refresh_jobs.id`.
@@ -66,7 +66,8 @@ pub(crate) struct IndexingCoordinator {
 }
 
 impl IndexingCoordinator {
-    pub(crate) fn new() -> Self {
+    /// Creates a new coordinator with no pending waiters.
+    pub fn new() -> Self {
         Self {
             worker_notify: Notify::new(),
             waiters: RwLock::new(HashMap::new()),
@@ -76,7 +77,7 @@ impl IndexingCoordinator {
     /// Enqueue a high-priority on-demand indexing job for the given scope and
     /// register a completion waiter. Returns the raw job ID for subsequent
     /// [`wait_for_job`](Self::wait_for_job) calls.
-    pub(crate) async fn enqueue_on_demand(
+    pub async fn enqueue_on_demand(
         &self,
         db: &PgPool,
         crate_name: &str,
@@ -113,7 +114,7 @@ impl IndexingCoordinator {
 
     /// Block until the given job reaches a terminal state or the timeout
     /// expires. Returns the observed [`JobOutcome`].
-    pub(crate) async fn wait_for_job(&self, job_id: i64) -> Result<JobOutcome, String> {
+    pub async fn wait_for_job(&self, job_id: i64) -> Result<JobOutcome, String> {
         let rx = {
             let waiters = self
                 .waiters
@@ -158,7 +159,7 @@ impl IndexingCoordinator {
     /// Called by the refresh worker after a job reaches a terminal state
     /// (success or failure). Sends the outcome to all waiting subscribers
     /// and removes the entry from the map.
-    pub(crate) fn signal_completion(&self, job_id: i64, outcome: JobOutcome) {
+    pub fn signal_completion(&self, job_id: i64, outcome: JobOutcome) {
         let mut waiters = self
             .waiters
             .write()
@@ -173,7 +174,7 @@ impl IndexingCoordinator {
     /// Returns a future that resolves when a worker wake-up is requested.
     /// Intended for use in the worker's `tokio::select!` alongside the
     /// poll-interval sleep.
-    pub(crate) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
+    pub fn notified(&self) -> tokio::sync::futures::Notified<'_> {
         self.worker_notify.notified()
     }
 
@@ -181,7 +182,7 @@ impl IndexingCoordinator {
     /// Used by background tasks (e.g. registry discovery) that enqueue jobs
     /// via [`enqueue_or_get_refresh_job_id`] directly and do not wait for
     /// the result.
-    pub(crate) fn notify_worker(&self) {
+    pub fn notify_worker(&self) {
         self.worker_notify
             .notify_one();
     }

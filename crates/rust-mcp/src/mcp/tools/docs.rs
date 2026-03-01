@@ -3,6 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use rmcp::Json;
 pub use rust_mcp_types::types::docs::{DocsSearchHit, DocsSearchRequest, DocsSearchResponse};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::db::{indexing, tools};
 use crate::integration::docs_rs::{DocsRsClient, discover_docs_paths, extract_title, strip_html};
@@ -48,11 +49,16 @@ impl CursorToken for DocsCursorToken {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct DocsRefreshOutcome {
-    pub(crate) versions_processed: usize,
-    pub(crate) pages_written: usize,
-    pub(crate) touched_versions: Vec<String>,
-    pub(crate) errors: Vec<String>,
+/// Outcome of a docs page refresh operation.
+pub struct DocsRefreshOutcome {
+    /// Number of crate versions whose documentation was processed.
+    pub versions_processed: usize,
+    /// Number of documentation pages written to the database.
+    pub pages_written: usize,
+    /// Version strings that were touched during the refresh.
+    pub touched_versions: Vec<String>,
+    /// Errors encountered during the refresh.
+    pub errors: Vec<String>,
 }
 
 const DOCS_DISCOVERY_MAX_PAGES: usize = 64;
@@ -79,7 +85,8 @@ fn docs_snippet(content: &str, query: &str) -> String {
 }
 
 impl McpServer {
-    pub(crate) async fn sync_docs_pages(
+    /// Fetches and indexes documentation pages from docs.rs.
+    pub async fn sync_docs_pages(
         &self,
         crate_name: Option<String>,
         page: Option<u32>,
@@ -106,6 +113,11 @@ impl McpServer {
         let docs_rs = DocsRsClient::new(&self.state);
 
         for candidate in candidates {
+            info!(
+                crate_name = %candidate.crate_name,
+                version = %candidate.version,
+                "syncing docs.rs pages"
+            );
             let crate_prefix = format!("{}/{}/", candidate.crate_name, candidate.version);
             let module_root = format!("{}{}/", crate_prefix, candidate.crate_name);
             let module_root_index = format!("{}index.html", module_root);
@@ -188,7 +200,8 @@ impl McpServer {
         Ok(outcome)
     }
 
-    pub(crate) async fn handle_docs_search(
+    /// Handles the `docs.search` tool call.
+    pub async fn handle_docs_search(
         &self,
         request: DocsSearchRequest,
     ) -> Result<Json<DocsSearchResponse>, String> {

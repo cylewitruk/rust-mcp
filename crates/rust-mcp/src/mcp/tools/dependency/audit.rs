@@ -240,7 +240,8 @@ fn evaluate_confidence(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_dependency_audit(
+    /// Handles the `dependency.audit` tool call.
+    pub async fn handle_dependency_audit(
         &self,
         request: DependencyAuditRequest,
     ) -> Result<Json<DependencyAuditResponse>, String> {

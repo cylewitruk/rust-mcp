@@ -2329,4 +2329,72 @@ pub mod krate {
         pub source_type: Option<String>,
         pub target_type: Option<String>,
     }
+
+    /// Request payload for `crate.deprecated`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateDeprecatedRequest {
+        /// Target crate name.
+        pub crate_name: String,
+        /// Specific version to inspect; defaults to the latest indexed version.
+        pub version: Option<String>,
+        /// Maximum number of deprecated items to return (default: 50).
+        pub limit: Option<u32>,
+        /// 1-based page when not using a cursor.
+        pub page: Option<u32>,
+    }
+
+    /// Response payload for `crate.deprecated`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateDeprecatedResponse {
+        /// Resolved crate name.
+        pub crate_name: String,
+        /// Version the deprecation data was read from.
+        pub selected_version: String,
+        /// Latest indexed version of the crate.
+        pub latest_version: String,
+        /// Number of deprecated items returned.
+        pub count: usize,
+        /// Whether additional results are available on the next page.
+        pub has_more: bool,
+        /// Whether the result set was truncated by pagination.
+        pub truncated: bool,
+        /// Deprecated items found in this version.
+        pub deprecated_items: Vec<DeprecatedItem>,
+        /// Whether a freshness check was performed.
+        pub freshness_check_performed: bool,
+        /// Freshness check outcome label.
+        pub freshness_check_result: String,
+        /// Whether a background refresh was enqueued.
+        pub refresh_enqueued: bool,
+        /// Enqueued refresh job id.
+        pub refresh_job_id: Option<String>,
+        /// Freshness provenance details.
+        pub freshness: Vec<ResponseFreshnessSource>,
+        /// Coarse confidence string.
+        pub confidence: String,
+        /// Structured confidence assessment.
+        pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested follow-up calls.
+        pub next_best_calls: Vec<String>,
+        /// Data origin description.
+        pub provenance: String,
+    }
+
+    /// One deprecated API item returned by `crate.deprecated`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct DeprecatedItem {
+        /// Symbol or type name.
+        pub name: String,
+        /// Item kind (e.g. `fn`, `struct`, `enum`, `type`, `const`).
+        pub kind: String,
+        /// Version since which the item has been deprecated, if available.
+        pub deprecated_since: Option<String>,
+        /// Deprecation note, usually explaining the reason and suggesting a
+        /// replacement.
+        pub deprecated_note: Option<String>,
+        /// Best-known canonical import path for this item.
+        pub canonical_path: Option<String>,
+        /// Index source that provided the data (`rustdoc_json` or `syn`).
+        pub index_source: String,
+    }
 }

@@ -123,6 +123,46 @@ async fn registry_scan_skips_already_indexed_crates() {
     assert_eq!(job_count, 1, "only the unknown crate ('beta') should be enqueued");
 }
 
+/// Crate versions with semver build metadata containing hyphens
+/// (e.g. `toml_parser-1.0.6+spec-1.1.0`) should be parsed correctly as
+/// name=`toml_parser`, not the full directory name.
+#[tokio::test]
+async fn registry_scan_correctly_parses_build_metadata_with_hyphens() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("failed to build index sync context");
+
+    let registry = TempRegistry::new("buildmeta");
+    // The real cargo registry contains dirs like "toml_parser-1.0.6+spec-1.1.0".
+    // The scanner should extract crate name "toml_parser", not
+    // "toml_parser-1.0.6+spec" (which would happen if the parser split at the
+    // hyphen inside the build metadata).
+    registry.add_crate("toml_parser", "1.0.6+spec-1.1.0");
+    registry.add_crate("toml-datetime", "0.7.5+spec-1.1.0");
+
+    let mut state = context.state.clone();
+    state
+        .config
+        .cargo_registry_dir = registry.root.clone();
+
+    run_registry_scan_for_tests(&state).await;
+
+    // Verify that "toml_parser" and "toml-datetime" were enqueued
+    // (NOT "toml_parser-1.0.6+spec" or "toml-datetime-0.7.5+spec").
+    let job_count = count_pending_crate_jobs(&state.db).await;
+    assert_eq!(job_count, 2, "expected one job per correctly-parsed crate name");
+
+    let job_names: Vec<String> = sqlx::query_scalar(
+        "SELECT crate_name FROM refresh_jobs WHERE scope = 'crate' AND status = 'pending' ORDER \
+         BY crate_name",
+    )
+    .fetch_all(&state.db)
+    .await
+    .expect("failed to query refresh_jobs");
+
+    assert_eq!(job_names, vec!["toml-datetime", "toml_parser"]);
+}
+
 /// When `registry_scan_batch_limit` is set to 1, at most one job should be
 /// enqueued even if multiple unknown crates are discovered.
 #[tokio::test]

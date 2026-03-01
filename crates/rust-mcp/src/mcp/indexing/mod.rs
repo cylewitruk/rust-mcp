@@ -1,13 +1,21 @@
-pub(crate) mod coordinator;
-pub(crate) mod discovery;
-pub(crate) mod freshness;
-pub(crate) mod handlers;
-pub(crate) mod local_cache;
-pub(crate) mod rustdoc_json;
-pub(crate) mod security;
-pub(crate) mod worker;
+/// On-demand and background indexing coordinator.
+pub mod coordinator;
+/// Proactive registry discovery and background crate scanning.
+pub mod discovery;
+/// Interaction-triggered freshness checks and TTL heuristics.
+pub mod freshness;
+/// `index.*` tool handlers (sync_crates, status, refresh).
+pub mod handlers;
+/// Local cargo registry source cache indexing.
+pub mod local_cache;
+/// Rustdoc JSON fetching, parsing, and symbol extraction.
+pub mod rustdoc_json;
+/// OSV and RustSec advisory synchronization.
+pub mod security;
+/// Durable refresh worker loop.
+pub mod worker;
 
-pub(crate) use discovery::run_registry_discovery;
-#[cfg(feature = "integration-tests")]
-pub(crate) use worker::run_startup_rustdoc_json_refresh_with_page_size;
-pub(crate) use worker::{run_refresh_worker, run_startup_rustdoc_json_refresh};
+pub use discovery::run_registry_discovery;
+#[cfg(feature = "testing")]
+pub use worker::run_startup_rustdoc_json_refresh_with_page_size;
+pub use worker::{run_refresh_worker, run_startup_rustdoc_json_refresh};

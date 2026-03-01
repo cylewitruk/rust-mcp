@@ -44,7 +44,8 @@ fn normalized_import_path(crate_name: &str, row: &ImportPathRow) -> String {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_import_path(
+    /// Handles the `crate.import_path` tool call.
+    pub async fn handle_crate_import_path(
         &self,
         request: CrateImportPathRequest,
     ) -> Result<Json<CrateImportPathResponse>, String> {

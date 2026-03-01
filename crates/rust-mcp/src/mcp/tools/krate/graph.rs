@@ -119,7 +119,8 @@ impl McpServer {
             .collect::<HashMap<_, _>>())
     }
 
-    pub(crate) async fn handle_crate_graph(
+    /// Handles the `crate.graph` tool call.
+    pub async fn handle_crate_graph(
         &self,
         request: CrateGraphRequest,
     ) -> Result<Json<CrateGraphResponse>, String> {

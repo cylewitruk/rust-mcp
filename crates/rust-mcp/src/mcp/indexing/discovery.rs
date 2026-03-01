@@ -21,7 +21,7 @@ use crate::state::AppState;
 
 /// Summary of a single registry discovery scan run.
 #[derive(Debug, Default)]
-pub(crate) struct DiscoveryScanOutcome {
+pub struct DiscoveryScanOutcome {
     /// Total `{name}-{version}` directories found in the registry.
     pub discovered: usize,
     /// New crate-scope jobs enqueued this run.
@@ -41,7 +41,7 @@ pub(crate) struct DiscoveryScanOutcome {
 /// Runs a startup scan immediately, then sleeps for
 /// `config.registry_scan_interval_secs` between subsequent scans. If the
 /// interval is 0 the function exits after the startup scan.
-pub(crate) async fn run_registry_discovery(state: AppState) {
+pub async fn run_registry_discovery(state: AppState) {
     let outcome = run_registry_scan(&state).await;
     info!(
         discovered = outcome.discovered,
@@ -78,7 +78,7 @@ pub(crate) async fn run_registry_discovery(state: AppState) {
 
 /// Perform one full scan of the cargo registry and enqueue crate jobs for
 /// any crate names not yet present in the database.
-pub(crate) async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
+pub async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
     let scan_started = std::time::Instant::now();
     let mut outcome = DiscoveryScanOutcome::default();
 
@@ -261,9 +261,16 @@ fn parse_registry_dir_name(dir_name: &str) -> Option<(String, String)> {
     let bytes = dir_name.as_bytes();
     for i in (1..dir_name.len()).rev() {
         if bytes[i - 1] == b'-' {
+            let potential_name = &dir_name[..i - 1];
             let potential_version = &dir_name[i..];
+            // Crate names may only contain [a-zA-Z0-9_-]. If the candidate
+            // name contains '.' or '+' the split landed inside semver build
+            // metadata (e.g. `toml_parser-1.0.6+spec-1.1.0`); keep scanning.
+            if potential_name.contains('.') || potential_name.contains('+') {
+                continue;
+            }
             if semver::Version::parse(potential_version).is_ok() {
-                return Some((dir_name[..i - 1].to_string(), potential_version.to_string()));
+                return Some((potential_name.to_string(), potential_version.to_string()));
             }
         }
     }
@@ -306,6 +313,20 @@ mod tests {
         let (name, version) = parse_registry_dir_name("foo-bar-1.0.0-alpha.1").unwrap();
         assert_eq!(name, "foo-bar");
         assert_eq!(version, "1.0.0-alpha.1");
+    }
+
+    #[test]
+    fn parses_version_with_build_metadata_containing_hyphens() {
+        let (name, version) = parse_registry_dir_name("toml_parser-1.0.6+spec-1.1.0").unwrap();
+        assert_eq!(name, "toml_parser");
+        assert_eq!(version, "1.0.6+spec-1.1.0");
+    }
+
+    #[test]
+    fn parses_hyphenated_crate_with_build_metadata() {
+        let (name, version) = parse_registry_dir_name("toml-datetime-0.7.5+spec-1.1.0").unwrap();
+        assert_eq!(name, "toml-datetime");
+        assert_eq!(version, "0.7.5+spec-1.1.0");
     }
 
     #[test]

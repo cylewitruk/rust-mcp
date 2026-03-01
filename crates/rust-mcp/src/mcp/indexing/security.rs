@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tracing::{debug, info};
 
 use crate::db::indexing::{
     clear_osv_advisory_matches, clear_rustsec_db_advisory_matches, fetch_security_crates_page,
@@ -17,16 +18,22 @@ use crate::integration::osv::{
 };
 use crate::mcp::server::McpServer;
 
+/// Outcome of a security advisory synchronization.
 #[derive(Debug, Default, Serialize)]
-pub(crate) struct SecuritySyncOutcome {
-    pub(crate) crates_processed: usize,
-    pub(crate) advisories_written: usize,
-    pub(crate) errors: Vec<String>,
-    pub(crate) touched_crates: Vec<String>,
+pub struct SecuritySyncOutcome {
+    /// Number of crates whose advisories were checked.
+    pub crates_processed: usize,
+    /// Number of advisory records written to the database.
+    pub advisories_written: usize,
+    /// Errors encountered during the sync, one per failed operation.
+    pub errors: Vec<String>,
+    /// Names of crates that had advisory data updated.
+    pub touched_crates: Vec<String>,
 }
 
 impl SecuritySyncOutcome {
-    pub(crate) fn merge(&mut self, mut other: SecuritySyncOutcome) {
+    /// Merges another outcome into this one.
+    pub fn merge(&mut self, mut other: SecuritySyncOutcome) {
         self.crates_processed += other.crates_processed;
         self.advisories_written += other.advisories_written;
         self.errors
@@ -270,7 +277,8 @@ fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
 }
 
 impl McpServer {
-    pub(crate) async fn sync_osv_security(
+    /// Synchronizes OSV vulnerability data for indexed crates.
+    pub async fn sync_osv_security(
         &self,
         limit: u32,
         offset: u32,
@@ -284,6 +292,8 @@ impl McpServer {
         let osv_client = OsvDevClient::new(&self.state);
 
         for krate in crate_rows {
+            info!(crate_name = %krate.name, "querying OSV for security advisories");
+
             let version_rows = fetch_security_versions_for_crate(&self.state.db, krate.id)
                 .await
                 .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
@@ -303,6 +313,13 @@ impl McpServer {
                     continue;
                 }
             };
+
+            debug!(
+                crate_name = %krate.name,
+                vulnerabilities = osv.vulns.len(),
+                indexed_versions = version_map.len(),
+                "OSV query returned"
+            );
 
             outcome.crates_processed += 1;
             outcome
@@ -388,7 +405,8 @@ impl McpServer {
         Ok(outcome)
     }
 
-    pub(crate) async fn sync_rustsec_db_security(
+    /// Synchronizes RustSec advisory-db data for indexed crates.
+    pub async fn sync_rustsec_db_security(
         &self,
         limit: u32,
         offset: u32,
@@ -431,6 +449,12 @@ impl McpServer {
             if advisory_files.is_empty() {
                 continue;
             }
+
+            info!(
+                crate_name = %krate.name,
+                advisory_files = advisory_files.len(),
+                "scanning RustSec DB advisories"
+            );
 
             outcome.crates_processed += 1;
             outcome

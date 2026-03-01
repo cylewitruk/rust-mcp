@@ -1,4 +1,5 @@
 use serde_json::json;
+use tracing::{debug, info};
 
 use crate::db::indexing::{
     count_crate_releases_last_year, days_since_latest_crate_release, is_crate_refresh_due,
@@ -8,12 +9,17 @@ use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse}
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_BACKFILL, PRIORITY_FRESHNESS};
 use crate::mcp::server::McpServer;
 
+/// Outcome of an interaction-triggered freshness check.
 #[derive(Debug, Default)]
-pub(crate) struct InteractionRefreshOutcome {
-    pub(crate) freshness_check_performed: bool,
-    pub(crate) freshness_check_result: String,
-    pub(crate) refresh_enqueued: bool,
-    pub(crate) refresh_job_id: Option<String>,
+pub struct InteractionRefreshOutcome {
+    /// Whether a freshness check was actually performed.
+    pub freshness_check_performed: bool,
+    /// Human-readable result of the freshness check (e.g. "fresh", "changed").
+    pub freshness_check_result: String,
+    /// Whether a refresh job was enqueued as a result of the check.
+    pub refresh_enqueued: bool,
+    /// The job ID of the enqueued refresh, if any.
+    pub refresh_job_id: Option<String>,
 }
 
 fn ttl_hint_seconds(
@@ -38,7 +44,9 @@ fn ttl_hint_seconds(
 }
 
 impl McpServer {
-    pub(crate) async fn ensure_freshness_for_interaction(
+    /// Checks whether the crate's local index is stale and enqueues a refresh
+    /// if needed.
+    pub async fn ensure_freshness_for_interaction(
         &self,
         crate_id: i64,
         crate_name: &str,
@@ -49,12 +57,15 @@ impl McpServer {
             .map_err(|e| format!("failed to evaluate freshness deadline for {crate_name}: {e}"))?;
 
         if !due {
+            debug!(%crate_name, "freshness check skipped, not yet due");
             return Ok(InteractionRefreshOutcome {
                 freshness_check_performed: false,
                 freshness_check_result: "skipped".to_string(),
                 ..Default::default()
             });
         }
+
+        info!(%crate_name, local_latest_version, "checking crate freshness against crates.io");
 
         let releases_last_year = count_crate_releases_last_year(&self.state.db, crate_id)
             .await
@@ -92,6 +103,16 @@ impl McpServer {
             .max_version
             .unwrap_or_default();
         let changed = !remote_latest.is_empty() && remote_latest != local_latest_version;
+
+        debug!(
+            %crate_name,
+            %local_latest_version,
+            %remote_latest,
+            %changed,
+            ttl_reason,
+            ttl_seconds,
+            "freshness probe result"
+        );
 
         if !changed {
             mark_crate_freshness_checked(&self.state.db, crate_id, ttl_seconds, ttl_reason)
@@ -133,10 +154,13 @@ impl McpServer {
         })
     }
 
-    pub(crate) async fn backfill_missing_requested_version(
+    /// Enqueues a backfill job if the specifically requested version is not
+    /// indexed locally.
+    pub async fn backfill_missing_requested_version(
         &self,
         crate_name: &str,
     ) -> Result<Option<String>, String> {
+        info!(%crate_name, "backfilling missing crate version on demand");
         let job_id = self
             .state
             .indexing_coordinator

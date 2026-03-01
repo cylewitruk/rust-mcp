@@ -219,7 +219,8 @@ fn prioritize_impl_rows(rows: Vec<CrateImplLookupRow>) -> Vec<CrateImplLookupRow
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_type_info(
+    /// Handles the `crate.type_info` tool call.
+    pub async fn handle_crate_type_info(
         &self,
         request: CrateTypeInfoRequest,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {

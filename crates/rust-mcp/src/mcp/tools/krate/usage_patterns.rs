@@ -65,7 +65,8 @@ fn extract_usage_snippet(content: &str, symbol_name: &str) -> (u32, u32, String)
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_usage_patterns(
+    /// Handles the `crate.usage_patterns` tool call.
+    pub async fn handle_crate_usage_patterns(
         &self,
         request: CrateUsagePatternsRequest,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {

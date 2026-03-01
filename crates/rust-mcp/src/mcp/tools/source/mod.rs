@@ -1,2 +1,4 @@
-pub(crate) mod context;
-pub(crate) mod search;
+/// `source.context` handler.
+pub mod context;
+/// `source.search` and `source.read` handlers.
+pub mod search;

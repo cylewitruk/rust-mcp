@@ -93,7 +93,8 @@ fn extract_text_snippet(content: &str, query: &str) -> (Option<u32>, String) {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_source_search(
+    /// Handles the `source.search` tool call.
+    pub async fn handle_source_search(
         &self,
         request: SourceSearchRequest,
     ) -> Result<Json<SourceSearchResponse>, String> {
@@ -269,7 +270,8 @@ impl McpServer {
         Ok(Json(response))
     }
 
-    pub(crate) async fn handle_source_read(
+    /// Handles the `source.read` tool call.
+    pub async fn handle_source_read(
         &self,
         request: SourceReadRequest,
     ) -> Result<Json<SourceReadResponse>, String> {

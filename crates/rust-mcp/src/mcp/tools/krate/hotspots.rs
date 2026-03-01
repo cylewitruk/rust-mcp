@@ -172,7 +172,8 @@ fn detect_hotspots_in_file(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_hotspots(
+    /// Handles the `crate.hotspots` tool call.
+    pub async fn handle_crate_hotspots(
         &self,
         request: CrateHotspotsRequest,
     ) -> Result<Json<CrateHotspotsResponse>, String> {

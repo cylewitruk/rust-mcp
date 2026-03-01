@@ -216,13 +216,11 @@ These are the highest-impact findings -- missing tools or capabilities that woul
 
 All user-provided inputs use `QueryBuilder::push_bind()` consistently. No string interpolation into SQL was found across any tool handler. This is the gold standard.
 
-### F23. Outbound Firewall DNS Resolution is Static (LOW)
+### F23. Outbound Firewall DNS Resolution is Static (LOW) -- RESOLVED
 
-**Current state:** The Docker entrypoint resolves `crates.io`, `docs.rs`, etc. to IP addresses at container startup. If these IPs change, the firewall blocks new connections until container restart.
+**Previous state:** The Docker entrypoint resolved domain names to IP addresses at container startup and pinned them in iptables rules. CDN IP rotation caused stale rules and connection failures.
 
-**Impact:** Low for local dev tool. CDNs (especially `static.crates.io` via CloudFront) do rotate IPs.
-
-**Recommendation:** Document this behavior. For production-like deployments, consider periodic DNS re-resolution or using domain-based iptables rules (with ipset).
+**Resolution:** Replaced with tinyproxy-based domain-level egress filtering. tinyproxy resolves DNS on each CONNECT request, so IP rotation is handled transparently. The `OUTBOUND_FIREWALL` and `OUTBOUND_ALLOWLIST` env vars remain unchanged; `NET_ADMIN` capability and `iptables` are no longer required.
 
 ### F24. `dependency.resolve` Accepts `cargo_toml_path` -- Path Traversal (LOW)
 

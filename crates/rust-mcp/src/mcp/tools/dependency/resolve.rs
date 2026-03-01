@@ -286,7 +286,8 @@ fn evaluate_confidence(
 }
 
 impl McpServer {
-    pub(crate) async fn handle_dependency_resolve(
+    /// Handles the `dependency.resolve` tool call.
+    pub async fn handle_dependency_resolve(
         &self,
         request: DependencyResolveRequest,
     ) -> Result<Json<DependencyResolveResponse>, String> {

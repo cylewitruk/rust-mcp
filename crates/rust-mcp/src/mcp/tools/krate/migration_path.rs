@@ -248,7 +248,8 @@ fn action_for_change(change: &CrateApiDiffChange) -> (String, String) {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_crate_migration_path(
+    /// Handles the `crate.migration_path` tool call.
+    pub async fn handle_crate_migration_path(
         &self,
         request: CrateMigrationPathRequest,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {

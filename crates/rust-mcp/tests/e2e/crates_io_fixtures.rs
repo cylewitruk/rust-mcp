@@ -18,13 +18,13 @@ use tokio::task::JoinHandle;
 
 use super::docs_rs_fixtures::mock_rustdoc_json_gzip;
 
-pub(super) const SEEDED_CRATE_NAME: &str = "demo-crate";
-pub(super) const SEEDED_CRATE_VERSION: &str = "1.2.3";
-pub(super) const SEEDED_CRATE_NEXT_VERSION: &str = "1.3.0";
-pub(super) const SEEDED_ALT_CRATE_NAME: &str = "demo-alt";
-pub(super) const SEEDED_ALT_CRATE_VERSION: &str = "0.9.0";
-pub(super) const SEEDED_TOKIO_CRATE_NAME: &str = "tokio";
-pub(super) const SEEDED_TOKIO_CRATE_VERSION: &str = "1.49.0";
+pub const SEEDED_CRATE_NAME: &str = "demo-crate";
+pub const SEEDED_CRATE_VERSION: &str = "1.2.3";
+pub const SEEDED_CRATE_NEXT_VERSION: &str = "1.3.0";
+pub const SEEDED_ALT_CRATE_NAME: &str = "demo-alt";
+pub const SEEDED_ALT_CRATE_VERSION: &str = "0.9.0";
+pub const SEEDED_TOKIO_CRATE_NAME: &str = "tokio";
+pub const SEEDED_TOKIO_CRATE_VERSION: &str = "1.49.0";
 const SEEDED_AUDIT_MOUNT_PATH: &str = "/e2e-fixtures";
 
 struct DocsHtmlFixture {
@@ -34,7 +34,7 @@ struct DocsHtmlFixture {
     function_text: &'static str,
 }
 
-pub(super) struct MockRegistryServer {
+pub struct MockRegistryServer {
     container_base_url: String,
     shutdown_tx: Option<oneshot::Sender<()>>,
     serve_task: JoinHandle<()>,
@@ -50,7 +50,7 @@ impl Drop for MockRegistryServer {
 }
 
 impl MockRegistryServer {
-    pub(super) async fn start() -> Result<Self> {
+    pub async fn start() -> Result<Self> {
         let router = Router::new()
             .route("/api/v1/crates", get(mock_search_crates))
             .route("/api/v1/crates/{crate_name}", get(mock_crate_detail))
@@ -87,13 +87,13 @@ impl MockRegistryServer {
     }
 }
 
-pub(super) struct ManifestFixtureMount {
+pub struct ManifestFixtureMount {
     host_dir: PathBuf,
     container_manifest_path: String,
 }
 
 impl ManifestFixtureMount {
-    pub(super) fn create() -> Result<Self> {
+    pub fn create() -> Result<Self> {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -122,7 +122,7 @@ rust-version = \"1.75\"
         })
     }
 
-    pub(super) fn bind_mount(&self) -> (String, String) {
+    pub fn bind_mount(&self) -> (String, String) {
         (
             self.host_dir
                 .to_string_lossy()
@@ -131,7 +131,7 @@ rust-version = \"1.75\"
         )
     }
 
-    pub(super) fn container_manifest_path(&self) -> &str {
+    pub fn container_manifest_path(&self) -> &str {
         &self.container_manifest_path
     }
 }
@@ -459,7 +459,7 @@ async fn mock_docs_module_subpage(
     StatusCode::NOT_FOUND.into_response()
 }
 
-pub(super) fn mock_registry_env(mock_server: &MockRegistryServer) -> Vec<(String, String)> {
+pub fn mock_registry_env(mock_server: &MockRegistryServer) -> Vec<(String, String)> {
     vec![
         (
             "CRATES_IO_BASE_URL".to_string(),

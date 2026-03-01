@@ -86,7 +86,8 @@ fn collect_imports_in_scope(content: &str, line: u32) -> Vec<String> {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_source_context(
+    /// Handles the `source.context` tool call.
+    pub async fn handle_source_context(
         &self,
         request: SourceContextRequest,
     ) -> Result<Json<SourceContextResponse>, String> {

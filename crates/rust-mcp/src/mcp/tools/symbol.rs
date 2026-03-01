@@ -51,7 +51,8 @@ impl CursorToken for SymbolCursorToken {
 }
 
 impl McpServer {
-    pub(crate) async fn handle_symbol_search(
+    /// Handles the `symbol.search` tool call.
+    pub async fn handle_symbol_search(
         &self,
         request: SymbolSearchRequest,
     ) -> Result<Json<SymbolSearchResponse>, String> {

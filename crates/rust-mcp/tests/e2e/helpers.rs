@@ -10,7 +10,7 @@ const MCP_ACCEPT_STREAMABLE: &str = "application/json, text/event-stream";
 const E2E_CLIENT_NAME: &str = "rust-mcp-e2e";
 const E2E_CLIENT_VERSION: &str = "0.1.0";
 
-pub(super) const DEFAULT_TEST_PROTOCOL_VERSION: &str = rust_mcp::LATEST_MCP_PROTOCOL_VERSION;
+pub const DEFAULT_TEST_PROTOCOL_VERSION: &str = rust_mcp::LATEST_MCP_PROTOCOL_VERSION;
 const DEFAULT_CONTAINER_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
 async fn wait_until_container_ready(rust_mcp: &RustMcpTestContainer) {
@@ -20,7 +20,7 @@ async fn wait_until_container_ready(rust_mcp: &RustMcpTestContainer) {
         .expect("container did not become ready");
 }
 
-pub(super) async fn start_ready_rust_mcp() -> RustMcpTestContainer {
+pub async fn start_ready_rust_mcp() -> RustMcpTestContainer {
     let rust_mcp = RustMcpTestContainer::start()
         .await
         .expect("failed to start rust-mcp container");
@@ -28,7 +28,7 @@ pub(super) async fn start_ready_rust_mcp() -> RustMcpTestContainer {
     rust_mcp
 }
 
-pub(super) async fn start_ready_rust_mcp_with_env<K, V, I>(env_vars: I) -> RustMcpTestContainer
+pub async fn start_ready_rust_mcp_with_env<K, V, I>(env_vars: I) -> RustMcpTestContainer
 where
     K: Into<String>,
     V: Into<String>,
@@ -41,7 +41,7 @@ where
     rust_mcp
 }
 
-pub(super) async fn start_ready_rust_mcp_with_env_and_mounts<K, V, I, P, Q, M>(
+pub async fn start_ready_rust_mcp_with_env_and_mounts<K, V, I, P, Q, M>(
     env_vars: I,
     mounts: M,
 ) -> RustMcpTestContainer
@@ -60,7 +60,7 @@ where
     rust_mcp
 }
 
-pub(super) async fn initialize_mcp_session(rust_mcp: &RustMcpTestContainer) -> Value {
+pub async fn initialize_mcp_session(rust_mcp: &RustMcpTestContainer) -> Value {
     let initialize = rust_mcp
         .initialize_mcp()
         .await
@@ -74,7 +74,7 @@ pub(super) async fn initialize_mcp_session(rust_mcp: &RustMcpTestContainer) -> V
     initialize
 }
 
-pub(super) fn tool_result<'a>(response: &'a Value, tool_name: &str) -> &'a Value {
+pub fn tool_result<'a>(response: &'a Value, tool_name: &str) -> &'a Value {
     let result = response
         .get("result")
         .unwrap_or_else(|| panic!("MCP tools/call {tool_name} returned no result payload"));
@@ -86,14 +86,14 @@ pub(super) fn tool_result<'a>(response: &'a Value, tool_name: &str) -> &'a Value
     result
 }
 
-pub(super) fn structured_content<'a>(result: &'a Value, tool_name: &str) -> &'a Value {
+pub fn structured_content<'a>(result: &'a Value, tool_name: &str) -> &'a Value {
     result
         .get("structuredContent")
         .or_else(|| result.get("structured_content"))
         .unwrap_or_else(|| panic!("MCP tools/call {tool_name} returned no structured content"))
 }
 
-pub(super) fn first_content_text<'a>(response: &'a Value, tool_name: &str) -> &'a str {
+pub fn first_content_text<'a>(response: &'a Value, tool_name: &str) -> &'a str {
     response
         .get("result")
         .and_then(|result| result.get("content"))
@@ -104,13 +104,13 @@ pub(super) fn first_content_text<'a>(response: &'a Value, tool_name: &str) -> &'
         .unwrap_or_else(|| panic!("MCP tools/call {tool_name} returned no text content"))
 }
 
-pub(super) fn parse_last_sse_json_data(body: &str) -> Option<Value> {
+pub fn parse_last_sse_json_data(body: &str) -> Option<Value> {
     parse_sse_json_data_events(body)
         .into_iter()
         .last()
 }
 
-pub(super) fn parse_sse_json_data_events(body: &str) -> Vec<Value> {
+pub fn parse_sse_json_data_events(body: &str) -> Vec<Value> {
     body.lines()
         .filter_map(|line| line.strip_prefix("data:"))
         .map(str::trim)
@@ -119,7 +119,7 @@ pub(super) fn parse_sse_json_data_events(body: &str) -> Vec<Value> {
         .collect()
 }
 
-pub(super) fn parse_mcp_response_events(content_type: &str, body: &str) -> Vec<Value> {
+pub fn parse_mcp_response_events(content_type: &str, body: &str) -> Vec<Value> {
     if content_type.contains("text/event-stream") {
         let events = parse_sse_json_data_events(body);
         assert!(
@@ -136,7 +136,7 @@ pub(super) fn parse_mcp_response_events(content_type: &str, body: &str) -> Vec<V
     }
 }
 
-pub(super) fn parse_mcp_response(content_type: &str, body: &str) -> Value {
+pub fn parse_mcp_response(content_type: &str, body: &str) -> Value {
     if content_type.contains("text/event-stream") {
         parse_last_sse_json_data(body)
             .unwrap_or_else(|| panic!("expected JSON data event in SSE response body: {body}"))
@@ -146,7 +146,7 @@ pub(super) fn parse_mcp_response(content_type: &str, body: &str) -> Value {
     }
 }
 
-pub(super) fn initialize_params(protocol_version: &str) -> Value {
+pub fn initialize_params(protocol_version: &str) -> Value {
     json!({
         "protocolVersion": protocol_version,
         "capabilities": {},
@@ -154,7 +154,7 @@ pub(super) fn initialize_params(protocol_version: &str) -> Value {
     })
 }
 
-pub(super) fn jsonrpc_request(request_id: u64, method: &str, params: Value) -> Value {
+pub fn jsonrpc_request(request_id: u64, method: &str, params: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": request_id,
@@ -163,7 +163,7 @@ pub(super) fn jsonrpc_request(request_id: u64, method: &str, params: Value) -> V
     })
 }
 
-pub(super) fn jsonrpc_notification(method: &str, params: Value) -> Value {
+pub fn jsonrpc_notification(method: &str, params: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "method": method,
@@ -171,7 +171,7 @@ pub(super) fn jsonrpc_notification(method: &str, params: Value) -> Value {
     })
 }
 
-pub(super) async fn post_mcp_jsonrpc(
+pub async fn post_mcp_jsonrpc(
     client: &reqwest::Client,
     mcp_url: &str,
     session_id: Option<&str>,
@@ -194,7 +194,7 @@ pub(super) async fn post_mcp_jsonrpc(
         .unwrap_or_else(|error| panic!("{error_context}: {error}"))
 }
 
-pub(super) fn response_session_id(response: &reqwest::Response) -> String {
+pub fn response_session_id(response: &reqwest::Response) -> String {
     response
         .headers()
         .get("mcp-session-id")
@@ -203,7 +203,7 @@ pub(super) fn response_session_id(response: &reqwest::Response) -> String {
         .to_string()
 }
 
-pub(super) async fn parse_mcp_response_from_http(
+pub async fn parse_mcp_response_from_http(
     response: reqwest::Response,
     error_context: &str,
 ) -> Value {
@@ -220,7 +220,7 @@ pub(super) async fn parse_mcp_response_from_http(
     parse_mcp_response(&content_type, &body)
 }
 
-pub(super) async fn parse_mcp_response_events_from_http(
+pub async fn parse_mcp_response_events_from_http(
     response: reqwest::Response,
     error_context: &str,
 ) -> Vec<Value> {
@@ -237,7 +237,7 @@ pub(super) async fn parse_mcp_response_events_from_http(
     parse_mcp_response_events(&content_type, &body)
 }
 
-pub(super) async fn initialize_raw_session(
+pub async fn initialize_raw_session(
     client: &reqwest::Client,
     mcp_url: &str,
     request_id: u64,
@@ -265,7 +265,7 @@ pub(super) async fn initialize_raw_session(
     (session_id, initialize_payload)
 }
 
-pub(super) async fn notify_initialized(
+pub async fn notify_initialized(
     client: &reqwest::Client,
     mcp_url: &str,
     session_id: &str,

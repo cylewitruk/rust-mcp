@@ -109,11 +109,16 @@ The previously planned milestone set through M13 is complete, including:
 
 ## P1: Protocol and Reliability
 
-- [ ] Audit and close MCP protocol version gap (negotiated: `2025-03-26`, latest published: `2025-11-25`).
-  - Newer MCP clients may expect features or behaviors from later spec revisions.
-  - Requires reviewing the spec changelog between the two versions, updating protocol constants, and adjusting transport/session handling if needed.
-- [ ] Replace `.expect()` calls in signal handler setup (`app.rs`) with proper error propagation.
-  - `ctrl_c()` and `signal(SignalKind::terminate())` both use `.expect()` today, which panics on failure rather than reporting a clean startup error.
+- [x] Audit and close MCP protocol version gap (negotiated: `2025-03-26`, latest published: `2025-11-25`).
+  - `SUPPORTED_MCP_PROTOCOL_VERSION` updated to `"2025-11-25"`.
+  - `get_info()` now explicitly sets `protocol_version` from the canonical constant via serde (rmcp 0.16.0's `ProtocolVersion` inner field is private; `Deserialize` accepts unknown version strings as `Cow::Owned`).
+  - rmcp's built-in negotiation downgrades to the client's version when the client requests an older revision (e.g. `2025-03-26`), so no custom negotiation code is needed.
+  - `MCP-Protocol-Version` request header validation is intentionally omitted: rmcp 0.16.0 does not validate it server-side, and the spec marks it SHOULD (not MUST); revisit when rmcp exposes server-side header validation hooks.
+  - Conformance test matrix extended with `"2025-11-25"` as an explicit test case.
+- [x] Replace `.expect()` calls in signal handler setup (`app.rs`) with proper error propagation.
+  - `shutdown_signal()` replaced with `make_shutdown_signal()` which returns `std::io::Result`.
+  - SIGTERM stream is now installed eagerly so failure propagates as a startup `Err` (via `.context()`) rather than a panic.
+  - Ctrl+C errors are logged as warnings (the error can only be observed after the future is polled, so full propagation is not possible synchronously).
 
 ## P1: First-Touch Latency
 
@@ -146,7 +151,9 @@ The previously planned milestone set through M13 is complete, including:
 ## P2: Optional Advanced Intelligence
 
 - [ ] Evaluate optional rust-analyzer-assisted enrichment for workspace-local, position-aware context where rustdoc/syn are insufficient.
-- [ ] Consider new tools for deprecations and feature-gated API surfacing after rustdoc data quality goals are met.
+- [x] Add `crate.deprecated` tool (deprecated symbols and types with notes and replacement hints).
+  - `crate.deprecated` queries `symbols` and `crate_types` for rows with `deprecated_since`/`deprecated_note` set, triggers on-demand rustdoc enrichment, and returns paginated `DeprecatedItem` entries.
+- [ ] Consider feature-gated API surfacing tools once rustdoc JSON exposes structured feature-gate data (currently only raw `Attribute::Other(String)` strings — not actionable).
 
 ## Out of Scope (For Now)
 

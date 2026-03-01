@@ -23,11 +23,12 @@ pub struct AppState {
     pub outbound_rate_limiters: Arc<OutboundRateLimiters>,
     /// Bridges tool handlers waiting for on-demand indexing with the
     /// background refresh worker.
-    pub(crate) indexing_coordinator: Arc<IndexingCoordinator>,
+    pub indexing_coordinator: Arc<IndexingCoordinator>,
 }
 
+/// Identifies a remote data source for outbound rate limiting.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum OutboundSource {
+pub enum OutboundSource {
     /// crates.io metadata and readme endpoints.
     CratesIo,
     /// docs.rs HTML page fetches.
@@ -73,7 +74,7 @@ impl OutboundRateLimiter {
 
 impl OutboundRateLimiters {
     /// Builds per-source outbound limiters from runtime configuration.
-    pub(crate) fn new(config: &Config) -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
             crates_io: OutboundRateLimiter::new(Duration::from_millis(
                 config.crates_io_min_interval_ms,
@@ -126,7 +127,8 @@ impl AppState {
         })
     }
 
-    pub(crate) async fn acquire_outbound_slot(&self, source: OutboundSource) {
+    /// Waits until the per-source rate limit allows the next outbound request.
+    pub async fn acquire_outbound_slot(&self, source: OutboundSource) {
         self.outbound_rate_limiters
             .acquire(source)
             .await;

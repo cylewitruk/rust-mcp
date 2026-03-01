@@ -4,7 +4,9 @@
 use serde_json::Value;
 use sqlx::PgPool;
 
-pub(crate) async fn upsert_crate_with_metadata(
+/// Inserts or updates a crate with its metadata (description, categories,
+/// keywords).
+pub async fn upsert_crate_with_metadata(
     pool: &PgPool,
     name: &str,
     description: Option<&str>,
@@ -29,7 +31,8 @@ pub(crate) async fn upsert_crate_with_metadata(
     .await
 }
 
-pub(crate) async fn upsert_crate_version(
+/// Inserts or updates a crate version record.
+pub async fn upsert_crate_version(
     pool: &PgPool,
     crate_id: i64,
     version: &str,
@@ -63,7 +66,8 @@ pub(crate) async fn upsert_crate_version(
     .await
 }
 
-pub(crate) async fn insert_dependency_edge(
+/// Inserts a dependency edge between a version and a target crate.
+pub async fn insert_dependency_edge(
     pool: &PgPool,
     from_version_id: i64,
     to_crate_id: i64,
@@ -93,7 +97,8 @@ pub(crate) async fn insert_dependency_edge(
     .await
 }
 
-pub(crate) async fn upsert_feature_flag(
+/// Inserts or updates a feature flag for a crate version.
+pub async fn upsert_feature_flag(
     pool: &PgPool,
     crate_version_id: i64,
     feature_name: &str,
@@ -114,7 +119,8 @@ pub(crate) async fn upsert_feature_flag(
     .await
 }
 
-pub(crate) async fn upsert_source_file(
+/// Inserts or updates a source file record for a crate version.
+pub async fn upsert_source_file(
     pool: &PgPool,
     crate_version_id: i64,
     path: &str,
@@ -151,7 +157,8 @@ pub(crate) async fn upsert_source_file(
     .await
 }
 
-pub(crate) async fn insert_symbol(
+/// Inserts a symbol record for a source file.
+pub async fn insert_symbol(
     pool: &PgPool,
     crate_version_id: i64,
     source_file_id: i64,
@@ -184,7 +191,8 @@ pub(crate) async fn insert_symbol(
     .await
 }
 
-pub(crate) async fn upsert_docs_page(
+/// Inserts or updates a documentation page for a crate version.
+pub async fn upsert_docs_page(
     pool: &PgPool,
     crate_version_id: i64,
     path: &str,

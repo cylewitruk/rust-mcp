@@ -31,16 +31,25 @@ use crate::mcp::utils::{normalize_required, sync_page, sync_per_page};
 // Outcome tracking
 // ============================================================
 
+/// Outcome of a rustdoc JSON sync operation.
 #[derive(Debug, Default)]
-pub(crate) struct RustdocJsonRefreshOutcome {
-    pub(crate) scanned_files: usize,
-    pub(crate) synced_versions: usize,
-    pub(crate) symbols_written: usize,
-    pub(crate) types_written: usize,
-    pub(crate) impls_written: usize,
-    pub(crate) traits_written: usize,
-    pub(crate) touched_versions: Vec<String>,
-    pub(crate) errors: Vec<String>,
+pub struct RustdocJsonRefreshOutcome {
+    /// Number of rustdoc JSON files that were processed.
+    pub scanned_files: usize,
+    /// Number of crate versions whose documentation was synced.
+    pub synced_versions: usize,
+    /// Number of symbol entries written to the database.
+    pub symbols_written: usize,
+    /// Number of type entries written to the database.
+    pub types_written: usize,
+    /// Number of trait implementation entries written to the database.
+    pub impls_written: usize,
+    /// Number of trait definition entries written to the database.
+    pub traits_written: usize,
+    /// List of `crate@version` strings that were touched during the sync.
+    pub touched_versions: Vec<String>,
+    /// Errors encountered during the sync, one per failed operation.
+    pub errors: Vec<String>,
 }
 
 // ============================================================
@@ -557,7 +566,7 @@ fn visibility_string(vis: &RustdocVisibility) -> Option<String> {
     match vis {
         RustdocVisibility::Public => Some("public".to_string()),
         RustdocVisibility::Default => Some("private".to_string()),
-        RustdocVisibility::Crate => Some("pub(crate)".to_string()),
+        RustdocVisibility::Crate => Some("pub".to_string()),
         RustdocVisibility::Restricted { path, .. } => Some(format!("pub(in {path})")),
     }
 }
@@ -1416,7 +1425,7 @@ impl McpServer {
                 // If the payload has an older format_version, try to patch
                 // known schema differences and re-deserialize before giving up.
                 if let Some(patched) = try_compat_deserialize(content) {
-                    tracing::info!(
+                    tracing::debug!(
                         crate_name = %candidate.crate_name,
                         version = %candidate.version,
                         source = %source_path,
@@ -1436,7 +1445,7 @@ impl McpServer {
         };
 
         if krate.format_version != rustdoc_types::FORMAT_VERSION {
-            tracing::warn!(
+            tracing::debug!(
                 crate_name = %candidate.crate_name,
                 version = %candidate.version,
                 source = %source_path,
@@ -1520,7 +1529,8 @@ impl McpServer {
         Ok(())
     }
 
-    pub(crate) async fn sync_rustdoc_json_cache(
+    /// Fetches and indexes rustdoc JSON from docs.rs for synced crate versions.
+    pub async fn sync_rustdoc_json_cache(
         &self,
         crate_name: Option<String>,
         page: Option<u32>,
@@ -1599,6 +1609,12 @@ impl McpServer {
 
         for candidate in candidates {
             outcome.scanned_files += 1;
+
+            tracing::info!(
+                crate_name = %candidate.crate_name,
+                version = %candidate.version,
+                "enriching crate with rustdoc JSON"
+            );
 
             let docs_source_path =
                 docs_rs_rustdoc_synthetic_path(&candidate.crate_name, &candidate.version);
@@ -2350,7 +2366,7 @@ mod tests {
     fn visibility_string_maps_correctly() {
         assert_eq!(visibility_string(&RustdocVisibility::Public), Some("public".to_string()));
         assert_eq!(visibility_string(&RustdocVisibility::Default), Some("private".to_string()));
-        assert_eq!(visibility_string(&RustdocVisibility::Crate), Some("pub(crate)".to_string()));
+        assert_eq!(visibility_string(&RustdocVisibility::Crate), Some("pub".to_string()));
     }
 
     // ---- compat deserialization tests ----
