@@ -610,6 +610,7 @@ impl McpServer {
                         request.query,
                         request.page,
                         request.per_page,
+                        false,
                     )
                     .await?;
 
@@ -707,7 +708,12 @@ impl McpServer {
             }
             IndexRefreshScope::RustdocJson => {
                 let outcome = self
-                    .sync_rustdoc_json_cache(request.crate_name, request.page, request.per_page)
+                    .sync_rustdoc_json_cache(
+                        request.crate_name,
+                        request.page,
+                        request.per_page,
+                        false,
+                    )
                     .await?;
 
                 Ok(Json(IndexRefreshResponse {

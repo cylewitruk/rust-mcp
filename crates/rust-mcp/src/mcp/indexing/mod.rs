@@ -15,7 +15,7 @@ pub mod security;
 /// Durable refresh worker loop.
 pub mod worker;
 
-pub use discovery::run_registry_discovery;
+pub use discovery::{collect_local_versions_for_crate, run_registry_discovery};
 #[cfg(feature = "testing")]
 pub use worker::run_startup_rustdoc_json_refresh_with_page_size;
 pub use worker::{run_refresh_worker, run_startup_rustdoc_json_refresh};

@@ -34,10 +34,39 @@ pub struct PersistCrateSyncOutcome {
     pub dependencies_synced: usize,
 }
 
+/// Marks which crate versions are locally present in the cargo registry.
+///
+/// Versions in `local_versions` are set to `locally_present = TRUE`; all
+/// other versions of the same crate are reset to `FALSE`. Uses
+/// `IS DISTINCT FROM` to skip no-op updates.
+pub async fn mark_versions_locally_present(
+    db: &PgPool,
+    crate_name: &str,
+    local_versions: &[String],
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE crate_versions cv
+         SET locally_present = (cv.version = ANY($2::TEXT[]))
+         FROM crates c
+         WHERE c.id = cv.crate_id
+           AND c.name = $1
+           AND cv.locally_present IS DISTINCT FROM (cv.version = ANY($2::TEXT[]))",
+    )
+    .bind(crate_name)
+    .bind(local_versions)
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Loads crate versions eligible for local source cache indexing.
+///
+/// When `locally_present_only` is `true`, only versions flagged as present
+/// in the user's cargo registry are returned.
 pub async fn fetch_local_cache_version_keys(
     db: &PgPool,
     crate_name: Option<&str>,
+    locally_present_only: bool,
 ) -> Result<Vec<LocalCacheVersionKeyRow>, sqlx::Error> {
     sqlx::query_as::<_, LocalCacheVersionKeyRow>(
         "SELECT
@@ -47,19 +76,25 @@ pub async fn fetch_local_cache_version_keys(
             cv.id AS crate_version_id
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
-         WHERE ($1::TEXT IS NULL OR c.name = $1)",
+         WHERE ($1::TEXT IS NULL OR c.name = $1)
+           AND ($2::BOOL IS FALSE OR cv.locally_present = TRUE)",
     )
     .bind(crate_name)
+    .bind(locally_present_only)
     .fetch_all(db)
     .await
 }
 
 /// Loads crate versions eligible for rustdoc JSON refresh.
+///
+/// When `locally_present_only` is `true`, only versions flagged as present
+/// in the user's cargo registry are returned.
 pub async fn fetch_rustdoc_sync_candidates(
     db: &PgPool,
     crate_name: Option<&str>,
     limit: i64,
     offset: i64,
+    locally_present_only: bool,
 ) -> Result<Vec<RustdocSyncCandidateRow>, sqlx::Error> {
     sqlx::query_as::<_, RustdocSyncCandidateRow>(
         "SELECT
@@ -69,12 +104,14 @@ pub async fn fetch_rustdoc_sync_candidates(
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
          WHERE ($1::TEXT IS NULL OR c.name = $1)
+           AND ($4::BOOL IS FALSE OR cv.locally_present = TRUE)
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT $2 OFFSET $3",
     )
     .bind(crate_name)
     .bind(limit)
     .bind(offset)
+    .bind(locally_present_only)
     .fetch_all(db)
     .await
 }

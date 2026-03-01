@@ -10,6 +10,9 @@
 //! (controlled by `REGISTRY_SCAN_INTERVAL_SECS`; 0 disables it) to pick up
 //! newly-added registry entries over time.
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use metrics::{counter, histogram};
 use serde_json::json;
 use tokio::time::{Duration, sleep};
@@ -87,8 +90,8 @@ pub async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
         .config
         .cargo_registry_dir
         .join("src");
-    let discovered_names = match collect_crate_names_from_registry(&src_root, &mut outcome) {
-        Ok(names) => names,
+    let discovered_map = match collect_crate_versions_from_registry(&src_root, &mut outcome) {
+        Ok(map) => map,
         Err(error) => {
             warn!(%error, src_root = %src_root.display(), "registry discovery scan skipped");
             counter!("rust_mcp_discovery_scan_errors_total").increment(1);
@@ -117,13 +120,17 @@ pub async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
         .collect();
 
     for crate_name in &pre_warm {
+        let local_versions = discovered_map
+            .get(crate_name.as_str())
+            .cloned()
+            .unwrap_or_default();
         if let Err(error) = enqueue_or_get_refresh_job_id(
             &state.db,
             crate_name,
             "crate",
             PRIORITY_PRE_WARM,
             false,
-            json!({"trigger": "registry_discovery", "pre_warm": true}),
+            json!({"trigger": "registry_discovery", "pre_warm": true, "local_versions": local_versions}),
         )
         .await
         {
@@ -137,26 +144,30 @@ pub async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
     let batch_limit = state
         .config
         .registry_scan_batch_limit as usize;
-    let unknown: Vec<&String> = discovered_names
-        .iter()
+    let unknown: Vec<&String> = discovered_map
+        .keys()
         .filter(|name| !known_names.contains(*name))
         .collect();
 
-    outcome.already_known = outcome
-        .discovered
-        .saturating_sub(unknown.len() + outcome.unparseable);
+    outcome.already_known = discovered_map
+        .len()
+        .saturating_sub(unknown.len());
 
     let to_enqueue =
         if batch_limit > 0 { &unknown[..unknown.len().min(batch_limit)] } else { &unknown[..] };
 
     for crate_name in to_enqueue {
+        let local_versions = discovered_map
+            .get(crate_name.as_str())
+            .cloned()
+            .unwrap_or_default();
         if let Err(error) = enqueue_or_get_refresh_job_id(
             &state.db,
             crate_name,
             "crate",
             PRIORITY_DISCOVERY,
             false,
-            json!({"trigger": "registry_discovery"}),
+            json!({"trigger": "registry_discovery", "local_versions": local_versions}),
         )
         .await
         {
@@ -188,13 +199,14 @@ pub async fn run_registry_scan(state: &AppState) -> DiscoveryScanOutcome {
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Walk `src_root/{registry}/{name}-{version}/` and collect the unique set of
-/// crate names. Updates `outcome.discovered` and `outcome.unparseable`.
-fn collect_crate_names_from_registry(
-    src_root: &std::path::Path,
+/// Walk `src_root/{registry}/{name}-{version}/` and collect a mapping of
+/// crate names to their locally-present version strings.
+/// Updates `outcome.discovered` and `outcome.unparseable`.
+fn collect_crate_versions_from_registry(
+    src_root: &Path,
     outcome: &mut DiscoveryScanOutcome,
-) -> Result<Vec<String>, String> {
-    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
 
     let registries = std::fs::read_dir(src_root)
         .map_err(|e| format!("cannot read registry src dir `{}`: {e}", src_root.display()))?;
@@ -241,8 +253,10 @@ fn collect_crate_names_from_registry(
             outcome.discovered += 1;
 
             match parse_registry_dir_name(dir_name) {
-                Some((crate_name, _version)) => {
-                    names.insert(crate_name);
+                Some((crate_name, version)) => {
+                    map.entry(crate_name)
+                        .or_default()
+                        .push(version);
                 }
                 None => {
                     outcome.unparseable += 1;
@@ -251,7 +265,53 @@ fn collect_crate_names_from_registry(
         }
     }
 
-    Ok(names.into_iter().collect())
+    Ok(map)
+}
+
+/// Collects locally-present version strings for a single crate by walking
+/// `src_root/{registry}/{name}-{version}/`.
+///
+/// Used by the worker as a fallback when the job payload does not include
+/// `local_versions` (e.g. freshness-triggered or on-demand jobs).
+pub fn collect_local_versions_for_crate(src_root: &Path, crate_name: &str) -> Vec<String> {
+    let mut versions = Vec::new();
+
+    let Ok(registries) = std::fs::read_dir(src_root) else {
+        return versions;
+    };
+
+    for registry_entry in registries.flatten() {
+        let registry_path = registry_entry.path();
+        if !registry_path.is_dir() {
+            continue;
+        }
+
+        let Ok(crate_dirs) = std::fs::read_dir(&registry_path) else {
+            continue;
+        };
+
+        for crate_entry in crate_dirs.flatten() {
+            let path = crate_entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(dir_name) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+            else {
+                continue;
+            };
+
+            if let Some((name, version)) = parse_registry_dir_name(dir_name)
+                && name == crate_name
+            {
+                versions.push(version);
+            }
+        }
+    }
+
+    versions
 }
 
 /// Parse a cargo registry directory name of the form `{name}-{semver}` into
@@ -283,7 +343,10 @@ fn parse_registry_dir_name(dir_name: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DiscoveryScanOutcome, collect_crate_names_from_registry, parse_registry_dir_name};
+    use super::{
+        DiscoveryScanOutcome, collect_crate_versions_from_registry,
+        collect_local_versions_for_crate, parse_registry_dir_name,
+    };
 
     // ── parse_registry_dir_name ───────────────────────────────────────────────
 
@@ -335,7 +398,7 @@ mod tests {
         assert!(parse_registry_dir_name("noversion").is_none());
     }
 
-    // ── collect_crate_names_from_registry ────────────────────────────────────
+    // ── collect_crate_versions_from_registry ─────────────────────────────────
 
     /// Build a deterministic temp path for a test, returning a cleanup guard.
     fn temp_registry_root(tag: &str) -> (std::path::PathBuf, TempCleanup) {
@@ -355,49 +418,46 @@ mod tests {
     }
 
     #[test]
-    fn collect_names_discovers_dirs_and_counts_unparseable() {
+    fn collect_discovers_dirs_and_counts_unparseable() {
         let (root, _cleanup) = temp_registry_root("basic");
-        // src_root/crates-io-test/{name}-{version}/
         let registry = root.join("crates-io-test");
         std::fs::create_dir_all(registry.join("serde-1.0.193")).unwrap();
         std::fs::create_dir_all(registry.join("tokio-util-0.7.10")).unwrap();
         std::fs::create_dir_all(registry.join("not-a-valid-version")).unwrap();
-        // A file (not a dir) — should be ignored.
         std::fs::write(registry.join("README.md"), b"readme").unwrap();
 
         let mut outcome = DiscoveryScanOutcome::default();
-        let names = collect_crate_names_from_registry(&root, &mut outcome).unwrap();
+        let map = collect_crate_versions_from_registry(&root, &mut outcome).unwrap();
 
-        // 3 directories counted (the file is skipped).
         assert_eq!(outcome.discovered, 3, "should count 3 dirs, not the file");
         assert_eq!(outcome.unparseable, 1, "not-a-valid-version is unparseable");
-        assert!(names.contains(&"serde".to_string()), "serde should be discovered");
-        assert!(names.contains(&"tokio-util".to_string()), "tokio-util should be discovered");
-        assert!(
-            !names.contains(&"not-a-valid-version".to_string()),
-            "unparseable dir should not appear in names"
-        );
+        assert!(map.contains_key("serde"), "serde should be discovered");
+        assert_eq!(map["serde"], vec!["1.0.193"]);
+        assert!(map.contains_key("tokio-util"), "tokio-util should be discovered");
+        assert!(!map.contains_key("not-a-valid-version"));
     }
 
     #[test]
-    fn collect_names_deduplicates_multiple_versions_of_same_crate() {
+    fn collect_groups_multiple_versions_of_same_crate() {
         let (root, _cleanup) = temp_registry_root("dedup");
         let registry = root.join("crates-io-test");
         std::fs::create_dir_all(registry.join("serde-1.0.0")).unwrap();
         std::fs::create_dir_all(registry.join("serde-1.1.0")).unwrap();
 
         let mut outcome = DiscoveryScanOutcome::default();
-        let names = collect_crate_names_from_registry(&root, &mut outcome).unwrap();
+        let map = collect_crate_versions_from_registry(&root, &mut outcome).unwrap();
 
         assert_eq!(outcome.discovered, 2, "two version dirs should be counted");
-        assert_eq!(names.len(), 1, "two versions of serde should deduplicate to one unique name");
+        assert_eq!(map.len(), 1, "two versions of serde should group to one key");
+        let mut versions = map["serde"].clone();
+        versions.sort();
+        assert_eq!(versions, vec!["1.0.0", "1.1.0"]);
         assert_eq!(outcome.unparseable, 0);
     }
 
     #[test]
-    fn collect_names_walks_multiple_registry_subdirs() {
+    fn collect_walks_multiple_registry_subdirs() {
         let (root, _cleanup) = temp_registry_root("multi-registry");
-        // Simulate two registry mirrors (both under src_root).
         std::fs::create_dir_all(
             root.join("crates-io-abc")
                 .join("serde-1.0.0"),
@@ -410,17 +470,17 @@ mod tests {
         .unwrap();
 
         let mut outcome = DiscoveryScanOutcome::default();
-        let names = collect_crate_names_from_registry(&root, &mut outcome).unwrap();
+        let map = collect_crate_versions_from_registry(&root, &mut outcome).unwrap();
 
         assert_eq!(outcome.discovered, 2);
-        assert!(names.contains(&"serde".to_string()));
-        assert!(names.contains(&"tokio".to_string()));
+        assert!(map.contains_key("serde"));
+        assert!(map.contains_key("tokio"));
     }
 
     #[test]
-    fn collect_names_returns_error_for_missing_dir() {
+    fn collect_returns_error_for_missing_dir() {
         let mut outcome = DiscoveryScanOutcome::default();
-        let result = collect_crate_names_from_registry(
+        let result = collect_crate_versions_from_registry(
             &std::path::PathBuf::from("/nonexistent/path/rust-mcp-test-xyz"),
             &mut outcome,
         );
@@ -428,16 +488,49 @@ mod tests {
     }
 
     #[test]
-    fn collect_names_returns_empty_for_empty_registry() {
+    fn collect_returns_empty_for_empty_registry() {
         let (root, _cleanup) = temp_registry_root("empty");
-        // Create the src_root but no registry subdirs inside it.
         std::fs::create_dir_all(&root).unwrap();
 
         let mut outcome = DiscoveryScanOutcome::default();
-        let names = collect_crate_names_from_registry(&root, &mut outcome).unwrap();
+        let map = collect_crate_versions_from_registry(&root, &mut outcome).unwrap();
 
-        assert!(names.is_empty());
+        assert!(map.is_empty());
         assert_eq!(outcome.discovered, 0);
         assert_eq!(outcome.unparseable, 0);
+    }
+
+    // ── collect_local_versions_for_crate ─────────────────────────────────────
+
+    #[test]
+    fn single_crate_collects_matching_versions() {
+        let (root, _cleanup) = temp_registry_root("single-crate");
+        let registry = root.join("crates-io-test");
+        std::fs::create_dir_all(registry.join("serde-1.0.0")).unwrap();
+        std::fs::create_dir_all(registry.join("serde-1.1.0")).unwrap();
+        std::fs::create_dir_all(registry.join("tokio-1.28.0")).unwrap();
+
+        let mut versions = collect_local_versions_for_crate(&root, "serde");
+        versions.sort();
+        assert_eq!(versions, vec!["1.0.0", "1.1.0"]);
+    }
+
+    #[test]
+    fn single_crate_returns_empty_for_unknown() {
+        let (root, _cleanup) = temp_registry_root("single-crate-miss");
+        let registry = root.join("crates-io-test");
+        std::fs::create_dir_all(registry.join("serde-1.0.0")).unwrap();
+
+        let versions = collect_local_versions_for_crate(&root, "tokio");
+        assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn single_crate_returns_empty_for_missing_dir() {
+        let versions = collect_local_versions_for_crate(
+            &std::path::PathBuf::from("/nonexistent/path/rust-mcp-test-xyz"),
+            "serde",
+        );
+        assert!(versions.is_empty());
     }
 }

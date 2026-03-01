@@ -1530,11 +1530,16 @@ impl McpServer {
     }
 
     /// Fetches and indexes rustdoc JSON from docs.rs for synced crate versions.
+    /// Syncs rustdoc JSON symbols for indexed crate versions.
+    ///
+    /// When `locally_present_only` is `true`, only crate versions flagged as
+    /// present in the user's cargo registry are processed.
     pub async fn sync_rustdoc_json_cache(
         &self,
         crate_name: Option<String>,
         page: Option<u32>,
         per_page: Option<u32>,
+        locally_present_only: bool,
     ) -> Result<RustdocJsonRefreshOutcome, String> {
         let crate_filter = match crate_name {
             Some(value) => Some(normalize_required(value, "crate_name")?),
@@ -1546,14 +1551,29 @@ impl McpServer {
             .saturating_sub(1)
             .saturating_mul(per_page);
 
-        let candidates = fetch_rustdoc_sync_candidates(
+        let mut candidates = fetch_rustdoc_sync_candidates(
             &self.state.db,
             crate_filter.as_deref(),
             i64::from(per_page),
             i64::from(offset),
+            locally_present_only,
         )
         .await
         .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;
+
+        // Sort by reverse semver so newest versions are processed first.
+        candidates.sort_by(|a, b| {
+            let av = semver::Version::parse(&a.version).ok();
+            let bv = semver::Version::parse(&b.version).ok();
+            match (bv, av) {
+                (Some(bv), Some(av)) => bv.cmp(&av),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a
+                    .crate_name
+                    .cmp(&b.crate_name),
+            }
+        });
 
         let (local_fallback, local_fallback_unavailable) = match self
             .state

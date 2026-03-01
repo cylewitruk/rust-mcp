@@ -7,9 +7,10 @@ use tracing::{error, info, warn};
 use crate::db::indexing::{
     claim_next_refresh_job, enqueue_or_get_refresh_job_id, fetch_refresh_job_gauge_counts,
     fetch_refresh_job_scope_pending_counts, mark_crate_refresh_error,
-    mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
+    mark_refresh_job_failed_or_requeued, mark_refresh_job_finished, mark_versions_locally_present,
 };
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
+use crate::mcp::indexing::discovery::collect_local_versions_for_crate;
 use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{sync_page, sync_per_page};
@@ -22,6 +23,8 @@ struct RefreshJobPayload {
     page: Option<u32>,
     per_page: Option<u32>,
     include_dependencies: Option<bool>,
+    local_versions: Option<Vec<String>>,
+    locally_present_only: Option<bool>,
 }
 
 fn optional_job_crate_name(
@@ -125,6 +128,9 @@ pub async fn run_refresh_worker(state: AppState) {
         let server = McpServer::new(state.clone());
         let payload =
             serde_json::from_value::<RefreshJobPayload>(job.payload.clone()).unwrap_or_default();
+        let locally_present_only = payload
+            .locally_present_only
+            .unwrap_or(false);
         let result = match job.scope.as_str() {
             "crate" | "crate_deep_refresh" => server
                 .sync_single_crate(&job.crate_name, job.include_dependencies)
@@ -170,6 +176,7 @@ pub async fn run_refresh_worker(state: AppState) {
                     payload.query,
                     payload.page,
                     payload.per_page,
+                    locally_present_only,
                 )
                 .await
                 .map(|_| ()),
@@ -178,6 +185,7 @@ pub async fn run_refresh_worker(state: AppState) {
                     optional_job_crate_name(&job.crate_name, payload.crate_name),
                     payload.page,
                     payload.per_page,
+                    locally_present_only,
                 )
                 .await
                 .map(|_| ()),
@@ -204,11 +212,34 @@ pub async fn run_refresh_worker(state: AppState) {
                     .indexing_coordinator
                     .signal_completion(job.id, JobOutcome::Completed);
 
-                // After a successful crate-metadata job, proactively enqueue
-                // source and rustdoc enrichment at lower priority so they are
-                // ready before any client asks. enqueue_or_get_refresh_job_id
-                // is idempotent — safe to call unconditionally.
+                // After a successful crate-metadata job, mark which versions
+                // are locally present in the cargo registry, then proactively
+                // enqueue source and rustdoc enrichment (locally-present only)
+                // at lower priority. enqueue_or_get_refresh_job_id is
+                // idempotent — safe to call unconditionally.
                 if job.scope == "crate" || job.scope == "crate_deep_refresh" {
+                    let local_versions = match payload.local_versions {
+                        Some(ref versions) if !versions.is_empty() => versions.clone(),
+                        _ => {
+                            let src_root = state
+                                .config
+                                .cargo_registry_dir
+                                .join("src");
+                            collect_local_versions_for_crate(&src_root, &job.crate_name)
+                        }
+                    };
+
+                    if let Err(error) =
+                        mark_versions_locally_present(&state.db, &job.crate_name, &local_versions)
+                            .await
+                    {
+                        warn!(
+                            crate_name = %job.crate_name,
+                            %error,
+                            "failed to mark locally-present versions"
+                        );
+                    }
+
                     for enrichment_scope in ["local_cache", "rustdoc_json"] {
                         if let Err(error) = enqueue_or_get_refresh_job_id(
                             &state.db,
@@ -216,7 +247,7 @@ pub async fn run_refresh_worker(state: AppState) {
                             enrichment_scope,
                             PRIORITY_PROACTIVE_ENRICH,
                             false,
-                            json!({"trigger": "proactive_enrich"}),
+                            json!({"trigger": "proactive_enrich", "locally_present_only": true}),
                         )
                         .await
                         {
@@ -302,7 +333,7 @@ pub async fn run_startup_rustdoc_json_refresh_with_page_size(state: AppState, pe
 
     loop {
         let outcome = match server
-            .sync_rustdoc_json_cache(None, Some(page), Some(page_size))
+            .sync_rustdoc_json_cache(None, Some(page), Some(page_size), true)
             .await
         {
             Ok(outcome) => outcome,

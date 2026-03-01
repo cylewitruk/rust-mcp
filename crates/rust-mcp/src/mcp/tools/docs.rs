@@ -105,6 +105,7 @@ impl McpServer {
             crate_filter.as_deref(),
             i64::from(per_page),
             i64::from(offset),
+            false,
         )
         .await
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;

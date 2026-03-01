@@ -118,8 +118,8 @@ pub struct Config {
     pub crates_io_timeout_secs: u64,
 
     /// Minimum delay between outbound crates.io requests (per process) in
-    /// milliseconds.
-    #[arg(long, env = env_vars::CRATES_IO_MIN_INTERVAL_MS, default_value_t = 100)]
+    /// milliseconds. The crates.io crawler policy requires max 1 req/s.
+    #[arg(long, env = env_vars::CRATES_IO_MIN_INTERVAL_MS, default_value_t = 1000)]
     pub crates_io_min_interval_ms: u64,
 
     /// Base URL for docs.rs page fetches.
@@ -128,12 +128,12 @@ pub struct Config {
 
     /// Minimum delay between outbound docs.rs requests (per process) in
     /// milliseconds.
-    #[arg(long, env = env_vars::DOCS_RS_MIN_INTERVAL_MS, default_value_t = 120)]
+    #[arg(long, env = env_vars::DOCS_RS_MIN_INTERVAL_MS, default_value_t = 500)]
     pub docs_rs_min_interval_ms: u64,
 
     /// Minimum delay between outbound OSV requests (per process) in
     /// milliseconds.
-    #[arg(long, env = env_vars::OSV_MIN_INTERVAL_MS, default_value_t = 150)]
+    #[arg(long, env = env_vars::OSV_MIN_INTERVAL_MS, default_value_t = 250)]
     pub osv_min_interval_ms: u64,
 
     /// Minimum database connection pool size.

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+use semver::Version;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use syn::punctuated::Punctuated;
@@ -656,12 +657,16 @@ fn extract_rust_symbols(content: &str) -> Result<IndexedExtractionBatch, String>
 
 impl McpServer {
     /// Refreshes the local source file cache from the cargo registry directory.
+    ///
+    /// When `locally_present_only` is `true`, only crate versions flagged as
+    /// present in the user's cargo registry are considered.
     pub async fn sync_local_source_cache(
         &self,
         crate_name: Option<String>,
         query: Option<String>,
         page: Option<u32>,
         per_page: Option<u32>,
+        locally_present_only: bool,
     ) -> Result<LocalCacheRefreshOutcome, String> {
         let requested_crate_name = match crate_name {
             Some(value) => Some(normalize_required(value, "crate_name")?),
@@ -687,10 +692,13 @@ impl McpServer {
             });
         }
 
-        let version_rows =
-            fetch_local_cache_version_keys(&self.state.db, requested_crate_name.as_deref())
-                .await
-                .map_err(|e| format!("local cache refresh failed to load crate versions: {e}"))?;
+        let version_rows = fetch_local_cache_version_keys(
+            &self.state.db,
+            requested_crate_name.as_deref(),
+            locally_present_only,
+        )
+        .await
+        .map_err(|e| format!("local cache refresh failed to load crate versions: {e}"))?;
 
         let version_map = version_rows
             .into_iter()
@@ -736,11 +744,22 @@ impl McpServer {
                     continue;
                 };
 
-                candidates.push((dir_name, path, mapped.crate_version_id));
+                candidates.push((dir_name, mapped.version.clone(), path, mapped.crate_version_id));
             }
         }
 
-        candidates.sort_by(|left, right| left.0.cmp(&right.0));
+        // Sort by reverse semver so newest versions are indexed first.
+        // Versions that fail to parse as semver are sorted last (alphabetically).
+        candidates.sort_by(|left, right| {
+            let lv = Version::parse(&left.1).ok();
+            let rv = Version::parse(&right.1).ok();
+            match (rv, lv) {
+                (Some(r), Some(l)) => r.cmp(&l),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => left.0.cmp(&right.0),
+            }
+        });
         let selected = candidates
             .into_iter()
             .skip(offset)
@@ -749,7 +768,7 @@ impl McpServer {
 
         let mut outcome = LocalCacheRefreshOutcome::default();
 
-        for (dir_name, version_dir, crate_version_id) in selected {
+        for (dir_name, _version, version_dir, crate_version_id) in selected {
             let Some(mapped) = version_map.get(&dir_name) else {
                 continue;
             };

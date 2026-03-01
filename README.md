@@ -166,21 +166,83 @@ curl -sS \
 
 ## Configuration
 
-Important environment variables:
+All server environment variables with their defaults:
 
-- `MCP_HTTP_BIND` (default `127.0.0.1:43173`)
-- `MCP_SSE_KEEP_ALIVE_SECS` (default `15`)
-- `MCP_SSE_RETRY_MS` (default `3000`)
-- `MCP_STRICT_ACCEPT` (default `false`; when `true`, reject POST `/mcp` requests that do not accept both `application/json` and `text/event-stream`)
-- `DATABASE_URL`
-- `PROMETHEUS_BIND` (default `0.0.0.0:9090` in container)
-- `CRATES_IO_BASE_URL`, `DOCS_RS_BASE_URL`
-- `CRATES_IO_MIN_INTERVAL_MS`, `DOCS_RS_MIN_INTERVAL_MS`, `OSV_MIN_INTERVAL_MS`
-- `MAX_CONCURRENT_REQUESTS`
-- `CARGO_REGISTRY_DIR`
-- `RUSTSEC_DB_DIR` (optional local advisory-db checkout)
-- `RUSTDOC_JSON_DIR` (optional pre-generated rustdoc JSON files)
-- `SCHEMA_EXPORT_DIR` (optional startup export of tool schema artifacts)
+**Database:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgres://postgres@%2Frun%2Fpostgresql/rust_mcp` | PostgreSQL connection string |
+| `DATABASE_MIN_CONNECTIONS` | `1` | Minimum database connection pool size |
+| `DATABASE_MAX_CONNECTIONS` | `10` | Maximum database connection pool size |
+| `AUTO_MIGRATE` | `true` | Run SQL migrations on startup |
+
+**HTTP / MCP transport:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_HTTP_BIND` | `127.0.0.1:43173` | HTTP bind address |
+| `MCP_SSE_KEEP_ALIVE_SECS` | `15` | SSE keep-alive interval (seconds) |
+| `MCP_SSE_RETRY_MS` | `3000` | SSE retry delay for reconnecting clients (ms) |
+| `MCP_STRICT_ACCEPT` | `false` | When `true`, reject POST `/mcp` requests that do not accept both `application/json` and `text/event-stream` |
+| `MAX_CONCURRENT_REQUESTS` | `128` | Maximum concurrent inbound HTTP requests |
+
+**Outbound rate limiting:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `CRATES_IO_MIN_INTERVAL_MS` | `1000` | Minimum delay between crates.io requests (ms) |
+| `DOCS_RS_MIN_INTERVAL_MS` | `500` | Minimum delay between docs.rs requests (ms) |
+| `OSV_MIN_INTERVAL_MS` | `250` | Minimum delay between OSV requests (ms) |
+
+**External integrations:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `CRATES_IO_BASE_URL` | `https://crates.io` | crates.io API base URL |
+| `CRATES_IO_USER_AGENT` | `rust-mcp/0.1.0 (local dev machine)` | User-Agent for outbound crates.io requests |
+| `CRATES_IO_TIMEOUT_SECS` | `20` | HTTP timeout for crates.io/OSV requests (seconds) |
+| `DOCS_RS_BASE_URL` | `https://docs.rs` | docs.rs base URL |
+
+**Paths:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `CARGO_REGISTRY_DIR` | `/cargo/registry` | Mounted cargo registry directory |
+| `MCP_DATA_DIR` | `/var/lib/rust-mcp` | Server local data directory |
+| `RUSTSEC_DB_DIR` | _(unset)_ | Optional local advisory-db checkout |
+| `RUSTDOC_JSON_DIR` | _(unset)_ | Optional pre-generated rustdoc JSON files |
+| `SCHEMA_EXPORT_DIR` | _(unset)_ | Optional startup export of tool schema artifacts |
+
+**Registry discovery & pre-warming:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `REGISTRY_SCAN_INTERVAL_SECS` | `600` | Seconds between periodic registry discovery scans (0 = disabled) |
+| `REGISTRY_SCAN_BATCH_LIMIT` | `0` | Max new crate jobs per discovery scan (0 = unlimited) |
+| `PRE_WARM_CRATES` | _(empty)_ | Comma-separated crate names to index first at startup |
+
+**Logging:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `RUST_LOG` | `info,rust_mcp=debug,sqlx=warn` | Tracing filter (RUST_LOG style) |
+| `LOG_FORMAT` | `pretty` | Log output format (`pretty` or `json`) |
+
+**Prometheus:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `PROMETHEUS_BIND` | `0.0.0.0:9090` | Prometheus metrics exporter bind address |
+
+**Docker / entrypoint only** (not read by the server binary):
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_HTTP_PORT` | `43173` | Host-side port mapping in docker-compose |
+| `PROMETHEUS_PORT` | `9090` | Host-side Prometheus port mapping in docker-compose |
+| `OUTBOUND_FIREWALL` | `true` | Enable tinyproxy-based domain allowlist |
+| `OUTBOUND_ALLOWLIST` | `crates.io,static.crates.io,docs.rs,api.osv.dev,api.github.com` | Comma-separated allowed outbound domains |
 
 `rust-mcp-stdio` adapter variables:
 
