@@ -205,11 +205,18 @@ impl McpServer {
             )
         })?;
 
-        let total_lines = row
+        let content = row
             .content
-            .lines()
-            .count()
-            .max(1) as u32;
+            .as_deref()
+            .ok_or_else(|| {
+                format!(
+                    "source content not available for {}@{}:{} (content was not stored for this \
+                     file type)",
+                    crate_row.name, selected_version.version, path
+                )
+            })?;
+
+        let total_lines = content.lines().count().max(1) as u32;
 
         let resolved_line = if let Some(line) = request.line {
             line.clamp(1, total_lines)
@@ -241,7 +248,7 @@ impl McpServer {
             return Err("source.context requires either line or symbol_name".to_string());
         };
 
-        let imports_in_scope = collect_imports_in_scope(&row.content, resolved_line);
+        let imports_in_scope = collect_imports_in_scope(content, resolved_line);
         let module_path = module_path_from_source_path(&crate_row.name, &path);
 
         let containing_impl = tools::fetch_containing_impl_for_context(

@@ -6,6 +6,7 @@ use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -17,7 +18,7 @@ use crate::state::AppState;
 
 /// Builds the HTTP router with health/readiness endpoints and MCP transport
 /// mounting.
-pub fn router(state: AppState, config: Config) -> Router {
+pub fn router(state: AppState, config: Config, prometheus_handle: PrometheusHandle) -> Router {
     let mcp_service = mcp::streamable_http_service(state.clone(), &config);
     let strict_accept = config.mcp_strict_accept;
     let mcp_router = Router::new()
@@ -27,10 +28,12 @@ pub fn router(state: AppState, config: Config) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics))
         .route("/schemas", get(list_tool_schemas))
         .route("/schemas/{tool_name}", get(get_tool_schema))
         .nest("/mcp", mcp_router)
         .with_state(state)
+        .layer(axum::Extension(prometheus_handle))
         .layer(ConcurrencyLimitLayer::new(
             config
                 .max_concurrent_requests
@@ -92,6 +95,10 @@ struct ErrorPayload {
 
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, Json(StatusPayload { status: "ok" }))
+}
+
+async fn metrics(axum::Extension(handle): axum::Extension<PrometheusHandle>) -> impl IntoResponse {
+    handle.render()
 }
 
 async fn readyz(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {

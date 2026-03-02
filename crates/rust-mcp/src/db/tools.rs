@@ -893,6 +893,7 @@ pub async fn list_crate_usage_sources(
         FROM dependents d
         JOIN source_files sf ON sf.crate_version_id = d.dependent_version_id
         WHERE sf.content ILIKE $2
+          AND (sf.language IS NULL OR sf.language != 'rustdoc_json')
         ORDER BY d.dependent_downloads DESC, d.dependent_crate_name ASC, sf.path ASC
         LIMIT $3
         OFFSET $4",
@@ -958,6 +959,7 @@ pub async fn list_source_files_for_hotspots(
              FROM source_files sf
              WHERE sf.crate_version_id = $1
                AND sf.path ILIKE $2 ESCAPE '\\\\'
+               AND (sf.language IS NULL OR sf.language != 'rustdoc_json')
              ORDER BY sf.path ASC
              LIMIT 1000",
         )
@@ -972,6 +974,7 @@ pub async fn list_source_files_for_hotspots(
                 sf.content
              FROM source_files sf
              WHERE sf.crate_version_id = $1
+               AND (sf.language IS NULL OR sf.language != 'rustdoc_json')
              ORDER BY sf.path ASC
              LIMIT 1000",
         )
@@ -1719,6 +1722,8 @@ pub async fn search_source_files(
             qb.push(' ');
         }
     }
+
+    qb.push("AND (sf.language IS NULL OR sf.language != 'rustdoc_json') ");
 
     qb.push("ORDER BY sf.indexed_at DESC, c.name ASC, sf.path ASC LIMIT ");
     qb.push_bind(params.limit.max(1));

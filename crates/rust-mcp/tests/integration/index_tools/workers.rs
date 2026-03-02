@@ -98,6 +98,17 @@ async fn startup_rustdoc_json_refresh_processes_all_pages() {
         assert!(seeded.version_id > 0);
     }
 
+    // The startup refresh filters `locally_present = TRUE`, so mark the seeded
+    // versions accordingly.
+    sqlx::query(
+        "UPDATE crate_versions SET locally_present = TRUE
+         WHERE crate_id = (SELECT id FROM crates WHERE name = $1)",
+    )
+    .bind(&crate_name)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to mark seeded versions as locally present");
+
     run_startup_rustdoc_json_refresh_for_tests(context.state.clone(), 1).await;
 
     for crate_version in &crate_versions {

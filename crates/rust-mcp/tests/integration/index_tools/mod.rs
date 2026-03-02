@@ -54,7 +54,6 @@ fn test_config(
         database_min_connections: 1,
         database_max_connections: 4,
         max_concurrent_requests: 32,
-        prometheus_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
         auto_migrate: false,
         cargo_registry_dir: PathBuf::from("/tmp"),
         data_dir: PathBuf::from("/tmp"),
@@ -151,7 +150,7 @@ async fn mock_index_sync_context_with_rustdoc_dir(
     let state = AppState::connect(config.clone()).await?;
     state.run_migrations().await?;
 
-    let router = http::router(state.clone(), config);
+    let router = http::router(state.clone(), config, common::test_prometheus_handle());
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(20))
         .await?;

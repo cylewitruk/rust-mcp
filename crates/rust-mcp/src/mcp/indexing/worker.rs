@@ -1,4 +1,4 @@
-use metrics::gauge;
+use metrics::{counter, gauge};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::{Duration, sleep};
@@ -11,10 +11,26 @@ use crate::db::indexing::{
 };
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
 use crate::mcp::indexing::discovery::collect_local_versions_for_crate;
-use crate::mcp::indexing::handlers::IndexSyncCratesRequest;
+use crate::mcp::indexing::handlers::{IndexSyncCratesRequest, SyncCrateOutcome};
+use crate::mcp::indexing::local_cache::LocalCacheRefreshOutcome;
+use crate::mcp::indexing::rustdoc_json::RustdocJsonRefreshOutcome;
+use crate::mcp::indexing::security::SecuritySyncOutcome;
 use crate::mcp::server::McpServer;
+use crate::mcp::tools::docs::DocsRefreshOutcome;
 use crate::mcp::utils::{sync_page, sync_per_page};
 use crate::state::AppState;
+
+/// Typed outcome returned by each refresh job scope, carrying data for
+/// Prometheus counter emission.
+enum RefreshJobOutcome {
+    CrateSync(SyncCrateOutcome),
+    RustdocJson(RustdocJsonRefreshOutcome),
+    LocalCache(LocalCacheRefreshOutcome),
+    Docs(DocsRefreshOutcome),
+    Security(SecuritySyncOutcome),
+    /// `index.sync_crates` ("all") — outcome is already handled internally.
+    AllSync,
+}
 
 #[derive(Debug, Default, Deserialize)]
 struct RefreshJobPayload {
@@ -124,6 +140,8 @@ pub async fn run_refresh_worker(state: AppState) {
             "processing refresh job"
         );
 
+        gauge!("rust_mcp_refresh_jobs_running").increment(1.0);
+
         let job_started = std::time::Instant::now();
         let server = McpServer::new(state.clone());
         let payload =
@@ -131,11 +149,11 @@ pub async fn run_refresh_worker(state: AppState) {
         let locally_present_only = payload
             .locally_present_only
             .unwrap_or(false);
-        let result = match job.scope.as_str() {
+        let result: Result<RefreshJobOutcome, String> = match job.scope.as_str() {
             "crate" | "crate_deep_refresh" => server
                 .sync_single_crate(&job.crate_name, job.include_dependencies)
                 .await
-                .map(|_| ()),
+                .map(RefreshJobOutcome::CrateSync),
             "all" => server
                 .handle_index_sync_crates(IndexSyncCratesRequest {
                     query: payload.query,
@@ -146,7 +164,7 @@ pub async fn run_refresh_worker(state: AppState) {
                         .or(Some(job.include_dependencies)),
                 })
                 .await
-                .map(|_| ()),
+                .map(|_| RefreshJobOutcome::AllSync),
             "security" => {
                 let page = sync_page(payload.page);
                 let per_page = sync_per_page(payload.per_page);
@@ -155,10 +173,16 @@ pub async fn run_refresh_worker(state: AppState) {
                     .sync_osv_security(per_page, offset)
                     .await
                 {
-                    Ok(_) => server
+                    Ok(mut osv) => match server
                         .sync_rustsec_db_security(per_page, offset)
                         .await
-                        .map(|_| ()),
+                    {
+                        Ok(rustsec) => {
+                            osv.merge(rustsec);
+                            Ok(RefreshJobOutcome::Security(osv))
+                        }
+                        Err(error) => Err(error),
+                    },
                     Err(error) => Err(error),
                 }
             }
@@ -169,7 +193,7 @@ pub async fn run_refresh_worker(state: AppState) {
                     payload.per_page,
                 )
                 .await
-                .map(|_| ()),
+                .map(RefreshJobOutcome::Docs),
             "local_cache" => server
                 .sync_local_source_cache(
                     optional_job_crate_name(&job.crate_name, payload.crate_name),
@@ -179,7 +203,7 @@ pub async fn run_refresh_worker(state: AppState) {
                     locally_present_only,
                 )
                 .await
-                .map(|_| ()),
+                .map(RefreshJobOutcome::LocalCache),
             "rustdoc_json" => server
                 .sync_rustdoc_json_cache(
                     optional_job_crate_name(&job.crate_name, payload.crate_name),
@@ -188,16 +212,19 @@ pub async fn run_refresh_worker(state: AppState) {
                     locally_present_only,
                 )
                 .await
-                .map(|_| ()),
+                .map(RefreshJobOutcome::RustdocJson),
             other => {
                 Err(format!("unsupported refresh scope '{}' for crate '{}'", other, job.crate_name))
             }
         };
 
+        gauge!("rust_mcp_refresh_jobs_running").decrement(1.0);
         let elapsed = job_started.elapsed();
 
         match result {
-            Ok(()) => {
+            Ok(outcome) => {
+                emit_outcome_counters(&outcome);
+
                 info!(
                     job_id = job.id,
                     crate_name = %job.crate_name,
@@ -208,6 +235,8 @@ pub async fn run_refresh_worker(state: AppState) {
                 if let Err(error) = mark_refresh_job_finished(&state.db, job.id).await {
                     error!(job_id = job.id, %error, "failed to mark refresh job finished");
                 }
+                counter!("rust_mcp_refresh_jobs_completed_total", "scope" => job.scope.clone())
+                    .increment(1);
                 state
                     .indexing_coordinator
                     .signal_completion(job.id, JobOutcome::Completed);
@@ -276,6 +305,8 @@ pub async fn run_refresh_worker(state: AppState) {
                 {
                     error!(job_id = job.id, %error, "failed to persist refresh job failure");
                 }
+                counter!("rust_mcp_refresh_jobs_errored_total", "scope" => job.scope.clone())
+                    .increment(1);
 
                 if let Err(error) =
                     mark_crate_refresh_error(&state.db, &job.crate_name, &error_message).await
@@ -309,6 +340,32 @@ pub async fn run_refresh_worker(state: AppState) {
                 }
             }
         }
+    }
+}
+
+fn emit_outcome_counters(outcome: &RefreshJobOutcome) {
+    match outcome {
+        RefreshJobOutcome::CrateSync(o) => {
+            counter!("rust_mcp_crate_versions_synced_total").increment(o.versions_synced as u64);
+            counter!("rust_mcp_dependencies_synced_total").increment(o.dependencies_synced as u64);
+        }
+        RefreshJobOutcome::RustdocJson(o) => {
+            counter!("rust_mcp_rustdoc_symbols_written_total").increment(o.symbols_written as u64);
+            counter!("rust_mcp_rustdoc_types_written_total").increment(o.types_written as u64);
+            counter!("rust_mcp_rustdoc_impls_written_total").increment(o.impls_written as u64);
+            counter!("rust_mcp_rustdoc_traits_written_total").increment(o.traits_written as u64);
+        }
+        RefreshJobOutcome::LocalCache(o) => {
+            counter!("rust_mcp_source_files_upserted_total").increment(o.upserted_files as u64);
+        }
+        RefreshJobOutcome::Docs(o) => {
+            counter!("rust_mcp_docs_pages_written_total").increment(o.pages_written as u64);
+        }
+        RefreshJobOutcome::Security(o) => {
+            counter!("rust_mcp_security_advisories_written_total")
+                .increment(o.advisories_written as u64);
+        }
+        RefreshJobOutcome::AllSync => {}
     }
 }
 

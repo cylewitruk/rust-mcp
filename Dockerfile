@@ -52,7 +52,7 @@ COPY --from=build /out/rust-mcp /usr/local/bin/rust-mcp
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Entrypoint runs as root, drops to postgres for DB and rust-mcp for the app
-EXPOSE 43173 9090
+EXPOSE 43173
 VOLUME /var/lib/postgresql/data
 
 ENTRYPOINT ["docker-entrypoint.sh"]

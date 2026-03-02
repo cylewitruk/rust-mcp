@@ -46,12 +46,11 @@ pub async fn run() -> Result<()> {
         warn!("AUTO_MIGRATE=false, skipping migrations");
     }
 
-    PrometheusBuilder::new()
-        .with_http_listener(config.prometheus_bind)
-        .install()
-        .context("failed to install prometheus metrics exporter")?;
+    let prometheus_handle = PrometheusBuilder::new()
+        .install_recorder()
+        .context("failed to install prometheus metrics recorder")?;
 
-    info!(bind = %config.prometheus_bind, "prometheus exporter listening");
+    mcp::metrics::register_metric_descriptions();
 
     let listener = TcpListener::bind(config.http_bind)
         .await
@@ -65,7 +64,7 @@ pub async fn run() -> Result<()> {
 
     let shutdown = make_shutdown_signal().context("failed to install shutdown signal handlers")?;
 
-    let app = http::router(state, config);
+    let app = http::router(state, config, prometheus_handle);
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
         .await

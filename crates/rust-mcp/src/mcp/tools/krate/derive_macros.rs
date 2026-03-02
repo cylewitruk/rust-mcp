@@ -199,8 +199,11 @@ impl McpServer {
         let mut function_like_macros = BTreeMap::<String, CrateFunctionLikeMacroEntry>::new();
 
         for source in source_rows {
+            let Some(content) = source.content.as_deref() else {
+                continue;
+            };
             let (derive_candidates, attribute_candidates, function_like_candidates) =
-                collect_macro_exports(&source.path, &source.content);
+                collect_macro_exports(&source.path, content);
 
             for candidate in derive_candidates {
                 derive_macros

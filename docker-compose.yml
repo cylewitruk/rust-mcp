@@ -19,12 +19,10 @@ services:
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       CARGO_REGISTRY_DIR: /cargo/registry
       MCP_DATA_DIR: /var/lib/rust-mcp
-      PROMETHEUS_BIND: ${PROMETHEUS_BIND:-0.0.0.0:9090}
       RUST_LOG: ${RUST_LOG:-info,rust_mcp=debug,sqlx=warn}
       LOG_FORMAT: ${LOG_FORMAT:-pretty}
     ports:
       - "127.0.0.1:${MCP_HTTP_PORT:-43173}:43173"
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ${HOME}/.cargo/registry:/cargo/registry:ro
       - mcp_data:/var/lib/rust-mcp

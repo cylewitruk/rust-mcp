@@ -237,7 +237,8 @@ impl McpServer {
         let scanned_files = files.len();
         let mut hotspots = files
             .iter()
-            .flat_map(|row| detect_hotspots_in_file(&row.path, &row.content, &patterns))
+            .filter_map(|row| Some((row, row.content.as_deref()?)))
+            .flat_map(|(row, content)| detect_hotspots_in_file(&row.path, content, &patterns))
             .collect::<Vec<_>>();
 
         hotspots.sort_by(|left, right| {

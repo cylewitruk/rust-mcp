@@ -43,8 +43,8 @@ pub struct SourceReadRow {
     pub version: String,
     /// Relative path of the source file in the crate.
     pub path: String,
-    /// Full source file contents.
-    pub content: String,
+    /// Full source file contents (NULL for rustdoc_json entries).
+    pub content: Option<String>,
 }
 
 /// Row for searching indexed source content.
@@ -54,7 +54,7 @@ pub struct SourceSearchRow {
     pub crate_name: String,
     pub version: String,
     pub path: String,
-    pub content: String,
+    pub content: Option<String>,
     pub indexed_at: String,
 }
 
@@ -645,6 +645,10 @@ pub struct IndexedSymbolInsert {
     pub deprecated_since: Option<String>,
     /// Optional deprecation note text.
     pub deprecated_note: Option<String>,
+    /// Raw markdown documentation from rustdoc `item.docs`.
+    pub docs: Option<String>,
+    /// Structured attributes from rustdoc `item.attrs`.
+    pub attrs: Option<Value>,
 }
 
 /// Insert DTO for a type definition extracted from source or rustdoc metadata.
@@ -682,6 +686,10 @@ pub struct IndexedTypeInsert {
     pub auto_traits: Value,
     /// Where-clause payload.
     pub where_clauses: Value,
+    /// Raw markdown documentation from rustdoc `item.docs`.
+    pub docs: Option<String>,
+    /// Structured attributes from rustdoc `item.attrs`.
+    pub attrs: Option<Value>,
 }
 
 /// Insert DTO for an impl block extracted from source or rustdoc metadata.
@@ -717,6 +725,8 @@ pub struct IndexedImplInsert {
     pub generics: Value,
     /// Where-clause payload for the impl.
     pub where_clauses: Value,
+    /// Raw markdown documentation from rustdoc `item.docs`.
+    pub docs: Option<String>,
 }
 
 /// Insert DTO for a trait definition extracted from source or rustdoc metadata.
@@ -742,6 +752,8 @@ pub struct IndexedTraitInsert {
     pub generics: Value,
     /// Optional rustdoc item id when source is rustdoc JSON.
     pub rustdoc_item_id: Option<i32>,
+    /// Raw markdown documentation from rustdoc `item.docs`.
+    pub docs: Option<String>,
 }
 
 /// Unified extraction batch DTO used by indexers before DB inserts.
@@ -832,7 +844,7 @@ pub struct RustdocReExportRow {
 #[derive(Debug, Clone, FromRow)]
 pub struct ReExportSourceRow {
     pub path: String,
-    pub content: String,
+    pub content: Option<String>,
 }
 
 /// Symbol metadata row used by `crate.re_exports` fallback parser.
@@ -851,7 +863,7 @@ pub struct CrateUsageSourceRow {
     pub dependent_version: String,
     pub dependent_downloads: i64,
     pub path: String,
-    pub content: String,
+    pub content: Option<String>,
 }
 
 /// License metadata row used by `crate.license_check`.
@@ -867,7 +879,7 @@ pub struct CrateVersionLicenseRow {
 #[derive(Debug, Clone, FromRow)]
 pub struct HotspotSourceFileRow {
     pub path: String,
-    pub content: String,
+    pub content: Option<String>,
 }
 
 /// Feature row used by `dependency.feature_impact` and `crate.features`.

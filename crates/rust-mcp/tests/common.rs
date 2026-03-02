@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use rust_mcp::config::{Config, LogFormat};
 use rust_mcp::http;
 use rust_mcp::state::AppState;
@@ -10,6 +11,13 @@ use rust_mcp_testing::fixtures::{MinimalCrateGraphFixture, seed_minimal_crate_gr
 use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 use serde_json::Value;
+
+/// Creates a test-only `PrometheusHandle` without installing a global recorder.
+pub fn test_prometheus_handle() -> PrometheusHandle {
+    PrometheusBuilder::new()
+        .build_recorder()
+        .handle()
+}
 
 pub fn test_config(database_url: String) -> Config {
     Config {
@@ -27,7 +35,6 @@ pub fn test_config(database_url: String) -> Config {
         database_min_connections: 1,
         database_max_connections: 4,
         max_concurrent_requests: 32,
-        prometheus_bind: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)),
         auto_migrate: false,
         cargo_registry_dir: PathBuf::from("/tmp"),
         data_dir: PathBuf::from("/tmp"),
@@ -74,7 +81,7 @@ pub async fn seeded_mcp_context() -> Result<SeededMcpContext> {
     .execute(&state.db)
     .await?;
 
-    let router = http::router(state.clone(), config);
+    let router = http::router(state.clone(), config, test_prometheus_handle());
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(20))
         .await?;

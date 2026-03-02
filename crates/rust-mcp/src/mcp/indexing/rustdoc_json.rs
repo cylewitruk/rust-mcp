@@ -14,7 +14,7 @@ use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
 use crate::db::indexing::{
-    fetch_rustdoc_sync_candidates, fetch_source_file_id_required, replace_crate_version_index_rows,
+    fetch_rustdoc_sync_candidates, replace_crate_version_index_rows,
     upsert_source_file_unconditional,
 };
 use crate::db::models::{
@@ -660,6 +660,48 @@ fn has_non_exhaustive(item: &Item) -> bool {
         .any(|attr| matches!(attr, Attribute::NonExhaustive))
 }
 
+/// Converts the `item.attrs` list into a JSONB-friendly representation.
+///
+/// Returns `None` when the list is empty so we don't store `[]` for every item.
+fn serialize_attrs(attrs: &[Attribute]) -> Option<serde_json::Value> {
+    if attrs.is_empty() {
+        return None;
+    }
+
+    let arr: Vec<serde_json::Value> = attrs
+        .iter()
+        .map(|attr| match attr {
+            Attribute::NonExhaustive => json!({"kind": "non_exhaustive"}),
+            Attribute::MustUse { reason } => json!({"kind": "must_use", "reason": reason}),
+            Attribute::MacroExport => json!({"kind": "macro_export"}),
+            Attribute::ExportName(name) => json!({"kind": "export_name", "name": name}),
+            Attribute::LinkSection(name) => json!({"kind": "link_section", "name": name}),
+            Attribute::AutomaticallyDerived => json!({"kind": "automatically_derived"}),
+            Attribute::Repr(repr) => {
+                let kind_str = match &repr.kind {
+                    rustdoc_types::ReprKind::Rust => "Rust",
+                    rustdoc_types::ReprKind::C => "C",
+                    rustdoc_types::ReprKind::Transparent => "transparent",
+                    rustdoc_types::ReprKind::Simd => "simd",
+                };
+                json!({
+                    "kind": "repr",
+                    "repr_kind": kind_str,
+                    "align": repr.align,
+                    "packed": repr.packed,
+                    "int": repr.int,
+                })
+            }
+            Attribute::NoMangle => json!({"kind": "no_mangle"}),
+            Attribute::TargetFeature { enable } => {
+                json!({"kind": "target_feature", "enable": enable})
+            }
+            Attribute::Other(raw) => json!({"kind": "other", "raw": raw}),
+        })
+        .collect();
+    Some(json!(arr))
+}
+
 fn item_enum_to_kind(inner: &ItemEnum) -> &'static str {
     match inner {
         ItemEnum::Module(_) => "module",
@@ -930,6 +972,8 @@ fn extract_symbols(
                 .deprecation
                 .as_ref()
                 .and_then(|d| d.note.clone()),
+            docs: item.docs.clone(),
+            attrs: serialize_attrs(&item.attrs),
         });
     }
 
@@ -1008,6 +1052,8 @@ fn extract_struct(
         is_non_exhaustive: has_non_exhaustive(item),
         auto_traits: collect_auto_traits(&st.impls, krate),
         where_clauses: serialize_where_predicates(&st.generics.where_predicates, krate),
+        docs: item.docs.clone(),
+        attrs: serialize_attrs(&item.attrs),
     }
 }
 
@@ -1080,6 +1126,8 @@ fn extract_enum(
         is_non_exhaustive: has_non_exhaustive(item),
         auto_traits: collect_auto_traits(&en.impls, krate),
         where_clauses: serialize_where_predicates(&en.generics.where_predicates, krate),
+        docs: item.docs.clone(),
+        attrs: serialize_attrs(&item.attrs),
     }
 }
 
@@ -1122,6 +1170,8 @@ fn extract_union(
         is_non_exhaustive: has_non_exhaustive(item),
         auto_traits: collect_auto_traits(&un.impls, krate),
         where_clauses: serialize_where_predicates(&un.generics.where_predicates, krate),
+        docs: item.docs.clone(),
+        attrs: serialize_attrs(&item.attrs),
     }
 }
 
@@ -1164,6 +1214,8 @@ fn extract_type_alias(
         is_non_exhaustive: false,
         auto_traits: json!([]),
         where_clauses: serialize_where_predicates(&ta.generics.where_predicates, krate),
+        docs: item.docs.clone(),
+        attrs: serialize_attrs(&item.attrs),
     }
 }
 
@@ -1220,6 +1272,7 @@ fn extract_impls(krate: &RustdocCrate) -> Vec<IndexedImplInsert> {
             blanket_type,
             generics: serialize_generic_params(&imp.generics.params, krate),
             where_clauses: serialize_where_predicates(&imp.generics.where_predicates, krate),
+            docs: item.docs.clone(),
         });
     }
 
@@ -1325,6 +1378,7 @@ fn extract_traits(krate: &RustdocCrate) -> Vec<IndexedTraitInsert> {
             associated_types: json!(assoc_types),
             generics: serialize_generic_params(&trait_def.generics.params, krate),
             rustdoc_item_id: Some(id.0 as i32),
+            docs: item.docs.clone(),
         });
     }
 
@@ -1473,14 +1527,15 @@ impl McpServer {
         }
 
         let content_bytes = content.as_bytes();
-        upsert_source_file_unconditional(
+        let source_file_id = upsert_source_file_unconditional(
             &self.state.db,
             candidate.crate_version_id,
             source_path,
             &file_sha256_hex(content_bytes),
             content_bytes.len() as i64,
             Some("rustdoc_json"),
-            content,
+            None, /* don't store the raw JSON blob — data is extracted into
+                   * symbols/types/impls/traits */
         )
         .await
         .map_err(|e| {
@@ -1489,16 +1544,6 @@ impl McpServer {
                 source_path, candidate.crate_name, candidate.version
             )
         })?;
-
-        let source_file_id =
-            fetch_source_file_id_required(&self.state.db, candidate.crate_version_id, source_path)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to lookup rustdoc source file id {} for {}@{}: {e}",
-                        source_path, candidate.crate_name, candidate.version
-                    )
-                })?;
 
         let extraction = extract_all(&krate);
 

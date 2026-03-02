@@ -253,12 +253,11 @@ impl McpServer {
                 .saturating_add(1) as usize;
             let mut entries = Vec::<CrateReExportEntry>::new();
             for source in sources {
+                let Some(content) = source.content.as_deref() else {
+                    continue;
+                };
                 let module_prefix = module_prefix_from_path(&ctx.crate_row.name, &source.path);
-                for (line_idx, line) in source
-                    .content
-                    .lines()
-                    .enumerate()
-                {
+                for (line_idx, line) in content.lines().enumerate() {
                     let parsed = parse_pub_use_statement(line, (line_idx + 1) as u32);
                     for entry in parsed {
                         let canonical_path = format!("{}::{}", module_prefix, entry.exported_name);

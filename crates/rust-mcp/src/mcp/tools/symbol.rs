@@ -298,22 +298,17 @@ mod tests {
                 .expect("load fixture version")
                 .expect("fixture version exists");
 
-            indexing::upsert_source_file_unconditional(
+            let source_file_id = indexing::upsert_source_file_unconditional(
                 pool,
                 version_row.id,
                 "src/lib.rs",
                 sha,
                 10,
                 Some("Rust"),
-                "pub trait Serializer {}",
+                Some("pub trait Serializer {}"),
             )
             .await
             .expect("upsert fixture source");
-
-            let source_file_id =
-                indexing::fetch_source_file_id_required(pool, version_row.id, "src/lib.rs")
-                    .await
-                    .expect("load fixture source id");
 
             let extraction = IndexedExtractionBatch {
                 symbols: vec![IndexedSymbolInsert {

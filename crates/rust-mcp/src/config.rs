@@ -35,8 +35,6 @@ pub mod env_vars {
     pub const DATABASE_MAX_CONNECTIONS: &str = "DATABASE_MAX_CONNECTIONS";
     /// Maximum concurrent inbound HTTP requests.
     pub const MAX_CONCURRENT_REQUESTS: &str = "MAX_CONCURRENT_REQUESTS";
-    /// Prometheus metrics exporter bind address.
-    pub const PROMETHEUS_BIND: &str = "PROMETHEUS_BIND";
     /// Whether to auto-run SQL migrations on startup.
     pub const AUTO_MIGRATE: &str = "AUTO_MIGRATE";
     /// Path to the mounted cargo registry directory.
@@ -147,10 +145,6 @@ pub struct Config {
     /// Maximum number of concurrent inbound HTTP requests.
     #[arg(long, env = env_vars::MAX_CONCURRENT_REQUESTS, default_value_t = 128)]
     pub max_concurrent_requests: u32,
-
-    /// Bind address for the standalone Prometheus metrics exporter.
-    #[arg(long, env = env_vars::PROMETHEUS_BIND, default_value = "0.0.0.0:9090")]
-    pub prometheus_bind: SocketAddr,
 
     /// Whether to run SQL migrations during startup.
     #[arg(long, env = env_vars::AUTO_MIGRATE, default_value_t = true)]

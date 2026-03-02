@@ -281,6 +281,7 @@ async fn rust_mcp_container_supports_tools_list_after_initialize() {
         "crate.derive_macros",
         "crate.compare",
         "crate.compatibility",
+        "crate.deprecated",
         "crate.compatibility_matrix",
         "crate.migration_path",
         "crate.license_check",

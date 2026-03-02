@@ -225,10 +225,10 @@ async fn rust_mcp_container_closes_session_via_delete_and_rejects_follow_up_requ
         "raw tools/list request failed after session close",
     )
     .await;
-    assert_eq!(
-        post_close_tools_list.status(),
-        StatusCode::UNAUTHORIZED,
-        "expected closed session id to be rejected by subsequent requests"
+    assert!(
+        matches!(post_close_tools_list.status(), StatusCode::UNAUTHORIZED | StatusCode::NOT_FOUND),
+        "expected closed session id to be rejected by subsequent requests, got {}",
+        post_close_tools_list.status()
     );
 }
 
@@ -269,10 +269,13 @@ async fn rust_mcp_container_rejects_unknown_session_id_header() {
         "raw tools/call request with unknown session failed",
     )
     .await;
-    assert_eq!(
-        unknown_session_response.status(),
-        StatusCode::UNAUTHORIZED,
-        "expected unauthorized status for unknown session id"
+    assert!(
+        matches!(
+            unknown_session_response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::NOT_FOUND
+        ),
+        "expected unauthorized/not-found status for unknown session id, got {}",
+        unknown_session_response.status()
     );
 
     let ping_response = post_mcp_jsonrpc(

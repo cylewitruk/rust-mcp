@@ -191,16 +191,17 @@ impl McpServer {
 
         let mut hits = rows
             .into_iter()
-            .map(|row| {
-                let (line, snippet) = extract_text_snippet(&row.content, &query);
-                SourceSearchHit {
+            .filter_map(|row| {
+                let content = row.content.as_deref()?;
+                let (line, snippet) = extract_text_snippet(content, &query);
+                Some(SourceSearchHit {
                     crate_name: row.crate_name,
                     version: row.version,
                     path: row.path,
                     indexed_at: row.indexed_at,
                     match_line: line,
                     snippet,
-                }
+                })
             })
             .collect::<Vec<_>>();
 
@@ -332,8 +333,17 @@ impl McpServer {
                 .ok_or_else(|| format!("source file not found for {crate_name}:{path}"))?
         };
 
-        let lines = row
+        let content = row
             .content
+            .as_deref()
+            .ok_or_else(|| {
+                format!(
+                    "source content not available for {crate_name}:{path} (content was not stored \
+                     for this file type)"
+                )
+            })?;
+
+        let lines = content
             .lines()
             .collect::<Vec<_>>();
         let total_lines = lines.len().max(1) as u32;

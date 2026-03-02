@@ -112,10 +112,10 @@ impl McpServer {
 
         let mut patterns = rows
             .into_iter()
-            .map(|row| {
-                let (line_start, line_end, snippet) =
-                    extract_usage_snippet(&row.content, &symbol_name);
-                CrateUsagePattern {
+            .filter_map(|row| {
+                let content = row.content.as_deref()?;
+                let (line_start, line_end, snippet) = extract_usage_snippet(content, &symbol_name);
+                Some(CrateUsagePattern {
                     dependent_crate: row.dependent_crate,
                     dependent_version: row.dependent_version,
                     dependent_downloads: row.dependent_downloads,
@@ -123,7 +123,7 @@ impl McpServer {
                     line_start,
                     line_end,
                     snippet,
-                }
+                })
             })
             .collect::<Vec<_>>();
 

@@ -117,6 +117,9 @@ pub async fn fetch_rustdoc_sync_candidates(
 }
 
 /// Upserts a source file row and only writes when the SHA changes.
+///
+/// Returns `Some(id)` when the row was inserted or updated, `None` when the
+/// SHA matched and no write occurred.
 pub async fn upsert_source_file_if_sha_changed(
     db: &PgPool,
     crate_version_id: i64,
@@ -124,9 +127,9 @@ pub async fn upsert_source_file_if_sha_changed(
     sha256: &str,
     file_size: i64,
     language: Option<&str>,
-    content: &str,
-) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
+    content: Option<&str>,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
         "INSERT INTO source_files (
             crate_version_id, path, sha256, file_size, language, content, indexed_at
          ) VALUES (
@@ -138,7 +141,8 @@ pub async fn upsert_source_file_if_sha_changed(
              language = EXCLUDED.language,
              content = EXCLUDED.content,
              indexed_at = NOW()
-         WHERE source_files.sha256 IS DISTINCT FROM EXCLUDED.sha256",
+         WHERE source_files.sha256 IS DISTINCT FROM EXCLUDED.sha256
+         RETURNING id",
     )
     .bind(crate_version_id)
     .bind(path)
@@ -146,12 +150,13 @@ pub async fn upsert_source_file_if_sha_changed(
     .bind(file_size)
     .bind(language)
     .bind(content)
-    .execute(db)
-    .await?;
-    Ok(result.rows_affected())
+    .fetch_optional(db)
+    .await
 }
 
 /// Upserts a source file row and always refreshes indexed content.
+///
+/// Always returns the row id (insert or update).
 pub async fn upsert_source_file_unconditional(
     db: &PgPool,
     crate_version_id: i64,
@@ -159,9 +164,9 @@ pub async fn upsert_source_file_unconditional(
     sha256: &str,
     file_size: i64,
     language: Option<&str>,
-    content: &str,
-) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
+    content: Option<&str>,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
         "INSERT INTO source_files (
             crate_version_id,
             path,
@@ -178,7 +183,8 @@ pub async fn upsert_source_file_unconditional(
              file_size = EXCLUDED.file_size,
              language = EXCLUDED.language,
              content = EXCLUDED.content,
-             indexed_at = NOW()",
+             indexed_at = NOW()
+         RETURNING id",
     )
     .bind(crate_version_id)
     .bind(path)
@@ -186,9 +192,8 @@ pub async fn upsert_source_file_unconditional(
     .bind(file_size)
     .bind(language)
     .bind(content)
-    .execute(db)
-    .await?;
-    Ok(result.rows_affected())
+    .fetch_one(db)
+    .await
 }
 
 /// Loads a source file id for the crate version and relative path.
@@ -206,24 +211,6 @@ pub async fn fetch_source_file_id_optional(
     .bind(crate_version_id)
     .bind(path)
     .fetch_optional(db)
-    .await
-}
-
-/// Loads a source file id for the crate version and relative path.
-pub async fn fetch_source_file_id_required(
-    db: &PgPool,
-    crate_version_id: i64,
-    path: &str,
-) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT id
-         FROM source_files
-         WHERE crate_version_id = $1 AND path = $2
-         LIMIT 1",
-    )
-    .bind(crate_version_id)
-    .bind(path)
-    .fetch_one(db)
     .await
 }
 
@@ -1195,10 +1182,12 @@ pub async fn insert_indexed_extraction_batch(
                 canonical_path,
                 definition_path,
                 deprecated_since,
-                deprecated_note
+                deprecated_note,
+                docs,
+                attrs
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(),
-                $10, $11, $12, $13, $14
+                $10, $11, $12, $13, $14, $15, $16
              )",
         )
         .bind(crate_version_id)
@@ -1215,6 +1204,8 @@ pub async fn insert_indexed_extraction_batch(
         .bind(&symbol.definition_path)
         .bind(&symbol.deprecated_since)
         .bind(&symbol.deprecated_note)
+        .bind(&symbol.docs)
+        .bind(&symbol.attrs)
         .execute(&mut **tx)
         .await?;
         counts.symbols += 1;
@@ -1247,10 +1238,13 @@ pub async fn insert_indexed_extraction_batch(
                 deprecated_note,
                 is_non_exhaustive,
                 auto_traits,
-                where_clauses
+                where_clauses,
+                docs,
+                attrs
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, NOW(), $12, $13, $14, $15, $16, $17, $18, $19
+                $11, NOW(), $12, $13, $14, $15, $16, $17, $18, $19,
+                $20, $21
              )
              ON CONFLICT (crate_version_id, source_file_id, type_name, kind)
                 WHERE index_source != 'rustdoc_json'
@@ -1275,6 +1269,8 @@ pub async fn insert_indexed_extraction_batch(
         .bind(extracted_type.is_non_exhaustive)
         .bind(&extracted_type.auto_traits)
         .bind(&extracted_type.where_clauses)
+        .bind(&extracted_type.docs)
+        .bind(&extracted_type.attrs)
         .execute(&mut **tx)
         .await?;
         counts.types += 1;
@@ -1301,10 +1297,11 @@ pub async fn insert_indexed_extraction_batch(
                 is_negative,
                 blanket_type,
                 generics,
-                where_clauses
+                where_clauses,
+                docs
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, NOW(), $12, $13, $14, $15, $16, $17, $18
+                $11, NOW(), $12, $13, $14, $15, $16, $17, $18, $19
              )",
         )
         .bind(crate_version_id)
@@ -1325,6 +1322,7 @@ pub async fn insert_indexed_extraction_batch(
         .bind(&extracted_impl.blanket_type)
         .bind(&extracted_impl.generics)
         .bind(&extracted_impl.where_clauses)
+        .bind(&extracted_impl.docs)
         .execute(&mut **tx)
         .await?;
         counts.impls += 1;
@@ -1345,10 +1343,11 @@ pub async fn insert_indexed_extraction_batch(
                 generics,
                 index_source,
                 indexed_at,
-                rustdoc_item_id
+                rustdoc_item_id,
+                docs
              ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, NOW(), $12
+                $11, NOW(), $12, $13
              )",
         )
         .bind(crate_version_id)
@@ -1363,6 +1362,7 @@ pub async fn insert_indexed_extraction_batch(
         .bind(&extracted_trait.generics)
         .bind(index_source)
         .bind(extracted_trait.rustdoc_item_id)
+        .bind(&extracted_trait.docs)
         .execute(&mut **tx)
         .await?;
         counts.traits += 1;

@@ -799,14 +799,14 @@ impl McpServer {
                 seen_paths.push(file.relative_path.clone());
                 outcome.scanned_files += 1;
 
-                let affected = upsert_source_file_if_sha_changed(
+                let upserted_id = upsert_source_file_if_sha_changed(
                     &self.state.db,
                     entry.crate_version_id,
                     &file.relative_path,
                     &file.sha256,
                     file.file_size,
                     file.language.as_deref(),
-                    &file.content,
+                    Some(&file.content),
                 )
                 .await
                 .map_err(|e| {
@@ -816,18 +816,22 @@ impl McpServer {
                     )
                 })?;
 
-                let source_file_id = fetch_source_file_id_optional(
-                    &self.state.db,
-                    entry.crate_version_id,
-                    &file.relative_path,
-                )
-                .await
-                .map_err(|e| {
-                    format!(
-                        "failed to lookup source file id {} for {}@{}: {e}",
-                        file.relative_path, entry.crate_name, entry.version
+                // Use the returned id when a write occurred, otherwise look it up.
+                let source_file_id = match upserted_id {
+                    Some(id) => Some(id),
+                    None => fetch_source_file_id_optional(
+                        &self.state.db,
+                        entry.crate_version_id,
+                        &file.relative_path,
                     )
-                })?;
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "failed to lookup source file id {} for {}@{}: {e}",
+                            file.relative_path, entry.crate_name, entry.version
+                        )
+                    })?,
+                };
 
                 if file.language.as_deref() == Some("rust") {
                     let Some(source_file_id) = source_file_id else {
@@ -844,13 +848,24 @@ impl McpServer {
                                 )
                             })?;
 
-                    if affected > 0 || existing_symbol_count == 0 {
-                        let extracted = extract_rust_symbols(&file.content).map_err(|e| {
-                            format!(
-                                "failed to parse rust symbols in {} for {}@{}: {e}",
-                                file.relative_path, entry.crate_name, entry.version
-                            )
-                        })?;
+                    if upserted_id.is_some() || existing_symbol_count == 0 {
+                        let extracted = match extract_rust_symbols(&file.content) {
+                            Ok(batch) => batch,
+                            Err(e) => {
+                                tracing::debug!(
+                                    crate_name = %entry.crate_name,
+                                    version = %entry.version,
+                                    path = %file.relative_path,
+                                    error = %e,
+                                    "skipping unparseable rust file"
+                                );
+                                outcome.errors.push(format!(
+                                    "skipped unparseable file {} in {}@{}: {e}",
+                                    file.relative_path, entry.crate_name, entry.version
+                                ));
+                                continue;
+                            }
+                        };
 
                         replace_source_file_index_rows(
                             &self.state.db,
@@ -869,7 +884,9 @@ impl McpServer {
                     }
                 }
 
-                outcome.upserted_files += affected as usize;
+                if upserted_id.is_some() {
+                    outcome.upserted_files += 1;
+                }
             }
 
             let deleted = prune_source_file_index_and_files(
@@ -901,5 +918,49 @@ impl McpServer {
         }
 
         Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_rust_symbols;
+
+    #[test]
+    fn extract_rust_symbols_succeeds_on_valid_rust() {
+        let code = r#"
+            pub fn hello() -> String { String::new() }
+            struct Foo { x: i32 }
+        "#;
+        let result = extract_rust_symbols(code);
+        assert!(result.is_ok());
+        let batch = result.unwrap();
+        assert_eq!(batch.symbols.len(), 2); // hello + Foo
+    }
+
+    #[test]
+    fn extract_rust_symbols_returns_error_on_invalid_syntax() {
+        // Intentionally invalid Rust — mirrors the compile-fail test fixtures
+        // that caused permanent job failures (e.g. pin-project UI tests).
+        let invalid_code = "fn foo(, bad) { }";
+        let result = extract_rust_symbols(invalid_code);
+        assert!(result.is_err(), "expected parse error for invalid syntax");
+    }
+
+    #[test]
+    fn extract_rust_symbols_returns_error_on_non_module_content() {
+        // Non-module content like CSV processing scripts that have a shebang
+        // or other non-Rust top-level constructs.
+        let non_module = "#!/usr/bin/env python3\nprint('hello')";
+        let result = extract_rust_symbols(non_module);
+        assert!(result.is_err(), "expected parse error for non-Rust content");
+    }
+
+    #[test]
+    fn extract_rust_symbols_returns_error_on_deliberately_malformed_test_fixture() {
+        // Mirrors compile-fail test fixtures (e.g. syn's tests/test_item.rs)
+        // that contain intentionally malformed Rust to test diagnostics.
+        let code = "struct Foo { x: i32, , }";
+        let result = extract_rust_symbols(code);
+        assert!(result.is_err(), "expected parse error for malformed struct");
     }
 }

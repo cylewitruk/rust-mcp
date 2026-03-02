@@ -34,7 +34,7 @@ async fn live_context(cargo_registry_dir: PathBuf) -> Result<LiveContext> {
     let state = AppState::connect(config.clone()).await?;
     state.run_migrations().await?;
 
-    let router = http::router(state.clone(), config);
+    let router = http::router(state.clone(), config, common::test_prometheus_handle());
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(30))
         .await?;
