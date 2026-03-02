@@ -25,7 +25,6 @@ use crate::env;
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
 const DEFAULT_PROTOCOL_VERSION: &str = LATEST_MCP_PROTOCOL_VERSION;
 const MCP_INTERNAL_PORT: u16 = 43173;
-const METRICS_INTERNAL_PORT: u16 = 9090;
 
 /// MCP session header name per the Streamable HTTP spec.
 const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
@@ -36,7 +35,6 @@ pub struct RustMcpTestContainer {
     container: ContainerAsync<GenericImage>,
     base_url: String,
     mcp_url: String,
-    metrics_url: String,
     client: reqwest::Client,
     next_request_id: AtomicU64,
     session_id: Mutex<Option<String>>,
@@ -158,13 +156,11 @@ impl RustMcpTestContainer {
 
         let mut container_request = image
             .with_exposed_port(MCP_INTERNAL_PORT.tcp())
-            .with_exposed_port(METRICS_INTERNAL_PORT.tcp())
             // Support containers reaching host-bound test fixtures via
             // `host.docker.internal`.
             .with_host("host.docker.internal", Host::HostGateway)
             .with_env_var(env::vars::OUTBOUND_FIREWALL, env::defaults::OUTBOUND_FIREWALL_DISABLED)
             .with_env_var(env::vars::MCP_HTTP_BIND, env::defaults::MCP_HTTP_BIND)
-            .with_env_var(env::vars::PROMETHEUS_BIND, env::defaults::PROMETHEUS_BIND)
             // The runtime container runs Postgres over unix socket only.
             .with_env_var(env::vars::DATABASE_URL, env::defaults::DATABASE_URL)
             .with_env_var(env::vars::RUST_LOG, env::defaults::RUST_LOG);
@@ -191,20 +187,14 @@ impl RustMcpTestContainer {
             .get_host_port_ipv4(MCP_INTERNAL_PORT)
             .await
             .context("failed to resolve rust-mcp MCP port mapping")?;
-        let metrics_port = container
-            .get_host_port_ipv4(METRICS_INTERNAL_PORT)
-            .await
-            .context("failed to resolve rust-mcp metrics port mapping")?;
 
         let base_url = format!("http://{host}:{mcp_port}");
         let mcp_url = format!("{base_url}/mcp");
-        let metrics_url = format!("http://{host}:{metrics_port}");
 
         Ok(Self {
             container,
             base_url,
             mcp_url,
-            metrics_url,
             client: reqwest::Client::new(),
             next_request_id: AtomicU64::new(1),
             session_id: Mutex::new(None),
@@ -219,11 +209,6 @@ impl RustMcpTestContainer {
     /// Returns the full MCP endpoint URL.
     pub fn mcp_url(&self) -> &str {
         &self.mcp_url
-    }
-
-    /// Returns the metrics endpoint base URL.
-    pub fn metrics_url(&self) -> &str {
-        &self.metrics_url
     }
 
     /// Returns the underlying container handle.

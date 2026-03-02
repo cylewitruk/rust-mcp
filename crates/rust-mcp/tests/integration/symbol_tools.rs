@@ -13,7 +13,7 @@ async fn symbol_search_returns_seeded_symbol() {
     let response = context
         .mcp
         .call_tool(
-            "symbol.search",
+            "symbol_search",
             json!({
                 "query": "from_str",
                 "crate_name": "serde_json",
@@ -21,7 +21,7 @@ async fn symbol_search_returns_seeded_symbol() {
             }),
         )
         .await
-        .expect("symbol.search call failed");
+        .expect("symbol_search call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

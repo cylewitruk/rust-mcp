@@ -105,7 +105,7 @@ impl McpServer {
         })
         .map_err(|e| format!("failed to build crate.search cache key: {e}"))?;
         if let Some(cached) = self
-            .query_cache_get("crate.search", &cache_key)
+            .query_cache_get("crate_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<CrateSearchResponse>(cached)
@@ -144,7 +144,7 @@ impl McpServer {
                 offset,
             )
             .await
-            .map_err(|e| format!("crate.search query failed: {e}"))?;
+            .map_err(|e| format!("crate_search query failed: {e}"))?;
 
         let has_more = rows.len() > limit as usize;
         if has_more {
@@ -255,12 +255,12 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: if hits.is_empty() {
-                vec!["index.sync_crates".to_string()]
+                vec!["index_sync_crates".to_string()]
             } else {
                 vec![
-                    "crate.intel".to_string(),
-                    "crate.versions".to_string(),
-                    "crate.graph".to_string(),
+                    "crate_intel".to_string(),
+                    "crate_versions".to_string(),
+                    "crate_graph".to_string(),
                 ]
             },
             provenance: "local_postgres_index".to_string(),
@@ -268,7 +268,7 @@ impl McpServer {
         };
 
         self.query_cache_put(
-            "crate.search",
+            "crate_search",
             &cache_key,
             &serde_json::to_value(&response)
                 .map_err(|e| format!("failed to encode crate.search cache value: {e}"))?,

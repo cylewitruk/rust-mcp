@@ -28,9 +28,9 @@ async fn schema_get_returns_contract_for_known_tool() {
 
     let response = context
         .mcp
-        .call_tool("schema.get", json!({"tool_name": "ping"}))
+        .call_tool("schema_get", json!({"tool_name": "ping"}))
         .await
-        .expect("schema.get call failed");
+        .expect("schema_get call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -44,7 +44,7 @@ async fn schema_get_returns_contract_for_known_tool() {
         .get("schemas")
         .and_then(Value::as_array)
         .and_then(|schemas| schemas.first())
-        .expect("schema.get should return one schema entry");
+        .expect("schema_get should return one schema entry");
     assert_eq!(
         first_schema
             .get("tool_name")

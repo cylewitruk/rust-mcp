@@ -9,7 +9,7 @@ async fn crate_compatibility_resolves_seeded_pair() {
     let response = context
         .mcp
         .call_tool(
-            "crate.compatibility",
+            "crate_compatibility",
             json!({
                 "left_crate": "serde_json",
                 "left_version": "1.0.145",
@@ -19,7 +19,7 @@ async fn crate_compatibility_resolves_seeded_pair() {
             }),
         )
         .await
-        .expect("crate.compatibility call failed");
+        .expect("crate_compatibility call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -54,7 +54,7 @@ async fn crate_compatibility_matrix_tests_seeded_version_pair() {
     let response = context
         .mcp
         .call_tool(
-            "crate.compatibility_matrix",
+            "crate_compatibility_matrix",
             json!({
                 "left_crate": "serde_json",
                 "right_crate": "serde",
@@ -64,7 +64,7 @@ async fn crate_compatibility_matrix_tests_seeded_version_pair() {
             }),
         )
         .await
-        .expect("crate.compatibility_matrix call failed");
+        .expect("crate_compatibility_matrix call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -100,9 +100,9 @@ async fn crate_license_check_returns_policy_for_seeded_crate() {
 
     let response = context
         .mcp
-        .call_tool("crate.license_check", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_license_check", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.license_check call failed");
+        .expect("crate_license_check call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -136,9 +136,9 @@ async fn crate_alternatives_returns_expected_shape() {
 
     let response = context
         .mcp
-        .call_tool("crate.alternatives", json!({"crate_name": "serde_json", "limit": 5}))
+        .call_tool("crate_alternatives", json!({"crate_name": "serde_json", "limit": 5}))
         .await
-        .expect("crate.alternatives call failed");
+        .expect("crate_alternatives call failed");
     let payload = common::structured_content(&response);
 
     assert!(
@@ -192,14 +192,14 @@ async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
     let compare_response = context
         .mcp
         .call_tool(
-            "crate.compare",
+            "crate_compare",
             json!({
                 "left_crate": "indexmap",
                 "right_crate": "serde"
             }),
         )
         .await
-        .expect("crate.compare call failed");
+        .expect("crate_compare call failed");
     let compare_payload = common::structured_content(&compare_response);
     let recommendation = compare_payload
         .get("recommendation")
@@ -230,7 +230,7 @@ async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
     let compatibility_response = context
         .mcp
         .call_tool(
-            "crate.compatibility",
+            "crate_compatibility",
             json!({
                 "left_crate": "serde_json",
                 "left_version": "1.0.145",
@@ -240,7 +240,7 @@ async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
             }),
         )
         .await
-        .expect("crate.compatibility call failed");
+        .expect("crate_compatibility call failed");
     let compatibility_payload = common::structured_content(&compatibility_response);
     assert_eq!(
         compatibility_payload
@@ -252,7 +252,7 @@ async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
     let matrix_response = context
         .mcp
         .call_tool(
-            "crate.compatibility_matrix",
+            "crate_compatibility_matrix",
             json!({
                 "left_crate": "serde_json",
                 "right_crate": "serde",
@@ -262,7 +262,7 @@ async fn crate_compare_and_compatibility_resolve_for_seeded_crates() {
             }),
         )
         .await
-        .expect("crate.compatibility_matrix call failed");
+        .expect("crate_compatibility_matrix call failed");
     let matrix_payload = common::structured_content(&matrix_response);
     assert_eq!(
         matrix_payload
@@ -287,9 +287,9 @@ async fn crate_license_and_alternatives_return_expected_policy_shapes() {
 
     let license_response = context
         .mcp
-        .call_tool("crate.license_check", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_license_check", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.license_check call failed");
+        .expect("crate_license_check call failed");
     let license_payload = common::structured_content(&license_response);
     assert_eq!(
         license_payload
@@ -300,9 +300,9 @@ async fn crate_license_and_alternatives_return_expected_policy_shapes() {
 
     let alternatives_response = context
         .mcp
-        .call_tool("crate.alternatives", json!({"crate_name": "serde_json", "limit": 5}))
+        .call_tool("crate_alternatives", json!({"crate_name": "serde_json", "limit": 5}))
         .await
-        .expect("crate.alternatives call failed");
+        .expect("crate_alternatives call failed");
     let alternatives_payload = common::structured_content(&alternatives_response);
     assert!(
         alternatives_payload

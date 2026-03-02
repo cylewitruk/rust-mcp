@@ -268,7 +268,7 @@ impl McpServer {
             ),
         )
         .await
-        .map_err(|e| format!("crate.alternatives candidate query failed: {e}"))?;
+        .map_err(|e| format!("crate_alternatives candidate query failed: {e}"))?;
 
         let mut alternatives = candidates
             .into_iter()
@@ -418,9 +418,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.intel".to_string(),
-                "crate.license_check".to_string(),
-                "crate.graph".to_string(),
+                "crate_intel".to_string(),
+                "crate_license_check".to_string(),
+                "crate_graph".to_string(),
             ],
             provenance: "local_postgres_index".to_string(),
         }))

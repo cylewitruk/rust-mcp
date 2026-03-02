@@ -1,3 +1,6 @@
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
 use base64::Engine as _;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -459,6 +462,95 @@ pub fn build_crate_freshness_sources(
             checked_at: None,
         },
     ]
+}
+
+/// Resolves the on-disk source directory for a crate version in the cargo
+/// registry.
+///
+/// Scans `{cargo_registry_dir}/src/*/` for a directory named
+/// `{crate_name}-{version}`. Returns `None` if no matching directory exists.
+pub fn resolve_registry_source_dir(
+    cargo_registry_dir: &Path,
+    crate_name: &str,
+    version: &str,
+) -> Option<PathBuf> {
+    let src_root = cargo_registry_dir.join("src");
+    let target_dir_name = format!("{crate_name}-{version}");
+
+    let registries = std::fs::read_dir(&src_root).ok()?;
+    for entry in registries {
+        let entry = entry.ok()?;
+        if !entry
+            .file_type()
+            .ok()
+            .is_some_and(|ft| ft.is_dir())
+        {
+            continue;
+        }
+        let candidate = entry
+            .path()
+            .join(&target_dir_name);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Reads a single source file from the cargo registry on disk.
+///
+/// Combines [`resolve_registry_source_dir`] with a `std::fs::read_to_string`
+/// call. Returns `None` if the registry directory or file does not exist,
+/// or if the content is not valid UTF-8.
+pub fn read_source_file_from_disk(
+    cargo_registry_dir: &Path,
+    crate_name: &str,
+    version: &str,
+    relative_path: &str,
+) -> Option<String> {
+    let version_dir = resolve_registry_source_dir(cargo_registry_dir, crate_name, version)?;
+    let full_path = version_dir.join(relative_path);
+    std::fs::read_to_string(full_path).ok()
+}
+
+/// Lists all text source file paths under a resolved registry directory.
+///
+/// Walks the directory tree and returns relative paths for files with
+/// recognized text extensions.
+pub fn list_source_file_paths_on_disk(version_dir: &Path) -> Vec<String> {
+    fn is_text_extension(ext: Option<&OsStr>) -> bool {
+        matches!(
+            ext.and_then(OsStr::to_str),
+            Some("rs" | "toml" | "md" | "json" | "yaml" | "yml" | "txt")
+        )
+    }
+
+    let mut paths = Vec::new();
+    let mut pending = vec![version_dir.to_path_buf()];
+
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.is_file()
+                && is_text_extension(path.extension())
+                && let Ok(relative) = path.strip_prefix(version_dir)
+            {
+                paths.push(
+                    relative
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+
+    paths.sort();
+    paths
 }
 
 #[cfg(test)]

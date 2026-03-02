@@ -33,6 +33,7 @@ zstd = "0.13.3"
 testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
 rust-mcp-types = { path = "crates/rust-mcp-types" }
 rust-mcp-testing = { path = "crates/rust-mcp-testing" }
+test-log = { version = "0.2.19", default-features = false, features = ["trace"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"

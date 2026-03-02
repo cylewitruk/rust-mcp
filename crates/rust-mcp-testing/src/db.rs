@@ -119,7 +119,9 @@ pub async fn upsert_feature_flag(
     .await
 }
 
-/// Inserts or updates a source file record for a crate version.
+/// Inserts or updates a source file metadata record for a crate version.
+///
+/// Content is not stored — it is read from the cargo registry on disk.
 pub async fn upsert_source_file(
     pool: &PgPool,
     crate_version_id: i64,
@@ -127,7 +129,6 @@ pub async fn upsert_source_file(
     sha256: String,
     file_size: i64,
     language: Option<&str>,
-    content: &str,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
         "INSERT INTO source_files (
@@ -135,15 +136,13 @@ pub async fn upsert_source_file(
              path,
              sha256,
              file_size,
-             language,
-             content
+             language
          )
-         VALUES ($1, $2, $3, $4, $5, $6)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (crate_version_id, path) DO UPDATE SET
            sha256 = EXCLUDED.sha256,
            file_size = EXCLUDED.file_size,
            language = EXCLUDED.language,
-           content = EXCLUDED.content,
            indexed_at = NOW()
          RETURNING id",
     )
@@ -152,7 +151,6 @@ pub async fn upsert_source_file(
     .bind(sha256)
     .bind(file_size)
     .bind(language)
-    .bind(content)
     .fetch_one(pool)
     .await
 }
@@ -178,7 +176,7 @@ pub async fn insert_symbol(
              end_line,
              index_source
          )
-         VALUES ($1, $2, $3, $4, 'public', $5, $6, 'fixture')
+         VALUES ($1, $2, $3, $4, 'public', $5, $6, 'rustdoc_json')
          RETURNING id",
     )
     .bind(crate_version_id)

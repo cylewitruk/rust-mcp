@@ -8,9 +8,9 @@ async fn crate_search_returns_seeded_crates_without_freshness_probe() {
 
     let response = context
         .mcp
-        .call_tool("crate.search", json!({"query": "serde", "limit": 10}))
+        .call_tool("crate_search", json!({"query": "serde", "limit": 10}))
         .await
-        .expect("crate.search call failed");
+        .expect("crate_search call failed");
     let payload = common::structured_content(&response);
 
     let count = payload
@@ -40,7 +40,7 @@ async fn crate_search_returns_seeded_crates_without_freshness_probe() {
         payload
             .get("next_cursor")
             .is_some(),
-        "crate.search response should include next_cursor field"
+        "crate_search response should include next_cursor field"
     );
     assert_eq!(
         payload
@@ -64,9 +64,9 @@ async fn crate_features_resolves_default_and_dependency_backed_feature() {
 
     let response = context
         .mcp
-        .call_tool("crate.features", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_features", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.features call failed");
+        .expect("crate_features call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -121,7 +121,7 @@ async fn crate_graph_dependencies_contains_seeded_edges() {
     let response = context
         .mcp
         .call_tool(
-            "crate.graph",
+            "crate_graph",
             json!({
                 "crate_name": "serde_json",
                 "direction": "dependencies",
@@ -129,7 +129,7 @@ async fn crate_graph_dependencies_contains_seeded_edges() {
             }),
         )
         .await
-        .expect("crate.graph call failed");
+        .expect("crate_graph call failed");
     let payload = common::structured_content(&response);
 
     let edges = payload
@@ -161,9 +161,9 @@ async fn crate_versions_returns_seeded_timeline() {
 
     let response = context
         .mcp
-        .call_tool("crate.versions", json!({"crate_name": "serde_json", "limit": 10}))
+        .call_tool("crate_versions", json!({"crate_name": "serde_json", "limit": 10}))
         .await
-        .expect("crate.versions call failed");
+        .expect("crate_versions call failed");
     let payload = common::structured_content(&response);
 
     let versions = payload
@@ -231,9 +231,9 @@ async fn crate_api_and_versions_report_seeded_symbol_timeline() {
 
     let api_response = context
         .mcp
-        .call_tool("crate.api", json!({"crate_name": "serde_json", "limit": 20}))
+        .call_tool("crate_api", json!({"crate_name": "serde_json", "limit": 20}))
         .await
-        .expect("crate.api call failed");
+        .expect("crate_api call failed");
     let api_payload = common::structured_content(&api_response);
 
     let symbols = api_payload
@@ -249,9 +249,9 @@ async fn crate_api_and_versions_report_seeded_symbol_timeline() {
 
     let versions_response = context
         .mcp
-        .call_tool("crate.versions", json!({"crate_name": "serde_json", "limit": 10}))
+        .call_tool("crate_versions", json!({"crate_name": "serde_json", "limit": 10}))
         .await
-        .expect("crate.versions call failed");
+        .expect("crate_versions call failed");
     let versions_payload = common::structured_content(&versions_response);
     let versions = versions_payload
         .get("versions")
@@ -342,9 +342,9 @@ async fn crate_api_prefers_rustdoc_json_symbols_when_available() {
 
     let api_response = context
         .mcp
-        .call_tool("crate.api", json!({"crate_name": "serde_json", "limit": 20}))
+        .call_tool("crate_api", json!({"crate_name": "serde_json", "limit": 20}))
         .await
-        .expect("crate.api call failed");
+        .expect("crate_api call failed");
     let api_payload = common::structured_content(&api_response);
 
     let symbols = api_payload
@@ -374,9 +374,9 @@ async fn crate_intel_summarizes_dependencies_for_seeded_crate() {
 
     let response = context
         .mcp
-        .call_tool("crate.intel", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_intel", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.intel call failed");
+        .expect("crate_intel call failed");
     let payload = common::structured_content(&response);
 
     let dependencies = payload

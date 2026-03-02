@@ -8,7 +8,7 @@ async fn tool_docs_search_returns_seeded_docs_hits() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "docs.search",
+        "docs_search",
         json!({
             "query": "parse",
             "crate_name": SEEDED_CRATE_NAME,
@@ -61,7 +61,7 @@ async fn tool_docs_search_returns_seeded_docs_hits() {
     let hits = payload
         .get("hits")
         .and_then(Value::as_array)
-        .expect("docs.search should return hits array");
+        .expect("docs_search should return hits array");
     assert!(
         hits.iter().any(|hit| {
             hit.get("crate_name")

@@ -290,16 +290,16 @@ impl McpServer {
     ) -> Result<Json<IndexStatusResponse>, String> {
         let coverage = fetch_index_coverage_counts(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to load coverage: {e}"))?;
+            .map_err(|e| format!("index_status failed to load coverage: {e}"))?;
         let queue = fetch_index_queue_counts(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to load queue counters: {e}"))?;
+            .map_err(|e| format!("index_status failed to load queue counters: {e}"))?;
         let retry_distribution = fetch_refresh_job_retry_distribution(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to compute retry distribution: {e}"))?;
+            .map_err(|e| format!("index_status failed to compute retry distribution: {e}"))?;
         let failures_by_scope = fetch_index_failures_by_scope(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to compute failure-by-scope: {e}"))?
+            .map_err(|e| format!("index_status failed to compute failure-by-scope: {e}"))?
             .into_iter()
             .map(|row| IndexFailureByScope {
                 scope: row.scope,
@@ -308,13 +308,13 @@ impl McpServer {
             .collect::<Vec<_>>();
         let last_errors = fetch_recent_refresh_job_errors(&self.state.db, 10)
             .await
-            .map_err(|e| format!("index.status failed to fetch job errors: {e}"))?;
+            .map_err(|e| format!("index_status failed to fetch job errors: {e}"))?;
         let freshness = fetch_index_freshness(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to load freshness: {e}"))?;
+            .map_err(|e| format!("index_status failed to load freshness: {e}"))?;
         let operational = fetch_index_operational_metrics_24h(&self.state.db)
             .await
-            .map_err(|e| format!("index.status failed to load operational metrics: {e}"))?;
+            .map_err(|e| format!("index_status failed to load operational metrics: {e}"))?;
 
         Ok(Json(IndexStatusResponse {
             freshness: IndexFreshness {
@@ -377,7 +377,7 @@ impl McpServer {
 
         let (sample_count, average_seconds) = fetch_refresh_eta_stats(&self.state.db, scope_key)
             .await
-            .map_err(|e| format!("index.refresh ETA estimate failed for scope {scope_key}: {e}"))?;
+            .map_err(|e| format!("index_refresh ETA estimate failed for scope {scope_key}: {e}"))?;
 
         if sample_count < 3 {
             return Ok(None);
@@ -712,6 +712,7 @@ impl McpServer {
                         request.crate_name,
                         request.page,
                         request.per_page,
+                        false,
                         false,
                     )
                     .await?;

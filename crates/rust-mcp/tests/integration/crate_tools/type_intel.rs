@@ -10,7 +10,7 @@ async fn crate_type_info_returns_seeded_type_definition() {
     let response = context
         .mcp
         .call_tool(
-            "crate.type_info",
+            "crate_type_info",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -19,7 +19,7 @@ async fn crate_type_info_returns_seeded_type_definition() {
             }),
         )
         .await
-        .expect("crate.type_info call failed");
+        .expect("crate_type_info call failed");
     let payload = common::structured_content(&response);
 
     let type_definition = payload
@@ -120,7 +120,7 @@ async fn crate_trait_impls_returns_seeded_impl_rows() {
     let response = context
         .mcp
         .call_tool(
-            "crate.trait_impls",
+            "crate_trait_impls",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -128,7 +128,7 @@ async fn crate_trait_impls_returns_seeded_impl_rows() {
             }),
         )
         .await
-        .expect("crate.trait_impls call failed");
+        .expect("crate_trait_impls call failed");
     let payload = common::structured_content(&response);
 
     assert!(
@@ -199,7 +199,7 @@ async fn crate_error_types_returns_seeded_error_type() {
     let response = context
         .mcp
         .call_tool(
-            "crate.error_types",
+            "crate_error_types",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -207,7 +207,7 @@ async fn crate_error_types_returns_seeded_error_type() {
             }),
         )
         .await
-        .expect("crate.error_types call failed");
+        .expect("crate_error_types call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -305,14 +305,14 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
     let type_info_response = context
         .mcp
         .call_tool(
-            "crate.type_info",
+            "crate_type_info",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "MissingType"
             }),
         )
         .await
-        .expect("crate.type_info call failed");
+        .expect("crate_type_info call failed");
     let type_info_payload = common::structured_content(&type_info_response);
     assert!(
         type_info_payload
@@ -329,7 +329,7 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
     let trait_impls_response = context
         .mcp
         .call_tool(
-            "crate.trait_impls",
+            "crate_trait_impls",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "MissingType",
@@ -337,7 +337,7 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
             }),
         )
         .await
-        .expect("crate.trait_impls call failed");
+        .expect("crate_trait_impls call failed");
     let trait_impls_payload = common::structured_content(&trait_impls_response);
     assert_eq!(
         trait_impls_payload
@@ -378,14 +378,14 @@ async fn crate_type_info_trait_impls_and_error_types_handle_sparse_index_data() 
     let error_types_response = context
         .mcp
         .call_tool(
-            "crate.error_types",
+            "crate_error_types",
             json!({
                 "crate_name": "serde_json",
                 "limit": 10
             }),
         )
         .await
-        .expect("crate.error_types call failed");
+        .expect("crate_error_types call failed");
     let error_types_payload = common::structured_content(&error_types_response);
     assert_eq!(
         error_types_payload
@@ -428,7 +428,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
     let type_info_response = context
         .mcp
         .call_tool(
-            "crate.type_info",
+            "crate_type_info",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -437,7 +437,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             }),
         )
         .await
-        .expect("crate.type_info call failed");
+        .expect("crate_type_info call failed");
     let type_info_payload = common::structured_content(&type_info_response);
 
     let type_definition = type_info_payload
@@ -517,7 +517,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
     let trait_impls_response = context
         .mcp
         .call_tool(
-            "crate.trait_impls",
+            "crate_trait_impls",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -525,7 +525,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             }),
         )
         .await
-        .expect("crate.trait_impls call failed");
+        .expect("crate_trait_impls call failed");
     let trait_impls_payload = common::structured_content(&trait_impls_response);
     assert_eq!(
         trait_impls_payload
@@ -576,7 +576,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
     let error_types_response = context
         .mcp
         .call_tool(
-            "crate.error_types",
+            "crate_error_types",
             json!({
                 "crate_name": "serde_json",
                 "type_name": "ParseError",
@@ -584,7 +584,7 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             }),
         )
         .await
-        .expect("crate.error_types call failed");
+        .expect("crate_error_types call failed");
     let error_types_payload = common::structured_content(&error_types_response);
     assert_eq!(
         error_types_payload

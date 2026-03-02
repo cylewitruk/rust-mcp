@@ -20,9 +20,9 @@ definitely_missing_crate = "1.0"
 
     let response = context
         .mcp
-        .call_tool("dependency.audit", json!({ "cargo_toml_path": manifest_path }))
+        .call_tool("dependency_audit", json!({ "cargo_toml_path": manifest_path }))
         .await
-        .expect("dependency.audit call failed");
+        .expect("dependency_audit call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

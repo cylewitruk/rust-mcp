@@ -110,7 +110,7 @@ impl McpServer {
             resolution.selected_version.id,
         )
         .await
-        .map_err(|e| format!("crate.api rustdoc source check failed: {e}"))?
+        .map_err(|e| format!("crate_api rustdoc source check failed: {e}"))?
             > 0;
         let preferred_source = if has_rustdoc_symbols { Some("rustdoc_json") } else { None };
 
@@ -130,7 +130,7 @@ impl McpServer {
             },
         )
         .await
-        .map_err(|e| format!("crate.api query failed: {e}"))?;
+        .map_err(|e| format!("crate_api query failed: {e}"))?;
 
         let has_more = rows.len() > pag.limit as usize;
         if has_more {
@@ -230,9 +230,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.api_diff".to_string(),
-                "symbol.search".to_string(),
-                "source.read".to_string(),
+                "crate_api_diff".to_string(),
+                "symbol_search".to_string(),
+                "source_read".to_string(),
             ],
             provenance: "local_postgres_index".to_string(),
         }))

@@ -323,11 +323,11 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.api_diff".to_string(),
-                "source.search".to_string(),
-                "source.read".to_string(),
+                "crate_api_diff".to_string(),
+                "source_search".to_string(),
+                "source_read".to_string(),
             ],
-            provenance: "crate.api_diff wrapper over indexed symbols".to_string(),
+            provenance: "crate_api_diff wrapper over indexed symbols".to_string(),
         }))
     }
 }

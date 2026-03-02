@@ -81,7 +81,7 @@ async fn rust_mcp_container_reports_tool_validation_failure_as_error_result() {
 
     let invalid_tool_response = rust_mcp
         .call_tool(
-            "dependency.feature_impact",
+            "dependency_feature_impact",
             json!({
                 "crate_name": "serde",
                 "features": []

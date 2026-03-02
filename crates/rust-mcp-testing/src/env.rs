@@ -10,8 +10,6 @@ pub mod vars {
     pub const OUTBOUND_FIREWALL: &str = "OUTBOUND_FIREWALL";
     /// HTTP bind address for MCP endpoints.
     pub const MCP_HTTP_BIND: &str = "MCP_HTTP_BIND";
-    /// Prometheus bind address.
-    pub const PROMETHEUS_BIND: &str = "PROMETHEUS_BIND";
     /// Database connection URL.
     pub const DATABASE_URL: &str = "DATABASE_URL";
     /// Log filter string.
@@ -26,8 +24,6 @@ pub mod defaults {
     pub const OUTBOUND_FIREWALL_DISABLED: &str = "false";
     /// Container bind address for MCP endpoints.
     pub const MCP_HTTP_BIND: &str = "0.0.0.0:43173";
-    /// Container bind address for Prometheus metrics.
-    pub const PROMETHEUS_BIND: &str = "0.0.0.0:9090";
     /// Container-local unix-socket Postgres URL.
     pub const DATABASE_URL: &str = "postgres://postgres@%2Frun%2Fpostgresql/rust_mcp";
     /// Default test container log level.

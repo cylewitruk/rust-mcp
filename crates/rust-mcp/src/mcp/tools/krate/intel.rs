@@ -202,9 +202,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.versions".to_string(),
-                "crate.graph".to_string(),
-                "index.refresh".to_string(),
+                "crate_versions".to_string(),
+                "crate_graph".to_string(),
+                "index_refresh".to_string(),
             ],
             provenance: "local_postgres_index".to_string(),
         }))

@@ -89,12 +89,17 @@ pub async fn fetch_local_cache_version_keys(
 ///
 /// When `locally_present_only` is `true`, only versions flagged as present
 /// in the user's cargo registry are returned.
+///
+/// When `skip_enriched` is `true`, versions that already have
+/// `index_source = 'rustdoc_json'` rows in the `symbols` table are excluded.
+/// This avoids re-processing versions on every startup.
 pub async fn fetch_rustdoc_sync_candidates(
     db: &PgPool,
     crate_name: Option<&str>,
     limit: i64,
     offset: i64,
     locally_present_only: bool,
+    skip_enriched: bool,
 ) -> Result<Vec<RustdocSyncCandidateRow>, sqlx::Error> {
     sqlx::query_as::<_, RustdocSyncCandidateRow>(
         "SELECT
@@ -105,6 +110,11 @@ pub async fn fetch_rustdoc_sync_candidates(
          JOIN crates c ON c.id = cv.crate_id
          WHERE ($1::TEXT IS NULL OR c.name = $1)
            AND ($4::BOOL IS FALSE OR cv.locally_present = TRUE)
+           AND ($5::BOOL IS FALSE OR NOT EXISTS (
+               SELECT 1 FROM symbols s
+               WHERE s.crate_version_id = cv.id
+                 AND s.index_source = 'rustdoc_json'
+           ))
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT $2 OFFSET $3",
     )
@@ -112,12 +122,14 @@ pub async fn fetch_rustdoc_sync_candidates(
     .bind(limit)
     .bind(offset)
     .bind(locally_present_only)
+    .bind(skip_enriched)
     .fetch_all(db)
     .await
 }
 
-/// Upserts a source file row and only writes when the SHA changes.
+/// Upserts a source file metadata row and only writes when the SHA changes.
 ///
+/// Content is not stored — it is read from the cargo registry on disk.
 /// Returns `Some(id)` when the row was inserted or updated, `None` when the
 /// SHA matched and no write occurred.
 pub async fn upsert_source_file_if_sha_changed(
@@ -127,19 +139,17 @@ pub async fn upsert_source_file_if_sha_changed(
     sha256: &str,
     file_size: i64,
     language: Option<&str>,
-    content: Option<&str>,
 ) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
         "INSERT INTO source_files (
-            crate_version_id, path, sha256, file_size, language, content, indexed_at
+            crate_version_id, path, sha256, file_size, language, indexed_at
          ) VALUES (
-            $1, $2, $3, $4, $5, $6, NOW()
+            $1, $2, $3, $4, $5, NOW()
          )
          ON CONFLICT (crate_version_id, path) DO UPDATE
          SET sha256 = EXCLUDED.sha256,
              file_size = EXCLUDED.file_size,
              language = EXCLUDED.language,
-             content = EXCLUDED.content,
              indexed_at = NOW()
          WHERE source_files.sha256 IS DISTINCT FROM EXCLUDED.sha256
          RETURNING id",
@@ -149,13 +159,13 @@ pub async fn upsert_source_file_if_sha_changed(
     .bind(sha256)
     .bind(file_size)
     .bind(language)
-    .bind(content)
     .fetch_optional(db)
     .await
 }
 
-/// Upserts a source file row and always refreshes indexed content.
+/// Upserts a source file metadata row unconditionally.
 ///
+/// Content is not stored — it is read from the cargo registry on disk.
 /// Always returns the row id (insert or update).
 pub async fn upsert_source_file_unconditional(
     db: &PgPool,
@@ -164,7 +174,6 @@ pub async fn upsert_source_file_unconditional(
     sha256: &str,
     file_size: i64,
     language: Option<&str>,
-    content: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar::<_, i64>(
         "INSERT INTO source_files (
@@ -173,16 +182,14 @@ pub async fn upsert_source_file_unconditional(
             sha256,
             file_size,
             language,
-            content,
             indexed_at
          ) VALUES (
-            $1, $2, $3, $4, $5, $6, NOW()
+            $1, $2, $3, $4, $5, NOW()
          )
          ON CONFLICT (crate_version_id, path) DO UPDATE
          SET sha256 = EXCLUDED.sha256,
              file_size = EXCLUDED.file_size,
              language = EXCLUDED.language,
-             content = EXCLUDED.content,
              indexed_at = NOW()
          RETURNING id",
     )
@@ -191,7 +198,6 @@ pub async fn upsert_source_file_unconditional(
     .bind(sha256)
     .bind(file_size)
     .bind(language)
-    .bind(content)
     .fetch_one(db)
     .await
 }

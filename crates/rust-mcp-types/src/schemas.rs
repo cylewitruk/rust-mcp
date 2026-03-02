@@ -5,7 +5,7 @@ use crate::types;
 /// Schema pair for one MCP tool.
 #[derive(Debug, Clone)]
 pub struct ToolSchema {
-    /// MCP tool name (for example `crate.search`).
+    /// MCP tool name (for example `crate_search`).
     pub tool_name: &'static str,
     /// JSON Schema for the request payload.
     pub request: Schema,
@@ -46,14 +46,14 @@ pub mod core {
     }
 }
 
-/// Schema exports for `schema.*` tools.
+/// Schema exports for `schema_*` tools.
 pub mod schema {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `schema.get`.
+    /// JSON Schemas for `schema_get`.
     pub fn get() -> ToolSchema {
         ToolSchema::new::<types::schema::ToolSchemasRequest, types::schema::ToolSchemasResponse>(
-            "schema.get",
+            "schema_get",
         )
     }
 
@@ -63,28 +63,28 @@ pub mod schema {
     }
 }
 
-/// Schema exports for `index.*` tools.
+/// Schema exports for `index_*` tools.
 pub mod index {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `index.sync_crates`.
+    /// JSON Schemas for `index_sync_crates`.
     pub fn sync_crates() -> ToolSchema {
         ToolSchema::new::<types::index::IndexSyncCratesRequest, types::index::IndexSyncCratesResponse>(
-            "index.sync_crates",
+            "index_sync_crates",
         )
     }
 
-    /// JSON Schemas for `index.status`.
+    /// JSON Schemas for `index_status`.
     pub fn status() -> ToolSchema {
         ToolSchema::new::<types::index::IndexStatusRequest, types::index::IndexStatusResponse>(
-            "index.status",
+            "index_status",
         )
     }
 
-    /// JSON Schemas for `index.refresh`.
+    /// JSON Schemas for `index_refresh`.
     pub fn refresh() -> ToolSchema {
         ToolSchema::new::<types::index::IndexRefreshRequest, types::index::IndexRefreshResponse>(
-            "index.refresh",
+            "index_refresh",
         )
     }
 
@@ -94,28 +94,28 @@ pub mod index {
     }
 }
 
-/// Schema exports for `source.*` tools.
+/// Schema exports for `source_*` tools.
 pub mod source {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `source.search`.
+    /// JSON Schemas for `source_search`.
     pub fn search() -> ToolSchema {
         ToolSchema::new::<types::source::SourceSearchRequest, types::source::SourceSearchResponse>(
-            "source.search",
+            "source_search",
         )
     }
 
-    /// JSON Schemas for `source.read`.
+    /// JSON Schemas for `source_read`.
     pub fn read() -> ToolSchema {
         ToolSchema::new::<types::source::SourceReadRequest, types::source::SourceReadResponse>(
-            "source.read",
+            "source_read",
         )
     }
 
-    /// JSON Schemas for `source.context`.
+    /// JSON Schemas for `source_context`.
     pub fn context() -> ToolSchema {
         ToolSchema::new::<types::source::SourceContextRequest, types::source::SourceContextResponse>(
-            "source.context",
+            "source_context",
         )
     }
 
@@ -125,14 +125,14 @@ pub mod source {
     }
 }
 
-/// Schema exports for `symbol.*` tools.
+/// Schema exports for `symbol_*` tools.
 pub mod symbol {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `symbol.search`.
+    /// JSON Schemas for `symbol_search`.
     pub fn search() -> ToolSchema {
         ToolSchema::new::<types::symbol::SymbolSearchRequest, types::symbol::SymbolSearchResponse>(
-            "symbol.search",
+            "symbol_search",
         )
     }
 
@@ -142,14 +142,14 @@ pub mod symbol {
     }
 }
 
-/// Schema exports for `docs.*` tools.
+/// Schema exports for `docs_*` tools.
 pub mod docs {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `docs.search`.
+    /// JSON Schemas for `docs_search`.
     pub fn search() -> ToolSchema {
         ToolSchema::new::<types::docs::DocsSearchRequest, types::docs::DocsSearchResponse>(
-            "docs.search",
+            "docs_search",
         )
     }
 
@@ -159,32 +159,32 @@ pub mod docs {
     }
 }
 
-/// Schema exports for `dependency.*` tools.
+/// Schema exports for `dependency_*` tools.
 pub mod dependency {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `dependency.audit`.
+    /// JSON Schemas for `dependency_audit`.
     pub fn audit() -> ToolSchema {
         ToolSchema::new::<
             types::dependency::DependencyAuditRequest,
             types::dependency::DependencyAuditResponse,
-        >("dependency.audit")
+        >("dependency_audit")
     }
 
-    /// JSON Schemas for `dependency.resolve`.
+    /// JSON Schemas for `dependency_resolve`.
     pub fn resolve() -> ToolSchema {
         ToolSchema::new::<
             types::dependency::DependencyResolveRequest,
             types::dependency::DependencyResolveResponse,
-        >("dependency.resolve")
+        >("dependency_resolve")
     }
 
-    /// JSON Schemas for `dependency.feature_impact`.
+    /// JSON Schemas for `dependency_feature_impact`.
     pub fn feature_impact() -> ToolSchema {
         ToolSchema::new::<
             types::dependency::DependencyFeatureImpactRequest,
             types::dependency::DependencyFeatureImpactResponse,
-        >("dependency.feature_impact")
+        >("dependency_feature_impact")
     }
 
     /// Returns all dependency tool schemas.
@@ -193,162 +193,162 @@ pub mod dependency {
     }
 }
 
-/// Schema exports for `crate.*` tools.
+/// Schema exports for `crate_*` tools.
 pub mod krate {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `crate.search`.
+    /// JSON Schemas for `crate_search`.
     pub fn search() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateSearchRequest, types::krate::CrateSearchResponse>(
-            "crate.search",
+            "crate_search",
         )
     }
 
-    /// JSON Schemas for `crate.intel`.
+    /// JSON Schemas for `crate_intel`.
     pub fn intel() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateIntelRequest, types::krate::CrateIntelResponse>(
-            "crate.intel",
+            "crate_intel",
         )
     }
 
-    /// JSON Schemas for `crate.features`.
+    /// JSON Schemas for `crate_features`.
     pub fn features() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateFeaturesRequest, types::krate::CrateFeaturesResponse>(
-            "crate.features",
+            "crate_features",
         )
     }
 
-    /// JSON Schemas for `crate.api_diff`.
+    /// JSON Schemas for `crate_api_diff`.
     pub fn api_diff() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateApiDiffRequest, types::krate::CrateApiDiffResponse>(
-            "crate.api_diff",
+            "crate_api_diff",
         )
     }
 
-    /// JSON Schemas for `crate.api`.
+    /// JSON Schemas for `crate_api`.
     pub fn api() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateApiRequest, types::krate::CrateApiResponse>(
-            "crate.api",
+            "crate_api",
         )
     }
 
-    /// JSON Schemas for `crate.type_info`.
+    /// JSON Schemas for `crate_type_info`.
     pub fn type_info() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateTypeInfoRequest, types::krate::CrateTypeInfoResponse>(
-            "crate.type_info",
+            "crate_type_info",
         )
     }
 
-    /// JSON Schemas for `crate.trait_impls`.
+    /// JSON Schemas for `crate_trait_impls`.
     pub fn trait_impls() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateTraitImplsRequest, types::krate::CrateTraitImplsResponse>(
-            "crate.trait_impls",
+            "crate_trait_impls",
         )
     }
 
-    /// JSON Schemas for `crate.re_exports`.
+    /// JSON Schemas for `crate_re_exports`.
     pub fn re_exports() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateReExportsRequest, types::krate::CrateReExportsResponse>(
-            "crate.re_exports",
+            "crate_re_exports",
         )
     }
 
-    /// JSON Schemas for `crate.import_path`.
+    /// JSON Schemas for `crate_import_path`.
     pub fn import_path() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateImportPathRequest, types::krate::CrateImportPathResponse>(
-            "crate.import_path",
+            "crate_import_path",
         )
     }
 
-    /// JSON Schemas for `crate.error_types`.
+    /// JSON Schemas for `crate_error_types`.
     pub fn error_types() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateErrorTypesRequest, types::krate::CrateErrorTypesResponse>(
-            "crate.error_types",
+            "crate_error_types",
         )
     }
 
-    /// JSON Schemas for `crate.derive_macros`.
+    /// JSON Schemas for `crate_derive_macros`.
     pub fn derive_macros() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateDeriveMacrosRequest,
             types::krate::CrateDeriveMacrosResponse,
-        >("crate.derive_macros")
+        >("crate_derive_macros")
     }
 
-    /// JSON Schemas for `crate.compare`.
+    /// JSON Schemas for `crate_compare`.
     pub fn compare() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateCompareRequest, types::krate::CrateCompareResponse>(
-            "crate.compare",
+            "crate_compare",
         )
     }
 
-    /// JSON Schemas for `crate.compatibility`.
+    /// JSON Schemas for `crate_compatibility`.
     pub fn compatibility() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateCompatibilityRequest,
             types::krate::CrateCompatibilityResponse,
-        >("crate.compatibility")
+        >("crate_compatibility")
     }
 
-    /// JSON Schemas for `crate.compatibility_matrix`.
+    /// JSON Schemas for `crate_compatibility_matrix`.
     pub fn compatibility_matrix() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateCompatibilityMatrixRequest,
             types::krate::CrateCompatibilityMatrixResponse,
-        >("crate.compatibility_matrix")
+        >("crate_compatibility_matrix")
     }
 
-    /// JSON Schemas for `crate.migration_path`.
+    /// JSON Schemas for `crate_migration_path`.
     pub fn migration_path() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateMigrationPathRequest,
             types::krate::CrateMigrationPathResponse,
-        >("crate.migration_path")
+        >("crate_migration_path")
     }
 
-    /// JSON Schemas for `crate.license_check`.
+    /// JSON Schemas for `crate_license_check`.
     pub fn license_check() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateLicenseCheckRequest,
             types::krate::CrateLicenseCheckResponse,
-        >("crate.license_check")
+        >("crate_license_check")
     }
 
-    /// JSON Schemas for `crate.alternatives`.
+    /// JSON Schemas for `crate_alternatives`.
     pub fn alternatives() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateAlternativesRequest,
             types::krate::CrateAlternativesResponse,
-        >("crate.alternatives")
+        >("crate_alternatives")
     }
 
-    /// JSON Schemas for `crate.versions`.
+    /// JSON Schemas for `crate_versions`.
     pub fn versions() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateVersionsRequest, types::krate::CrateVersionsResponse>(
-            "crate.versions",
+            "crate_versions",
         )
     }
 
-    /// JSON Schemas for `crate.graph`.
+    /// JSON Schemas for `crate_graph`.
     pub fn graph() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateGraphRequest, types::krate::CrateGraphResponse>(
-            "crate.graph",
+            "crate_graph",
         )
     }
 
-    /// JSON Schemas for `crate.hotspots`.
+    /// JSON Schemas for `crate_hotspots`.
     pub fn hotspots() -> ToolSchema {
         ToolSchema::new::<types::krate::CrateHotspotsRequest, types::krate::CrateHotspotsResponse>(
-            "crate.hotspots",
+            "crate_hotspots",
         )
     }
 
-    /// JSON Schemas for `crate.usage_patterns`.
+    /// JSON Schemas for `crate_usage_patterns`.
     pub fn usage_patterns() -> ToolSchema {
         ToolSchema::new::<
             types::krate::CrateUsagePatternsRequest,
             types::krate::CrateUsagePatternsResponse,
-        >("crate.usage_patterns")
+        >("crate_usage_patterns")
     }
 
     /// Returns all crate tool schemas.
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn tool_schema_lookup_finds_known_tool() {
-        let schema = tool_schema("schema.get");
+        let schema = tool_schema("schema_get");
         assert!(schema.is_some(), "expected schema.get schema to exist");
     }
 }

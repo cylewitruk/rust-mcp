@@ -30,6 +30,7 @@ async fn live_discovery_context(cargo_registry_dir: PathBuf) -> Result<LiveDisco
         postgres
             .connection_string()
             .to_string(),
+        std::path::PathBuf::from("/tmp"),
     );
     config.cargo_registry_dir = cargo_registry_dir;
 

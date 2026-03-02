@@ -1534,8 +1534,6 @@ impl McpServer {
             &file_sha256_hex(content_bytes),
             content_bytes.len() as i64,
             Some("rustdoc_json"),
-            None, /* don't store the raw JSON blob — data is extracted into
-                   * symbols/types/impls/traits */
         )
         .await
         .map_err(|e| {
@@ -1585,6 +1583,7 @@ impl McpServer {
         page: Option<u32>,
         per_page: Option<u32>,
         locally_present_only: bool,
+        skip_enriched: bool,
     ) -> Result<RustdocJsonRefreshOutcome, String> {
         let crate_filter = match crate_name {
             Some(value) => Some(normalize_required(value, "crate_name")?),
@@ -1602,6 +1601,7 @@ impl McpServer {
             i64::from(per_page),
             i64::from(offset),
             locally_present_only,
+            skip_enriched,
         )
         .await
         .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;

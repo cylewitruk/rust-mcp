@@ -21,7 +21,7 @@ async fn tool_ping_returns_pong_with_message() {
 async fn tool_schema_get_returns_single_contract_for_selected_tool() {
     let rust_mcp = initialized_container().await;
 
-    let payload = call_tool_payload(&rust_mcp, "schema.get", json!({ "tool_name": "ping" })).await;
+    let payload = call_tool_payload(&rust_mcp, "schema_get", json!({ "tool_name": "ping" })).await;
     assert_eq!(
         payload
             .get("total_tools")
@@ -34,13 +34,13 @@ async fn tool_schema_get_returns_single_contract_for_selected_tool() {
         .get("schemas")
         .and_then(Value::as_array)
         .and_then(|schemas| schemas.first())
-        .expect("schema.get should return one schema entry");
+        .expect("schema_get should return one schema entry");
     assert_eq!(
         first_schema
             .get("tool_name")
             .and_then(Value::as_str),
         Some("ping"),
-        "schema.get should return ping contract when filtered to ping: {first_schema}"
+        "schema_get should return ping contract when filtered to ping: {first_schema}"
     );
     assert_eq!(
         first_schema

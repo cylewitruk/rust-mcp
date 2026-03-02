@@ -250,7 +250,7 @@ impl McpServer {
             &type_name,
         )
         .await
-        .map_err(|e| format!("crate.type_info type query failed: {e}"))?;
+        .map_err(|e| format!("crate_type_info type query failed: {e}"))?;
 
         let impl_rows = tools::list_crate_impl_rows_for_filters(
             &self.state.db,
@@ -261,7 +261,7 @@ impl McpServer {
             None,
         )
         .await
-        .map_err(|e| format!("crate.type_info impl query failed: {e}"))?;
+        .map_err(|e| format!("crate_type_info impl query failed: {e}"))?;
 
         let impl_rows = prioritize_impl_rows(impl_rows);
 
@@ -336,7 +336,7 @@ impl McpServer {
                 &trait_names,
             )
             .await
-            .map_err(|e| format!("crate.type_info trait definition query failed: {e}"))?;
+            .map_err(|e| format!("crate_type_info trait definition query failed: {e}"))?;
 
             for row in rows {
                 definitions_by_name
@@ -447,9 +447,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.trait_impls".to_string(),
-                "crate.api".to_string(),
-                "source.search".to_string(),
+                "crate_trait_impls".to_string(),
+                "crate_api".to_string(),
+                "source_search".to_string(),
             ],
             provenance: "local_postgres_index(crate_types, crate_impls, source_files)".to_string(),
         }))

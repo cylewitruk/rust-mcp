@@ -78,11 +78,11 @@ impl McpServer {
             confidence: resolve_response.confidence,
             confidence_assessment: resolve_response.confidence_assessment,
             next_best_calls: vec![
-                "dependency.resolve".to_string(),
-                "crate.graph".to_string(),
-                "crate.versions".to_string(),
+                "dependency_resolve".to_string(),
+                "crate_graph".to_string(),
+                "crate_versions".to_string(),
             ],
-            provenance: "dependency.resolve wrapper with exact version constraints".to_string(),
+            provenance: "dependency_resolve wrapper with exact version constraints".to_string(),
         }))
     }
 
@@ -225,11 +225,11 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.compatibility".to_string(),
-                "dependency.resolve".to_string(),
-                "crate.graph".to_string(),
+                "crate_compatibility".to_string(),
+                "dependency_resolve".to_string(),
+                "crate_graph".to_string(),
             ],
-            provenance: "dependency.resolve matrix expansion over indexed versions".to_string(),
+            provenance: "dependency_resolve matrix expansion over indexed versions".to_string(),
         }))
     }
 }

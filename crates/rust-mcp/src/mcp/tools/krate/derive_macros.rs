@@ -14,6 +14,7 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, dedupe_strings, normalize_optional, normalize_required,
+    resolve_registry_source_dir,
 };
 
 #[derive(Debug, Clone)]
@@ -187,19 +188,33 @@ impl McpServer {
         self.ensure_source_indexed(&crate_name, resolution.selected_version.id)
             .await?;
 
-        let source_rows = tools::list_rust_source_files_for_version(
+        let source_rows = tools::list_rust_source_file_paths_for_version(
             &self.state.db,
             resolution.selected_version.id,
         )
         .await
-        .map_err(|e| format!("crate.derive_macros source query failed: {e}"))?;
+        .map_err(|e| format!("crate_derive_macros source query failed: {e}"))?;
+
+        let version_dir = resolve_registry_source_dir(
+            &self
+                .state
+                .config
+                .cargo_registry_dir,
+            &crate_name,
+            &resolution
+                .selected_version
+                .version,
+        );
 
         let mut derive_macros = BTreeMap::<String, CrateDeriveMacroEntry>::new();
         let mut attribute_macros = BTreeMap::<String, CrateAttributeMacroEntry>::new();
         let mut function_like_macros = BTreeMap::<String, CrateFunctionLikeMacroEntry>::new();
 
         for source in source_rows {
-            let Some(content) = source.content.as_deref() else {
+            let content = version_dir
+                .as_ref()
+                .and_then(|vdir| std::fs::read_to_string(vdir.join(&source.path)).ok());
+            let Some(ref content) = content else {
                 continue;
             };
             let (derive_candidates, attribute_candidates, function_like_candidates) =
@@ -314,9 +329,9 @@ impl McpServer {
                 reason: confidence_reason,
             },
             next_best_calls: vec![
-                "source.search".to_string(),
-                "source.read".to_string(),
-                "crate.re_exports".to_string(),
+                "source_search".to_string(),
+                "source_read".to_string(),
+                "crate_re_exports".to_string(),
             ],
             provenance: "source_files.language=rust parsed via syn for proc_macro attributes"
                 .to_string(),

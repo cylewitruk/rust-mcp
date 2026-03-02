@@ -23,7 +23,7 @@ async fn index_refresh_rustdoc_json_scope_reports_remote_and_fallback_failures()
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": "demo-rustdoc",
@@ -32,7 +32,7 @@ async fn index_refresh_rustdoc_json_scope_reports_remote_and_fallback_failures()
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json failure-path call failed");
+        .expect("index_refresh rustdoc_json failure-path call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -82,7 +82,7 @@ async fn index_refresh_rustdoc_json_scope_reports_invalid_utf8_fixture() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": "demo-rustdoc",
@@ -91,7 +91,7 @@ async fn index_refresh_rustdoc_json_scope_reports_invalid_utf8_fixture() {
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json invalid-utf8 call failed");
+        .expect("index_refresh rustdoc_json invalid-utf8 call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

@@ -1,4 +1,10 @@
-use super::{Value, common, json, seed_crate_version, seed_source_file, seed_symbol};
+use test_log::test as test_log;
+use tracing::debug;
+
+use super::{
+    Value, common, json, seed_crate_version, seed_source_file, seed_symbol,
+    write_fixture_source_to_registry,
+};
 
 #[tokio::test]
 async fn crate_usage_patterns_returns_seeded_symbol_matches() {
@@ -9,7 +15,7 @@ async fn crate_usage_patterns_returns_seeded_symbol_matches() {
     let response = context
         .mcp
         .call_tool(
-            "crate.usage_patterns",
+            "crate_usage_patterns",
             json!({
                 "crate_name": "serde",
                 "symbol_name": "from_str",
@@ -17,7 +23,7 @@ async fn crate_usage_patterns_returns_seeded_symbol_matches() {
             }),
         )
         .await
-        .expect("crate.usage_patterns call failed");
+        .expect("crate_usage_patterns call failed");
     let payload = common::structured_content(&response);
 
     assert!(
@@ -68,6 +74,14 @@ async fn crate_hotspots_detects_unsafe_in_seeded_source() {
         .await
         .expect("failed to build seeded MCP context");
 
+    let hotspot_content = "pub unsafe fn read(ptr: *const u8) -> u8 { unsafe { *ptr } }";
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/hotspots.rs",
+        hotspot_content,
+    );
     seed_source_file(
         &context.state.db,
         context
@@ -76,7 +90,7 @@ async fn crate_hotspots_detects_unsafe_in_seeded_source() {
             .version_id,
         "src/hotspots.rs",
         Some("rust"),
-        "pub unsafe fn read(ptr: *const u8) -> u8 { unsafe { *ptr } }",
+        hotspot_content,
     )
     .await
     .expect("failed to seed hotspot source file");
@@ -84,7 +98,7 @@ async fn crate_hotspots_detects_unsafe_in_seeded_source() {
     let response = context
         .mcp
         .call_tool(
-            "crate.hotspots",
+            "crate_hotspots",
             json!({
                 "crate_name": "serde_json",
                 "include_unsafe": true,
@@ -92,7 +106,7 @@ async fn crate_hotspots_detects_unsafe_in_seeded_source() {
             }),
         )
         .await
-        .expect("crate.hotspots call failed");
+        .expect("crate_hotspots call failed");
     let payload = common::structured_content(&response);
 
     let hotspots = payload
@@ -186,7 +200,7 @@ async fn crate_migration_path_reports_removed_symbol() {
     let response = context
         .mcp
         .call_tool(
-            "crate.migration_path",
+            "crate_migration_path",
             json!({
                 "crate_name": "serde_json",
                 "from_version": "1.0.144",
@@ -194,7 +208,7 @@ async fn crate_migration_path_reports_removed_symbol() {
             }),
         )
         .await
-        .expect("crate.migration_path call failed");
+        .expect("crate_migration_path call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -232,6 +246,19 @@ async fn crate_derive_macros_parses_proc_macro_source() {
         .await
         .expect("failed to build seeded MCP context");
 
+    let macros_content = "use proc_macro::TokenStream;\n#[proc_macro_derive(MyDerive, \
+                          attributes(my_attr))]\npub fn my_derive(_input: TokenStream) -> \
+                          TokenStream { TokenStream::new() }\n#[proc_macro_attribute]\npub fn \
+                          my_attr(_attr: TokenStream, item: TokenStream) -> TokenStream { item \
+                          }\n#[proc_macro]\npub fn my_macro(_input: TokenStream) -> TokenStream { \
+                          TokenStream::new() }";
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/macros.rs",
+        macros_content,
+    );
     seed_source_file(
         &context.state.db,
         context
@@ -240,20 +267,16 @@ async fn crate_derive_macros_parses_proc_macro_source() {
             .version_id,
         "src/macros.rs",
         Some("rust"),
-        "use proc_macro::TokenStream;\n#[proc_macro_derive(MyDerive, attributes(my_attr))]\npub \
-         fn my_derive(_input: TokenStream) -> TokenStream { TokenStream::new() \
-         }\n#[proc_macro_attribute]\npub fn my_attr(_attr: TokenStream, item: TokenStream) -> \
-         TokenStream { item }\n#[proc_macro]\npub fn my_macro(_input: TokenStream) -> TokenStream \
-         { TokenStream::new() }",
+        macros_content,
     )
     .await
     .expect("failed to seed macro source");
 
     let response = context
         .mcp
-        .call_tool("crate.derive_macros", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_derive_macros", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.derive_macros call failed");
+        .expect("crate_derive_macros call failed");
     let payload = common::structured_content(&response);
 
     let derive_macros = payload
@@ -300,6 +323,14 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
         .await
         .expect("failed to build seeded MCP context");
 
+    let hotspot_content = "pub unsafe fn read(ptr: *const u8) -> u8 { unsafe { *ptr } }";
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/hotspots.rs",
+        hotspot_content,
+    );
     seed_source_file(
         &context.state.db,
         context
@@ -308,7 +339,7 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
             .version_id,
         "src/hotspots.rs",
         Some("rust"),
-        "pub unsafe fn read(ptr: *const u8) -> u8 { unsafe { *ptr } }",
+        hotspot_content,
     )
     .await
     .expect("failed to seed hotspot source file");
@@ -316,7 +347,7 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
     let usage_response = context
         .mcp
         .call_tool(
-            "crate.usage_patterns",
+            "crate_usage_patterns",
             json!({
                 "crate_name": "serde",
                 "symbol_name": "from_str",
@@ -324,7 +355,7 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
             }),
         )
         .await
-        .expect("crate.usage_patterns call failed");
+        .expect("crate_usage_patterns call failed");
     let usage_payload = common::structured_content(&usage_response);
     assert!(
         usage_payload
@@ -360,7 +391,7 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
     let hotspots_response = context
         .mcp
         .call_tool(
-            "crate.hotspots",
+            "crate_hotspots",
             json!({
                 "crate_name": "serde_json",
                 "include_unsafe": true,
@@ -368,7 +399,7 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
             }),
         )
         .await
-        .expect("crate.hotspots call failed");
+        .expect("crate_hotspots call failed");
     let hotspots_payload = common::structured_content(&hotspots_response);
 
     let hotspots = hotspots_payload
@@ -411,11 +442,14 @@ async fn crate_usage_patterns_and_hotspots_return_matches_from_seeded_sources() 
 }
 
 #[tokio::test]
+#[test_log]
 async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
+    debug!("Creating common seeded MCP context");
     let context = common::seeded_mcp_context()
         .await
         .expect("failed to build seeded MCP context");
 
+    debug!("Seeding crate version");
     let previous_version_id = seed_crate_version(
         &context.state.db,
         context
@@ -428,6 +462,8 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
     )
     .await
     .expect("failed to seed previous crate version");
+
+    debug!("Seeding source file");
     let previous_source_id = seed_source_file(
         &context.state.db,
         previous_version_id,
@@ -437,6 +473,8 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
     )
     .await
     .expect("failed to seed previous version source file");
+
+    debug!("Seeding symbol");
     seed_symbol(
         &context.state.db,
         previous_version_id,
@@ -452,7 +490,7 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
     let diff_response = context
         .mcp
         .call_tool(
-            "crate.api_diff",
+            "crate_api_diff",
             json!({
                 "crate_name": "serde_json",
                 "from_version": "1.0.144",
@@ -460,7 +498,8 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
             }),
         )
         .await
-        .expect("crate.api_diff call failed");
+        .expect("crate_api_diff call failed");
+
     let diff_payload = common::structured_content(&diff_response);
 
     assert_eq!(
@@ -487,7 +526,7 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
     let migration_response = context
         .mcp
         .call_tool(
-            "crate.migration_path",
+            "crate_migration_path",
             json!({
                 "crate_name": "serde_json",
                 "from_version": "1.0.144",
@@ -495,7 +534,7 @@ async fn crate_api_diff_and_migration_path_detect_removed_symbol() {
             }),
         )
         .await
-        .expect("crate.migration_path call failed");
+        .expect("crate_migration_path call failed");
     let migration_payload = common::structured_content(&migration_response);
     assert_eq!(
         migration_payload
@@ -522,6 +561,15 @@ async fn crate_re_exports_and_derive_macros_parse_seeded_source_files() {
         .await
         .expect("failed to build seeded MCP context");
 
+    let lib_content =
+        "pub use crate::from_str;\npub fn from_str<T>() -> Result<T, Error> { todo!() }";
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/lib.rs",
+        lib_content,
+    );
     seed_source_file(
         &context.state.db,
         context
@@ -530,11 +578,24 @@ async fn crate_re_exports_and_derive_macros_parse_seeded_source_files() {
             .version_id,
         "src/lib.rs",
         Some("rust"),
-        "pub use crate::from_str;\npub fn from_str<T>() -> Result<T, Error> { todo!() }",
+        lib_content,
     )
     .await
     .expect("failed to seed re-export source");
 
+    let macros_content = "use proc_macro::TokenStream;\n#[proc_macro_derive(MyDerive, \
+                          attributes(my_attr))]\npub fn my_derive(_input: TokenStream) -> \
+                          TokenStream { TokenStream::new() }\n#[proc_macro_attribute]\npub fn \
+                          my_attr(_attr: TokenStream, item: TokenStream) -> TokenStream { item \
+                          }\n#[proc_macro]\npub fn my_macro(_input: TokenStream) -> TokenStream { \
+                          TokenStream::new() }";
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/macros.rs",
+        macros_content,
+    );
     seed_source_file(
         &context.state.db,
         context
@@ -543,20 +604,16 @@ async fn crate_re_exports_and_derive_macros_parse_seeded_source_files() {
             .version_id,
         "src/macros.rs",
         Some("rust"),
-        "use proc_macro::TokenStream;\n#[proc_macro_derive(MyDerive, attributes(my_attr))]\npub \
-         fn my_derive(_input: TokenStream) -> TokenStream { TokenStream::new() \
-         }\n#[proc_macro_attribute]\npub fn my_attr(_attr: TokenStream, item: TokenStream) -> \
-         TokenStream { item }\n#[proc_macro]\npub fn my_macro(_input: TokenStream) -> TokenStream \
-         { TokenStream::new() }",
+        macros_content,
     )
     .await
     .expect("failed to seed macro source");
 
     let re_exports_response = context
         .mcp
-        .call_tool("crate.re_exports", json!({"crate_name": "serde_json", "limit": 10}))
+        .call_tool("crate_re_exports", json!({"crate_name": "serde_json", "limit": 10}))
         .await
-        .expect("crate.re_exports call failed");
+        .expect("crate_re_exports call failed");
     let re_exports_payload = common::structured_content(&re_exports_response);
     assert!(
         re_exports_payload
@@ -568,9 +625,9 @@ async fn crate_re_exports_and_derive_macros_parse_seeded_source_files() {
 
     let derive_response = context
         .mcp
-        .call_tool("crate.derive_macros", json!({"crate_name": "serde_json"}))
+        .call_tool("crate_derive_macros", json!({"crate_name": "serde_json"}))
         .await
-        .expect("crate.derive_macros call failed");
+        .expect("crate_derive_macros call failed");
     let derive_payload = common::structured_content(&derive_response);
 
     let derive_macros = derive_payload
@@ -641,7 +698,7 @@ async fn crate_re_exports_prefers_rustdoc_canonical_paths_when_available() {
     let re_exports_response = context
         .mcp
         .call_tool(
-            "crate.re_exports",
+            "crate_re_exports",
             json!({
                 "crate_name": "serde_json",
                 "path_prefix": "serde_json::",
@@ -649,7 +706,7 @@ async fn crate_re_exports_prefers_rustdoc_canonical_paths_when_available() {
             }),
         )
         .await
-        .expect("crate.re_exports call failed");
+        .expect("crate_re_exports call failed");
     let re_exports_payload = common::structured_content(&re_exports_response);
     assert!(
         re_exports_payload
@@ -731,7 +788,7 @@ async fn crate_import_path_resolves_best_known_public_path() {
     let response = context
         .mcp
         .call_tool(
-            "crate.import_path",
+            "crate_import_path",
             json!({
                 "crate_name": "serde_json",
                 "symbol_name": "Parser",
@@ -740,7 +797,7 @@ async fn crate_import_path_resolves_best_known_public_path() {
             }),
         )
         .await
-        .expect("crate.import_path call failed");
+        .expect("crate_import_path call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -879,7 +936,7 @@ async fn crate_api_diff_prefers_rustdoc_rows_when_dual_source_symbols_exist() {
     let response = context
         .mcp
         .call_tool(
-            "crate.api_diff",
+            "crate_api_diff",
             json!({
                 "crate_name": "serde_json",
                 "from_version": "1.0.143",
@@ -888,7 +945,7 @@ async fn crate_api_diff_prefers_rustdoc_rows_when_dual_source_symbols_exist() {
             }),
         )
         .await
-        .expect("crate.api_diff call failed");
+        .expect("crate_api_diff call failed");
     let payload = common::structured_content(&response);
 
     let changed_count = payload
@@ -955,7 +1012,7 @@ async fn crate_deprecated_returns_seeded_deprecated_items() {
             deprecated_note
          ) VALUES (
             $1, $2, 'old_parse', 'function', 'pub fn old_parse() -> bool', 'public', 1, 1,
-            'fixture', '1.0.100', 'use new_parse instead'
+            'rustdoc_json', '1.0.100', 'use new_parse instead'
          )",
     )
     .bind(
@@ -987,7 +1044,7 @@ async fn crate_deprecated_returns_seeded_deprecated_items() {
             deprecated_note
          ) VALUES (
             $1, $2, 'OldConfig', 'struct', 'public', $3::JSONB, $4::JSONB, $5::JSONB, 3, 3,
-            'fixture', NULL, 'use Config instead'
+            'rustdoc_json', NULL, 'use Config instead'
          )",
     )
     .bind(
@@ -1007,14 +1064,14 @@ async fn crate_deprecated_returns_seeded_deprecated_items() {
     let response = context
         .mcp
         .call_tool(
-            "crate.deprecated",
+            "crate_deprecated",
             json!({
                 "crate_name": "serde_json",
                 "limit": 50
             }),
         )
         .await
-        .expect("crate.deprecated call failed");
+        .expect("crate_deprecated call failed");
     let payload = common::structured_content(&response);
 
     let count = payload

@@ -1,11 +1,29 @@
 //! Integration tests for `crate.*` MCP tools.
 
-use rust_mcp_testing::fixtures::{seed_crate_version, seed_source_file, seed_symbol};
+use rust_mcp_testing::fixtures::{
+    seed_crate_version, seed_source_file, seed_symbol, write_fixture_source_to_registry,
+};
 use serde_json::{Value, json};
 
 use super::common;
 
+const TYPE_INTEL_SOURCE: &str =
+    "use std::fmt::{self, Display};\npub struct ParseError {\npub message: String,\n}\nimpl \
+     ParseError {\npub fn new(message: String) -> ParseError { ParseError { message } }\n}\nimpl \
+     Display for ParseError {\nfn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result \
+     {\nwrite!(f, \"parse error: {}\", self.message)\n}\n}\nimpl From<String> for ParseError \
+     {\nfn from(value: String) -> ParseError { ParseError { message: value } }\n}\npub fn parse() \
+     -> Result<(), ParseError> { Err(ParseError::new(\"oops\".to_string())) }";
+
 async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
+    write_fixture_source_to_registry(
+        &context.registry_dir,
+        "serde_json",
+        "1.0.145",
+        "src/error.rs",
+        TYPE_INTEL_SOURCE,
+    );
+
     let source_file_id = seed_source_file(
         &context.state.db,
         context
@@ -14,13 +32,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             .version_id,
         "src/error.rs",
         Some("rust"),
-        "use std::fmt::{self, Display};\npub struct ParseError {\npub message: String,\n}\nimpl \
-         ParseError {\npub fn new(message: String) -> ParseError { ParseError { message } \
-         }\n}\nimpl Display for ParseError {\nfn fmt(&self, f: &mut fmt::Formatter<'_>) -> \
-         fmt::Result {\nwrite!(f, \"parse error: {}\", self.message)\n}\n}\nimpl From<String> for \
-         ParseError {\nfn from(value: String) -> ParseError { ParseError { message: value } \
-         }\n}\npub fn parse() -> Result<(), ParseError> { \
-         Err(ParseError::new(\"oops\".to_string())) }",
+        TYPE_INTEL_SOURCE,
     )
     .await
     .expect("failed to seed type-intelligence source file");
@@ -40,7 +52,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, $2, 'ParseError', 'struct', 'public', $3::JSONB, $4::JSONB, $5::JSONB, $6, $7, \
-         'fixture'
+         'rustdoc_json'
          )",
     )
     .bind(
@@ -74,7 +86,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, $2, 'ParseError', 'ParseError', NULL, NULL, 'inherent', $3::JSONB, $4, $5, \
-         'fixture'
+         'rustdoc_json'
          )",
     )
     .bind(
@@ -106,7 +118,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, $2, 'ParseError', 'ParseError', 'Display', 'std::fmt::Display', 'trait', \
-         $3::JSONB, $4, $5, 'fixture'
+         $3::JSONB, $4, $5, 'rustdoc_json'
          )",
     )
     .bind(
@@ -138,7 +150,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, $2, 'ParseError', 'ParseError', 'From', 'From<String>', 'trait', $3::JSONB, $4, \
-         $5, 'fixture'
+         $5, 'rustdoc_json'
          )",
     )
     .bind(
@@ -170,7 +182,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, 'Display', FALSE, FALSE, TRUE, $2::JSONB, $3::JSONB, $4::JSONB, $5::JSONB, \
-         $6::JSONB, 'fixture'
+         $6::JSONB, 'rustdoc_json'
          )",
     )
     .bind(
@@ -201,7 +213,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
             index_source
          ) VALUES (
             $1, $2, 'parse', 'function', 'fn parse() -> Result<(), ParseError>', 'public', 16, 16, \
-         'fixture'
+         'rustdoc_json'
          )",
     )
     .bind(

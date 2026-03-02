@@ -11,7 +11,7 @@ async fn tool_dependency_feature_impact_reports_per_feature_entry() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "dependency.feature_impact",
+        "dependency_feature_impact",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -37,7 +37,7 @@ async fn tool_dependency_feature_impact_reports_per_feature_entry() {
     let per_feature = payload
         .get("per_feature")
         .and_then(Value::as_array)
-        .expect("dependency.feature_impact should return per_feature array");
+        .expect("dependency_feature_impact should return per_feature array");
     assert!(
         per_feature
             .iter()
@@ -55,7 +55,7 @@ async fn tool_dependency_resolve_resolves_seeded_dependencies() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "dependency.resolve",
+        "dependency_resolve",
         json!({
             "dependencies": [
                 {"name": SEEDED_CRATE_NAME, "version_req": "^1.2"},
@@ -77,7 +77,7 @@ async fn tool_dependency_resolve_resolves_seeded_dependencies() {
     let resolved_versions = payload
         .get("resolved_versions")
         .and_then(Value::as_array)
-        .expect("dependency.resolve should return resolved_versions array");
+        .expect("dependency_resolve should return resolved_versions array");
     assert!(
         resolved_versions
             .iter()
@@ -106,7 +106,7 @@ async fn tool_dependency_audit_reports_seeded_manifest_dependencies() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "dependency.audit",
+        "dependency_audit",
         json!({ "cargo_toml_path": context.manifest_path }),
     )
     .await;
@@ -121,7 +121,7 @@ async fn tool_dependency_audit_reports_seeded_manifest_dependencies() {
     let dependencies = payload
         .get("dependencies")
         .and_then(Value::as_array)
-        .expect("dependency.audit should return dependencies array");
+        .expect("dependency_audit should return dependencies array");
     assert!(
         dependencies
             .iter()

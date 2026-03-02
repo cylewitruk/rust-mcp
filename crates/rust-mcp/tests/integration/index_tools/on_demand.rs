@@ -29,13 +29,13 @@ async fn crate_intel_triggers_on_demand_indexing_for_unindexed_crate() {
     let response = context
         .mcp
         .call_tool(
-            "crate.intel",
+            "crate_intel",
             json!({
                 "crate_name": "demo_crate"
             }),
         )
         .await
-        .expect("crate.intel should succeed via on-demand indexing");
+        .expect("crate_intel should succeed via on-demand indexing");
     let payload = common::structured_content(&response);
 
     // The response should contain the crate name from the mock server.
@@ -74,7 +74,7 @@ async fn crate_intel_returns_error_for_nonexistent_crate() {
     let result = context
         .mcp
         .call_tool(
-            "crate.intel",
+            "crate_intel",
             json!({
                 "crate_name": "nonexistent_crate_xyz"
             }),
@@ -84,7 +84,7 @@ async fn crate_intel_returns_error_for_nonexistent_crate() {
     // The call should fail with a descriptive error (not a timeout).
     assert!(
         result.is_err(),
-        "crate.intel for a nonexistent crate should return an error, got: {result:?}"
+        "crate_intel for a nonexistent crate should return an error, got: {result:?}"
     );
 }
 
@@ -103,10 +103,10 @@ async fn concurrent_on_demand_calls_coalesce() {
     let (r1, r2) = tokio::join!(
         context
             .mcp
-            .call_tool("crate.intel", json!({"crate_name": "demo_crate"})),
+            .call_tool("crate_intel", json!({"crate_name": "demo_crate"})),
         context
             .mcp
-            .call_tool("crate.intel", json!({"crate_name": "demo_crate"})),
+            .call_tool("crate_intel", json!({"crate_name": "demo_crate"})),
     );
 
     // Both should succeed.

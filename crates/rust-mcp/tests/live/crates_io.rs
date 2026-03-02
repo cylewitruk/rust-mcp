@@ -31,6 +31,7 @@ async fn live_crates_io_context() -> Result<LiveCratesIoContext> {
         postgres
             .connection_string()
             .to_string(),
+        std::path::PathBuf::from("/tmp"),
     );
     let state = AppState::connect(config.clone()).await?;
     state.run_migrations().await?;
@@ -136,7 +137,7 @@ async fn live_sync_serde_stores_metadata_and_readme() -> Result<()> {
     let response = context
         .mcp
         .call_tool(
-            "index.sync_crates",
+            "index_sync_crates",
             json!({
                 "query": "serde",
                 "page": 1,
@@ -145,7 +146,7 @@ async fn live_sync_serde_stores_metadata_and_readme() -> Result<()> {
             }),
         )
         .await
-        .context("index.sync_crates for serde failed")?;
+        .context("index_sync_crates for serde failed")?;
 
     let payload = common::structured_content(&response);
     assert!(
@@ -214,7 +215,7 @@ async fn live_sync_crate_with_build_metadata_versions() -> Result<()> {
     let response = context
         .mcp
         .call_tool(
-            "index.sync_crates",
+            "index_sync_crates",
             json!({
                 "query": "toml_datetime",
                 "page": 1,
@@ -223,7 +224,7 @@ async fn live_sync_crate_with_build_metadata_versions() -> Result<()> {
             }),
         )
         .await
-        .context("index.sync_crates for toml_datetime failed")?;
+        .context("index_sync_crates for toml_datetime failed")?;
 
     let payload = common::structured_content(&response);
     assert!(

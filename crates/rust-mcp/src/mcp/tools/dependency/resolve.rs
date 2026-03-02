@@ -537,9 +537,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "dependency.audit".to_string(),
-                "crate.graph".to_string(),
-                "crate.features".to_string(),
+                "dependency_audit".to_string(),
+                "crate_graph".to_string(),
+                "crate_features".to_string(),
             ],
             provenance: "local_postgres_index(crates, crate_versions, dependency_edges)"
                 .to_string(),

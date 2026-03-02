@@ -806,7 +806,6 @@ impl McpServer {
                     &file.sha256,
                     file.file_size,
                     file.language.as_deref(),
-                    Some(&file.content),
                 )
                 .await
                 .map_err(|e| {

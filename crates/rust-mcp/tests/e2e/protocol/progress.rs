@@ -32,7 +32,7 @@ async fn rust_mcp_container_emits_progress_notifications_for_progress_tokenized_
             request_id,
             "tools/call",
             json!({
-                "name": "index.sync_crates",
+                "name": "index_sync_crates",
                 "_meta": {
                     "progressToken": progress_token
                 },

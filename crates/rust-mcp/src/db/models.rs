@@ -34,7 +34,7 @@ pub struct CrateSearchRow {
     pub relevance_score: f64,
 }
 
-/// Row for reading indexed source content.
+/// Row for reading indexed source metadata (content is read from disk).
 #[derive(Debug, FromRow)]
 pub struct SourceReadRow {
     /// Canonical crate name owning the file.
@@ -43,19 +43,15 @@ pub struct SourceReadRow {
     pub version: String,
     /// Relative path of the source file in the crate.
     pub path: String,
-    /// Full source file contents (NULL for rustdoc_json entries).
-    pub content: Option<String>,
 }
 
-/// Row for searching indexed source content.
+/// Row identifying a crate version that has indexed source files, used to
+/// scope ripgrep searches.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
-pub struct SourceSearchRow {
+pub struct SearchableCrateVersionRow {
     pub crate_name: String,
     pub version: String,
-    pub path: String,
-    pub content: Option<String>,
-    pub indexed_at: String,
 }
 
 /// Row for reading indexed docs pages for `docs.search`.
@@ -839,12 +835,11 @@ pub struct RustdocReExportRow {
     pub source_line: i32,
 }
 
-/// Source content row used by `crate.re_exports` fallback parser.
+/// Source path row used by `crate.re_exports` fallback parser.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ReExportSourceRow {
     pub path: String,
-    pub content: Option<String>,
 }
 
 /// Symbol metadata row used by `crate.re_exports` fallback parser.
@@ -855,15 +850,14 @@ pub struct ReExportSymbolKindRow {
     pub visibility: Option<String>,
 }
 
-/// Dependent source row used by `crate.usage_patterns`.
+/// Dependent crate version row used by `crate.usage_patterns` for graph
+/// traversal (content search is done via ripgrep on disk).
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
-pub struct CrateUsageSourceRow {
+pub struct DependentCrateVersionRow {
     pub dependent_crate: String,
     pub dependent_version: String,
     pub dependent_downloads: i64,
-    pub path: String,
-    pub content: Option<String>,
 }
 
 /// License metadata row used by `crate.license_check`.
@@ -874,12 +868,12 @@ pub struct CrateVersionLicenseRow {
     pub license_expression: Option<String>,
 }
 
-/// Source file row used by `crate.hotspots` and `crate.derive_macros`.
+/// Source file path row used by `crate.hotspots` and `crate.derive_macros`
+/// (content is read from disk).
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
-pub struct HotspotSourceFileRow {
+pub struct SourceFilePathRow {
     pub path: String,
-    pub content: Option<String>,
 }
 
 /// Feature row used by `dependency.feature_impact` and `crate.features`.

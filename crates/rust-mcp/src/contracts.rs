@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn tool_schemas_response_supports_filtering() {
         let filtered =
-            tool_schemas_response(Some("ping".to_string())).expect("schema.get filtering failed");
+            tool_schemas_response(Some("ping".to_string())).expect("schema_get filtering failed");
         assert_eq!(filtered.total_tools, 1);
         assert_eq!(filtered.schemas[0].tool_name, "ping");
     }

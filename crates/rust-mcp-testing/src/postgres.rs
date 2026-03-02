@@ -45,7 +45,8 @@ impl PostgresTestContainer {
             .await
             .context("failed to resolve mapped Postgres port after retries")?;
 
-        let connection_string = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+        let connection_string =
+            format!("postgres://postgres:postgres@{host}:{port}/postgres?sslmode=disable");
 
         Ok(Self { container, connection_string })
     }

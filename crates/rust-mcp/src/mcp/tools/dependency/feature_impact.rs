@@ -121,7 +121,7 @@ impl McpServer {
         let feature_rows =
             tools::list_crate_features_for_version(&self.state.db, selected_version.id)
                 .await
-                .map_err(|e| format!("dependency.feature_impact feature query failed: {e}"))?;
+                .map_err(|e| format!("dependency_feature_impact feature query failed: {e}"))?;
 
         let mut feature_to_features = HashMap::<String, Vec<String>>::new();
         let mut feature_to_dependencies = HashMap::<String, Vec<String>>::new();
@@ -137,7 +137,7 @@ impl McpServer {
             selected_version.id,
         )
         .await
-        .map_err(|e| format!("dependency.feature_impact dependency query failed: {e}"))?;
+        .map_err(|e| format!("dependency_feature_impact dependency query failed: {e}"))?;
 
         let mut all_dependencies = BTreeSet::<String>::new();
         let mut baseline_dependencies = BTreeSet::<String>::new();
@@ -232,9 +232,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.features".to_string(),
-                "crate.graph".to_string(),
-                "dependency.resolve".to_string(),
+                "crate_features".to_string(),
+                "crate_graph".to_string(),
+                "dependency_resolve".to_string(),
             ],
             provenance: "local_postgres_index(crate_version_features, dependency_edges)"
                 .to_string(),

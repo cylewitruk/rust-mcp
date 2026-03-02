@@ -217,15 +217,15 @@ async fn main() -> Result<(), String> {
                 let request_id = 10_000_u64 + (worker as u64 * 1_000) + i as u64;
                 let params = match i % 3 {
                     0 => json!({
-                        "name": "crate.search",
+                        "name": "crate_search",
                         "arguments": {"query": crate_name, "limit": 10}
                     }),
                     1 => json!({
-                        "name": "symbol.search",
+                        "name": "symbol_search",
                         "arguments": {"query": "Serializer", "crate_name": crate_name, "limit": 25}
                     }),
                     _ => json!({
-                        "name": "docs.search",
+                        "name": "docs_search",
                         "arguments": {"query": "serialize", "crate_name": crate_name, "limit": 10}
                     }),
                 };

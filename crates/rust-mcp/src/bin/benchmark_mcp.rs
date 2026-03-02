@@ -220,9 +220,9 @@ async fn main() -> Result<(), String> {
 
     let tools = vec![
         (
-            "crate.search",
+            "crate_search",
             json!({
-                "name": "crate.search",
+                "name": "crate_search",
                 "arguments": {
                     "query": args.crate_name,
                     "limit": 10
@@ -230,18 +230,18 @@ async fn main() -> Result<(), String> {
             }),
         ),
         (
-            "crate.intel",
+            "crate_intel",
             json!({
-                "name": "crate.intel",
+                "name": "crate_intel",
                 "arguments": {
                     "crate_name": args.crate_name
                 }
             }),
         ),
         (
-            "symbol.search",
+            "symbol_search",
             json!({
-                "name": "symbol.search",
+                "name": "symbol_search",
                 "arguments": {
                     "query": "Serializer",
                     "crate_name": args.crate_name,
@@ -250,9 +250,9 @@ async fn main() -> Result<(), String> {
             }),
         ),
         (
-            "docs.search",
+            "docs_search",
             json!({
-                "name": "docs.search",
+                "name": "docs_search",
                 "arguments": {
                     "query": "serialize",
                     "crate_name": args.crate_name,

@@ -6,7 +6,7 @@ pub use rust_mcp_types::types::source::{
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{normalize_optional, normalize_required};
+use crate::mcp::utils::{normalize_optional, normalize_required, read_source_file_from_disk};
 
 fn module_path_from_source_path(crate_name: &str, path: &str) -> String {
     let normalized = path.trim_start_matches("./");
@@ -194,7 +194,7 @@ impl McpServer {
         .await
         .map_err(|e| {
             format!(
-                "source.context lookup failed for {}@{}:{}: {e}",
+                "source_context lookup failed for {}@{}:{}: {e}",
                 crate_row.name, selected_version.version, path
             )
         })?
@@ -205,16 +205,21 @@ impl McpServer {
             )
         })?;
 
-        let content = row
-            .content
-            .as_deref()
-            .ok_or_else(|| {
-                format!(
-                    "source content not available for {}@{}:{} (content was not stored for this \
-                     file type)",
-                    crate_row.name, selected_version.version, path
-                )
-            })?;
+        let content = read_source_file_from_disk(
+            &self
+                .state
+                .config
+                .cargo_registry_dir,
+            &crate_row.name,
+            &selected_version.version,
+            &row.path,
+        )
+        .ok_or_else(|| {
+            format!(
+                "source content not available on disk for {}@{}:{} (not found in cargo registry)",
+                crate_row.name, selected_version.version, path
+            )
+        })?;
 
         let total_lines = content.lines().count().max(1) as u32;
 
@@ -230,7 +235,7 @@ impl McpServer {
             .await
             .map_err(|e| {
                 format!(
-                    "source.context symbol lookup failed for {}@{}:{}:{}: {e}",
+                    "source_context symbol lookup failed for {}@{}:{}:{}: {e}",
                     crate_row.name, selected_version.version, path, symbol
                 )
             })?;
@@ -245,10 +250,10 @@ impl McpServer {
                 })?
                 .clamp(1, total_lines)
         } else {
-            return Err("source.context requires either line or symbol_name".to_string());
+            return Err("source_context requires either line or symbol_name".to_string());
         };
 
-        let imports_in_scope = collect_imports_in_scope(content, resolved_line);
+        let imports_in_scope = collect_imports_in_scope(&content, resolved_line);
         let module_path = module_path_from_source_path(&crate_row.name, &path);
 
         let containing_impl = tools::fetch_containing_impl_for_context(
@@ -258,7 +263,7 @@ impl McpServer {
             resolved_line as i32,
         )
         .await
-        .map_err(|e| format!("source.context impl lookup failed: {e}"))?
+        .map_err(|e| format!("source_context impl lookup failed: {e}"))?
         .filter(|row| ((resolved_line as i32) - row.start_line).abs() <= 200)
         .map(|row| SourceContextImplBlock {
             type_name: row.type_name,
@@ -277,7 +282,7 @@ impl McpServer {
             5,
         )
         .await
-        .map_err(|e| format!("source.context type lookup failed: {e}"))?;
+        .map_err(|e| format!("source_context type lookup failed: {e}"))?;
 
         let surrounding_types = surrounding_type_rows
             .into_iter()
@@ -333,9 +338,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "source.read".to_string(),
-                "symbol.search".to_string(),
-                "crate.type_info".to_string(),
+                "source_read".to_string(),
+                "symbol_search".to_string(),
+                "crate_type_info".to_string(),
             ],
             provenance: "source_files + symbols + crate_impls + crate_types".to_string(),
         }))

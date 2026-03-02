@@ -15,6 +15,7 @@ async fn app_state_connects_and_migrates_against_testcontainer_postgres() {
         postgres
             .connection_string()
             .to_string(),
+        std::path::PathBuf::from("/tmp"),
     ))
     .await
     .expect("failed to connect AppState to test postgres");
@@ -62,6 +63,7 @@ async fn fixture_helpers_seed_rows_for_tool_level_tests() {
         postgres
             .connection_string()
             .to_string(),
+        std::path::PathBuf::from("/tmp"),
     ))
     .await
     .expect("failed to connect AppState to test postgres");

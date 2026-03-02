@@ -9,7 +9,7 @@ async fn dependency_resolve_reports_seeded_crates_as_resolvable() {
     let response = context
         .mcp
         .call_tool(
-            "dependency.resolve",
+            "dependency_resolve",
             json!({
                 "dependencies": [
                     { "name": "serde_json", "version_req": "^1.0" },
@@ -19,7 +19,7 @@ async fn dependency_resolve_reports_seeded_crates_as_resolvable() {
             }),
         )
         .await
-        .expect("dependency.resolve call failed");
+        .expect("dependency_resolve call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

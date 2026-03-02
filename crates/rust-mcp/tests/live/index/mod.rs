@@ -28,6 +28,7 @@ async fn live_context(cargo_registry_dir: PathBuf) -> Result<LiveContext> {
         postgres
             .connection_string()
             .to_string(),
+        PathBuf::from("/tmp"),
     );
     config.cargo_registry_dir = cargo_registry_dir;
 
@@ -63,7 +64,7 @@ async fn live_local_cargo_registry_refresh_indexes_real_sources() -> Result<()> 
     let sync_response = context
         .mcp
         .call_tool(
-            "index.sync_crates",
+            "index_sync_crates",
             json!({
                 "query": "tokio",
                 "page": 1,
@@ -72,7 +73,7 @@ async fn live_local_cargo_registry_refresh_indexes_real_sources() -> Result<()> 
             }),
         )
         .await
-        .context("index.sync_crates live call failed")?;
+        .context("index_sync_crates live call failed")?;
     let sync_payload = common::structured_content(&sync_response);
 
     assert!(
@@ -87,14 +88,14 @@ async fn live_local_cargo_registry_refresh_indexes_real_sources() -> Result<()> 
     let refresh_response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "local_cache",
                 "crate_name": "tokio"
             }),
         )
         .await
-        .context("index.refresh local_cache call failed")?;
+        .context("index_refresh local_cache call failed")?;
     let refresh_payload = common::structured_content(&refresh_response);
 
     assert!(matches!(

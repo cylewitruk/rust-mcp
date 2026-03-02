@@ -33,7 +33,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_docs_rs_payload() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": "docs-rustdoc",
@@ -42,7 +42,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_docs_rs_payload() {
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json docs.rs call failed");
+        .expect("index_refresh rustdoc_json docs.rs call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -96,7 +96,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_fixture_file() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": crate_name,
@@ -105,7 +105,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_fixture_file() {
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json call failed");
+        .expect("index_refresh rustdoc_json call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -178,7 +178,7 @@ async fn index_refresh_rustdoc_json_scope_tracks_canonical_reexport_paths() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": crate_name,
@@ -187,7 +187,7 @@ async fn index_refresh_rustdoc_json_scope_tracks_canonical_reexport_paths() {
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json call failed");
+        .expect("index_refresh rustdoc_json call failed");
     let payload = common::structured_content(&response);
     assert!(matches!(
         payload
@@ -249,7 +249,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": TOKIO_CRATE_NAME,
@@ -258,7 +258,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json call for tokio fixture failed");
+        .expect("index_refresh rustdoc_json call for tokio fixture failed");
     let payload = common::structured_content(&response);
     assert!(matches!(
         payload
@@ -333,7 +333,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
     let trait_impls_response = context
         .mcp
         .call_tool(
-            "crate.trait_impls",
+            "crate_trait_impls",
             json!({
                 "crate_name": TOKIO_CRATE_NAME,
                 "version": TOKIO_VERSION,
@@ -342,7 +342,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
             }),
         )
         .await
-        .expect("crate.trait_impls call failed for tokio fixture");
+        .expect("crate_trait_impls call failed for tokio fixture");
     let trait_impls_payload = common::structured_content(&trait_impls_response);
     assert!(
         trait_impls_payload
@@ -365,7 +365,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
     let type_info_response = context
         .mcp
         .call_tool(
-            "crate.type_info",
+            "crate_type_info",
             json!({
                 "crate_name": TOKIO_CRATE_NAME,
                 "version": TOKIO_VERSION,
@@ -374,7 +374,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
             }),
         )
         .await
-        .expect("crate.type_info call failed for tokio fixture");
+        .expect("crate_type_info call failed for tokio fixture");
     let type_info_payload = common::structured_content(&type_info_response);
     assert!(
         type_info_payload
@@ -414,7 +414,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
     let re_exports_response = context
         .mcp
         .call_tool(
-            "crate.re_exports",
+            "crate_re_exports",
             json!({
                 "crate_name": TOKIO_CRATE_NAME,
                 "version": TOKIO_VERSION,
@@ -422,12 +422,12 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
             }),
         )
         .await
-        .expect("crate.re_exports call failed for tokio fixture");
+        .expect("crate_re_exports call failed for tokio fixture");
     let re_exports_payload = common::structured_content(&re_exports_response);
     let re_exports = re_exports_payload
         .get("re_exports")
         .and_then(Value::as_array)
-        .expect("crate.re_exports should return re_exports array");
+        .expect("crate_re_exports should return re_exports array");
     assert_eq!(
         re_exports_payload
             .get("count")
@@ -498,7 +498,7 @@ async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "rustdoc_json",
                 "crate_name": TOKIO_CRATE_NAME,
@@ -507,7 +507,7 @@ async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
             }),
         )
         .await
-        .expect("index.refresh rustdoc_json call failed");
+        .expect("index_refresh rustdoc_json call failed");
     let payload = common::structured_content(&response);
 
     assert!(matches!(
@@ -546,7 +546,7 @@ async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
     let diff_response = context
         .mcp
         .call_tool(
-            "crate.api_diff",
+            "crate_api_diff",
             json!({
                 "crate_name": TOKIO_CRATE_NAME,
                 "from_version": TOKIO_VERSION_148,
@@ -555,7 +555,7 @@ async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
             }),
         )
         .await
-        .expect("crate.api_diff call failed after rustdoc indexing");
+        .expect("crate_api_diff call failed after rustdoc indexing");
     let diff_payload = common::structured_content(&diff_response);
 
     assert!(

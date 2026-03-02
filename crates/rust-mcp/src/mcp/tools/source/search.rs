@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use rmcp::Json;
 pub use rust_mcp_types::types::source::{
     SourceSearchHit, SourceSearchMode, SourceSearchRequest, SourceSearchResponse,
@@ -8,10 +10,12 @@ use crate::db::tools;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, SourceReadRequest, SourceReadResponse,
 };
+use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
-    path_glob_to_like, resolve_pagination, source_read_end_line, source_search_limit, sync_page,
+    read_source_file_from_disk, resolve_pagination, resolve_registry_source_dir,
+    source_read_end_line, source_search_limit, sync_page,
 };
 
 #[derive(Debug, Serialize)]
@@ -50,48 +54,6 @@ impl CursorToken for SourceCursorToken {
     }
 }
 
-fn extract_text_snippet(content: &str, query: &str) -> (Option<u32>, String) {
-    if query.is_empty() {
-        let first_line = content
-            .lines()
-            .next()
-            .unwrap_or_default();
-        return (
-            Some(1),
-            first_line
-                .chars()
-                .take(220)
-                .collect(),
-        );
-    }
-
-    let q = query.to_ascii_lowercase();
-    for (index, line) in content.lines().enumerate() {
-        if line
-            .to_ascii_lowercase()
-            .contains(&q)
-        {
-            return (
-                Some((index + 1) as u32),
-                line.trim()
-                    .chars()
-                    .take(220)
-                    .collect::<String>(),
-            );
-        }
-    }
-
-    let fallback = content
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .chars()
-        .take(220)
-        .collect();
-    (None, fallback)
-}
-
 impl McpServer {
     /// Handles the `source.search` tool call.
     pub async fn handle_source_search(
@@ -121,7 +83,7 @@ impl McpServer {
         })
         .map_err(|e| format!("failed to build source.search cache key: {e}"))?;
         if let Some(cached) = self
-            .query_cache_get("source.search", &cache_key)
+            .query_cache_get("source_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<SourceSearchResponse>(cached)
@@ -171,40 +133,69 @@ impl McpServer {
             }
         }
 
-        let path_like = path_glob
-            .as_deref()
-            .map(path_glob_to_like);
-        let rows = tools::search_source_files(
+        let rg_mode = match mode {
+            SourceSearchMode::Text => RipgrepMode::FixedString,
+            SourceSearchMode::Regex => RipgrepMode::Regex,
+        };
+
+        let crate_versions = tools::list_searchable_crate_versions(
             &self.state.db,
-            &tools::SourceFileSearchParams {
-                query: &query,
-                crate_name: crate_name.as_deref(),
-                version: version.as_deref(),
-                path_like: path_like.as_deref(),
-                mode,
-                limit: i64::from(limit.saturating_add(1)),
-                offset: i64::from(offset),
-            },
+            crate_name.as_deref(),
+            version.as_deref(),
+            200,
         )
         .await
-        .map_err(|e| format!("source.search query failed: {e}"))?;
+        .map_err(|e| format!("source_search crate version query failed: {e}"))?;
 
-        let mut hits = rows
+        let target_count = (offset as usize) + (limit as usize) + 1;
+        let mut file_hits = Vec::<SourceSearchHit>::new();
+
+        for cv in &crate_versions {
+            if file_hits.len() >= target_count {
+                break;
+            }
+            let Some(version_dir) = resolve_registry_source_dir(
+                &self
+                    .state
+                    .config
+                    .cargo_registry_dir,
+                &cv.crate_name,
+                &cv.version,
+            ) else {
+                continue;
+            };
+
+            let matches = ripgrep::search(&version_dir, &query, rg_mode, path_glob.as_deref(), 500)
+                .map_err(|e| format!("source_search ripgrep failed: {e}"))?;
+
+            let mut seen_paths = HashSet::new();
+            for m in matches {
+                if file_hits.len() >= target_count {
+                    break;
+                }
+                if !seen_paths.insert(m.path.clone()) {
+                    continue;
+                }
+                file_hits.push(SourceSearchHit {
+                    crate_name: cv.crate_name.clone(),
+                    version: cv.version.clone(),
+                    path: m.path,
+                    indexed_at: String::new(),
+                    match_line: Some(m.line_number),
+                    snippet: m
+                        .line_content
+                        .trim()
+                        .chars()
+                        .take(220)
+                        .collect(),
+                });
+            }
+        }
+
+        let mut hits: Vec<_> = file_hits
             .into_iter()
-            .filter_map(|row| {
-                let content = row.content.as_deref()?;
-                let (line, snippet) = extract_text_snippet(content, &query);
-                Some(SourceSearchHit {
-                    crate_name: row.crate_name,
-                    version: row.version,
-                    path: row.path,
-                    indexed_at: row.indexed_at,
-                    match_line: line,
-                    snippet,
-                })
-            })
-            .collect::<Vec<_>>();
-
+            .skip(offset as usize)
+            .collect();
         let has_more = hits.len() > limit as usize;
         if has_more {
             hits.truncate(limit as usize);
@@ -254,13 +245,13 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec!["source.read".to_string(), "crate.intel".to_string()],
+            next_best_calls: vec!["source_read".to_string(), "crate_intel".to_string()],
             provenance: "local_postgres_index".to_string(),
             hits,
         };
 
         self.query_cache_put(
-            "source.search",
+            "source_search",
             &cache_key,
             &serde_json::to_value(&response)
                 .map_err(|e| format!("failed to encode source.search cache value: {e}"))?,
@@ -284,7 +275,7 @@ impl McpServer {
                 .await
                 .map_err(|e| {
                     format!(
-                        "source.read crate lookup failed for {crate_name}@{version}:{path}: {e}"
+                        "source_read crate lookup failed for {crate_name}@{version}:{path}: {e}"
                     )
                 })?
                 .ok_or_else(|| format!("crate '{crate_name}' is not indexed locally"))?;
@@ -294,7 +285,7 @@ impl McpServer {
                     .await
                     .map_err(|e| {
                         format!(
-                            "source.read version lookup failed for {crate_name}@{version}:{path}: \
+                            "source_read version lookup failed for {crate_name}@{version}:{path}: \
                              {e}"
                         )
                     })?
@@ -315,7 +306,7 @@ impl McpServer {
             )
             .await
             .map_err(|e| {
-                format!("source.read lookup failed for {crate_name}@{version}:{path}: {e}")
+                format!("source_read lookup failed for {crate_name}@{version}:{path}: {e}")
             })?
             .ok_or_else(|| format!("source file not found for {crate_name}@{version}:{path}"))?
         } else {
@@ -329,19 +320,25 @@ impl McpServer {
 
             tools::fetch_source_read_latest_for_crate_path(&self.state.db, &crate_name, &path)
                 .await
-                .map_err(|e| format!("source.read lookup failed for {crate_name}:{path}: {e}"))?
+                .map_err(|e| format!("source_read lookup failed for {crate_name}:{path}: {e}"))?
                 .ok_or_else(|| format!("source file not found for {crate_name}:{path}"))?
         };
 
-        let content = row
-            .content
-            .as_deref()
-            .ok_or_else(|| {
-                format!(
-                    "source content not available for {crate_name}:{path} (content was not stored \
-                     for this file type)"
-                )
-            })?;
+        let content = read_source_file_from_disk(
+            &self
+                .state
+                .config
+                .cargo_registry_dir,
+            &row.crate_name,
+            &row.version,
+            &row.path,
+        )
+        .ok_or_else(|| {
+            format!(
+                "source content not available on disk for {}@{}:{} (not found in cargo registry)",
+                row.crate_name, row.version, row.path
+            )
+        })?;
 
         let lines = content
             .lines()
@@ -380,7 +377,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec!["source.search".to_string(), "symbol.search".to_string()],
+            next_best_calls: vec!["source_search".to_string(), "symbol_search".to_string()],
             provenance: "local_postgres_index".to_string(),
         }))
     }

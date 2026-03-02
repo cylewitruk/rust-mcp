@@ -11,6 +11,30 @@ use sqlx::PgPool;
 
 use crate::db;
 
+/// Writes a source file to a cargo registry directory structure on disk.
+///
+/// Creates the directory hierarchy
+/// `{registry_dir}/src/test-registry/{crate_name}-{version}/{relative_path}`
+/// and writes `content` there. This enables tool handlers that read source
+/// content from the cargo registry on disk rather than from PostgreSQL.
+pub fn write_fixture_source_to_registry(
+    registry_dir: &Path,
+    crate_name: &str,
+    version: &str,
+    relative_path: &str,
+    content: &str,
+) {
+    let file_path = registry_dir
+        .join("src")
+        .join("test-registry")
+        .join(format!("{crate_name}-{version}"))
+        .join(relative_path);
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent).expect("failed to create fixture registry directory");
+    }
+    std::fs::write(&file_path, content).expect("failed to write fixture source file to registry");
+}
+
 /// Identifiers returned when seeding a crate and one of its versions.
 #[derive(Debug, Clone, Copy)]
 pub struct SeededCrateVersion {
@@ -237,8 +261,7 @@ pub async fn seed_source_file(
     let file_size = i64::try_from(content.len())?;
 
     let source_file_id =
-        db::upsert_source_file(pool, crate_version_id, path, sha256, file_size, language, content)
-            .await?;
+        db::upsert_source_file(pool, crate_version_id, path, sha256, file_size, language).await?;
 
     Ok(source_file_id)
 }

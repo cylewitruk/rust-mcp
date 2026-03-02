@@ -11,7 +11,8 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, hotspots_limit,
-    normalize_optional, normalize_required, path_glob_to_like, resolve_pagination, sync_page,
+    normalize_optional, normalize_required, path_glob_to_like, resolve_pagination,
+    resolve_registry_source_dir, sync_page,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -226,20 +227,35 @@ impl McpServer {
         let path_like = path_glob
             .as_deref()
             .map(path_glob_to_like);
-        let files = tools::list_source_files_for_hotspots(
+        let file_rows = tools::list_source_file_paths_for_hotspots(
             &self.state.db,
             resolution.selected_version.id,
             path_like.as_deref(),
         )
         .await
-        .map_err(|e| format!("crate.hotspots source scan failed: {e}"))?;
+        .map_err(|e| format!("crate_hotspots source scan failed: {e}"))?;
 
-        let scanned_files = files.len();
-        let mut hotspots = files
-            .iter()
-            .filter_map(|row| Some((row, row.content.as_deref()?)))
-            .flat_map(|(row, content)| detect_hotspots_in_file(&row.path, content, &patterns))
-            .collect::<Vec<_>>();
+        let version_dir = resolve_registry_source_dir(
+            &self
+                .state
+                .config
+                .cargo_registry_dir,
+            &crate_name,
+            &resolution
+                .selected_version
+                .version,
+        );
+
+        let scanned_files = file_rows.len();
+        let mut hotspots = Vec::new();
+        if let Some(ref vdir) = version_dir {
+            for row in &file_rows {
+                let full_path = vdir.join(&row.path);
+                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                    hotspots.extend(detect_hotspots_in_file(&row.path, &content, &patterns));
+                }
+            }
+        }
 
         hotspots.sort_by(|left, right| {
             severity_rank(left.severity)
@@ -337,9 +353,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "source.read".to_string(),
-                "symbol.search".to_string(),
-                "crate.graph".to_string(),
+                "source_read".to_string(),
+                "symbol_search".to_string(),
+                "crate_graph".to_string(),
             ],
             provenance: "local_postgres_index".to_string(),
         }))

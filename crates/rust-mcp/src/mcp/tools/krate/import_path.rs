@@ -95,7 +95,7 @@ impl McpServer {
             i64::from(pag.offset),
         )
         .await
-        .map_err(|e| format!("crate.import_path query failed: {e}"))?;
+        .map_err(|e| format!("crate_import_path query failed: {e}"))?;
 
         let matches = symbol_rows
             .iter()
@@ -195,9 +195,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.re_exports".to_string(),
-                "crate.type_info".to_string(),
-                "source.search".to_string(),
+                "crate_re_exports".to_string(),
+                "crate_type_info".to_string(),
+                "source_search".to_string(),
             ],
             provenance: "local_postgres_index(symbols, source_files)".to_string(),
         }))

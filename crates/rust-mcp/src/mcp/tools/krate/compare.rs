@@ -223,7 +223,7 @@ impl McpServer {
                 .await
                 .map_err(|e| {
                     format!(
-                        "crate.compare count aggregation failed for {}: {e}",
+                        "crate_compare count aggregation failed for {}: {e}",
                         ctx.crate_row.name
                     )
                 })?;
@@ -405,10 +405,10 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                format!("crate.intel(crate_name='{}')", left_crate),
-                format!("crate.intel(crate_name='{}')", right_crate),
-                format!("crate.api(crate_name='{}')", left_crate),
-                format!("crate.api(crate_name='{}')", right_crate),
+                format!("crate_intel(crate_name='{}')", left_crate),
+                format!("crate_intel(crate_name='{}')", right_crate),
+                format!("crate_api(crate_name='{}')", left_crate),
+                format!("crate_api(crate_name='{}')", right_crate),
             ],
             provenance: "local_postgres_index+derived_compare_score:v1".to_string(),
         }))

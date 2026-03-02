@@ -83,7 +83,7 @@ impl McpServer {
         })
         .map_err(|e| format!("failed to build symbol.search cache key: {e}"))?;
         if let Some(cached) = self
-            .query_cache_get("symbol.search", &cache_key)
+            .query_cache_get("symbol_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<SymbolSearchResponse>(cached)
@@ -125,7 +125,7 @@ impl McpServer {
 
         let total_count = tools::count_symbol_search_hits(&self.state.db, &filters)
             .await
-            .map_err(|e| format!("symbol.search count query failed: {e}"))?
+            .map_err(|e| format!("symbol_search count query failed: {e}"))?
             .max(0) as usize;
 
         let rows = tools::search_symbol_hits(
@@ -135,7 +135,7 @@ impl McpServer {
             i64::from(offset),
         )
         .await
-        .map_err(|e| format!("symbol.search query failed: {e}"))?;
+        .map_err(|e| format!("symbol_search query failed: {e}"))?;
 
         let hits = rows
             .into_iter()
@@ -204,16 +204,16 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: if hits.is_empty() {
-                vec!["index.refresh".to_string(), "source.search".to_string()]
+                vec!["index_refresh".to_string(), "source_search".to_string()]
             } else {
-                vec!["source.read".to_string(), "crate.intel".to_string()]
+                vec!["source_read".to_string(), "crate_intel".to_string()]
             },
             provenance: "local_postgres_index".to_string(),
             hits,
         };
 
         self.query_cache_put(
-            "symbol.search",
+            "symbol_search",
             &cache_key,
             &serde_json::to_value(&response)
                 .map_err(|e| format!("failed to encode symbol.search cache value: {e}"))?,
@@ -305,7 +305,6 @@ mod tests {
                 sha,
                 10,
                 Some("Rust"),
-                Some("pub trait Serializer {}"),
             )
             .await
             .expect("upsert fixture source");

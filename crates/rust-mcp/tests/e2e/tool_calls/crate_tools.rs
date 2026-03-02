@@ -11,7 +11,7 @@ async fn tool_crate_search_returns_seeded_hits() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.search",
+        "crate_search",
         json!({ "query": "demo", "limit": 10 }),
     )
     .await;
@@ -54,7 +54,7 @@ async fn tool_crate_search_returns_seeded_hits() {
     let hits = payload
         .get("hits")
         .and_then(Value::as_array)
-        .expect("crate.search should return hits array");
+        .expect("crate_search should return hits array");
     assert!(
         hits.iter().any(|hit| {
             hit.get("name")
@@ -79,7 +79,7 @@ async fn tool_crate_api_lists_seeded_function_symbol() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.api",
+        "crate_api",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_VERSION,
@@ -120,7 +120,7 @@ async fn tool_crate_api_lists_seeded_function_symbol() {
     let symbols = payload
         .get("symbols")
         .and_then(Value::as_array)
-        .expect("crate.api should return symbols array");
+        .expect("crate_api should return symbols array");
     assert!(
         symbols
             .iter()
@@ -138,7 +138,7 @@ async fn tool_crate_alternatives_includes_seeded_alternative() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.alternatives",
+        "crate_alternatives",
         json!({ "crate_name": SEEDED_CRATE_NAME, "limit": 5 }),
     )
     .await;
@@ -181,7 +181,7 @@ async fn tool_crate_alternatives_includes_seeded_alternative() {
     let alternatives = payload
         .get("alternatives")
         .and_then(Value::as_array)
-        .expect("crate.alternatives should return alternatives array");
+        .expect("crate_alternatives should return alternatives array");
     assert!(
         alternatives
             .iter()
@@ -201,7 +201,7 @@ async fn tool_crate_api_diff_detects_breaking_changes() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.api_diff",
+        "crate_api_diff",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "from_version": SEEDED_CRATE_VERSION,
@@ -240,7 +240,7 @@ async fn tool_crate_compare_reports_recommendation_reasons() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.compare",
+        "crate_compare",
         json!({
             "left_crate": SEEDED_CRATE_NAME,
             "right_crate": SEEDED_ALT_CRATE_NAME
@@ -277,7 +277,7 @@ async fn tool_crate_compatibility_resolves_seeded_pair() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.compatibility",
+        "crate_compatibility",
         json!({
             "left_crate": SEEDED_CRATE_NAME,
             "right_crate": SEEDED_ALT_CRATE_NAME
@@ -295,7 +295,7 @@ async fn tool_crate_compatibility_resolves_seeded_pair() {
     let resolved_versions = payload
         .get("resolved_versions")
         .and_then(Value::as_array)
-        .expect("crate.compatibility should return resolved_versions array");
+        .expect("crate_compatibility should return resolved_versions array");
     assert!(
         resolved_versions
             .iter()
@@ -324,7 +324,7 @@ async fn tool_crate_compatibility_matrix_tests_requested_pairs() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.compatibility_matrix",
+        "crate_compatibility_matrix",
         json!({
             "left_crate": SEEDED_CRATE_NAME,
             "right_crate": SEEDED_ALT_CRATE_NAME,
@@ -338,7 +338,7 @@ async fn tool_crate_compatibility_matrix_tests_requested_pairs() {
     let pairs_tested = payload
         .get("pairs_tested")
         .and_then(Value::as_u64)
-        .expect("crate.compatibility_matrix should report pairs_tested");
+        .expect("crate_compatibility_matrix should report pairs_tested");
     assert!(
         (1..=2).contains(&pairs_tested),
         "expected pairs_tested in [1, 2], got {pairs_tested}: {payload}"
@@ -367,7 +367,7 @@ async fn tool_crate_derive_macros_handles_sparse_fixture() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.derive_macros",
+        "crate_derive_macros",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION
@@ -404,7 +404,7 @@ async fn tool_crate_error_types_handles_sparse_fixture() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.error_types",
+        "crate_error_types",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -462,7 +462,7 @@ async fn tool_crate_features_reports_default_std_feature() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.features",
+        "crate_features",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION
@@ -481,7 +481,7 @@ async fn tool_crate_features_reports_default_std_feature() {
     let default_features = payload
         .get("default_features")
         .and_then(Value::as_array)
-        .expect("crate.features should return default_features array");
+        .expect("crate_features should return default_features array");
     assert!(
         default_features
             .iter()
@@ -496,7 +496,7 @@ async fn tool_crate_graph_contains_seeded_dependency_edge() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.graph",
+        "crate_graph",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -517,7 +517,7 @@ async fn tool_crate_graph_contains_seeded_dependency_edge() {
     let edges = payload
         .get("edges")
         .and_then(Value::as_array)
-        .expect("crate.graph should return edges array");
+        .expect("crate_graph should return edges array");
     assert!(
         edges.iter().any(|edge| edge
             .get("to_crate")
@@ -533,7 +533,7 @@ async fn tool_crate_hotspots_reports_scanned_files() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.hotspots",
+        "crate_hotspots",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -580,7 +580,7 @@ async fn tool_crate_hotspots_reports_scanned_files() {
     let hotspots = payload
         .get("hotspots")
         .and_then(Value::as_array)
-        .expect("crate.hotspots should return hotspots array");
+        .expect("crate_hotspots should return hotspots array");
     assert_eq!(
         payload
             .get("count")
@@ -595,7 +595,7 @@ async fn tool_crate_intel_includes_seeded_dependency() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.intel",
+        "crate_intel",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION
@@ -613,7 +613,7 @@ async fn tool_crate_intel_includes_seeded_dependency() {
     let dependencies = payload
         .get("dependencies")
         .and_then(Value::as_array)
-        .expect("crate.intel should return dependencies array");
+        .expect("crate_intel should return dependencies array");
     assert!(
         dependencies
             .iter()
@@ -631,7 +631,7 @@ async fn tool_crate_license_check_evaluates_seeded_license_expression() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.license_check",
+        "crate_license_check",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION
@@ -660,7 +660,7 @@ async fn tool_crate_migration_path_emits_actions_for_breaking_changes() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.migration_path",
+        "crate_migration_path",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "from_version": SEEDED_CRATE_VERSION,
@@ -692,7 +692,7 @@ async fn tool_crate_re_exports_handles_sparse_fixture() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.re_exports",
+        "crate_re_exports",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -732,7 +732,7 @@ async fn tool_crate_re_exports_handles_sparse_fixture() {
     let re_exports = payload
         .get("re_exports")
         .and_then(Value::as_array)
-        .expect("crate.re_exports should return re_exports array");
+        .expect("crate_re_exports should return re_exports array");
     assert_eq!(
         payload
             .get("count")
@@ -747,7 +747,7 @@ async fn tool_crate_import_path_handles_missing_symbol() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.import_path",
+        "crate_import_path",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -805,7 +805,7 @@ async fn tool_crate_trait_impls_handles_sparse_fixture() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.trait_impls",
+        "crate_trait_impls",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -864,7 +864,7 @@ async fn tool_crate_type_info_handles_sparse_fixture() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.type_info",
+        "crate_type_info",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -887,7 +887,7 @@ async fn tool_crate_usage_patterns_finds_dependent_references() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.usage_patterns",
+        "crate_usage_patterns",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_NEXT_VERSION,
@@ -939,7 +939,7 @@ async fn tool_crate_usage_patterns_finds_dependent_references() {
             .get("patterns")
             .and_then(Value::as_array)
             .is_some(),
-        "crate.usage_patterns should return patterns array: {payload}"
+        "crate_usage_patterns should return patterns array: {payload}"
     );
 }
 
@@ -949,7 +949,7 @@ async fn tool_crate_versions_marks_latest_version() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "crate.versions",
+        "crate_versions",
         json!({ "crate_name": SEEDED_CRATE_NAME, "limit": 20 }),
     )
     .await;
@@ -992,7 +992,7 @@ async fn tool_crate_versions_marks_latest_version() {
     let versions = payload
         .get("versions")
         .and_then(Value::as_array)
-        .expect("crate.versions should return versions array");
+        .expect("crate_versions should return versions array");
     assert!(
         versions
             .iter()

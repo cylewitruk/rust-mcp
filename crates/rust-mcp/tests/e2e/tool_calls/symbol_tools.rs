@@ -11,7 +11,7 @@ async fn tool_symbol_search_returns_seeded_parse_symbol() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "symbol.search",
+        "symbol_search",
         json!({
             "query": "parse",
             "crate_name": SEEDED_CRATE_NAME,
@@ -32,7 +32,7 @@ async fn tool_symbol_search_returns_seeded_parse_symbol() {
     let hits = payload
         .get("hits")
         .and_then(Value::as_array)
-        .expect("symbol.search should return hits array");
+        .expect("symbol_search should return hits array");
     assert!(
         hits.iter().any(|hit| {
             hit.get("name")

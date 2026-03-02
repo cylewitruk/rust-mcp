@@ -11,7 +11,7 @@ async fn tool_source_search_returns_well_formed_response() {
 
     let payload = call_tool_payload(
         &context.rust_mcp,
-        "source.search",
+        "source_search",
         json!({
             "query": "parse",
             "crate_name": SEEDED_CRATE_NAME,
@@ -61,7 +61,7 @@ async fn tool_source_search_returns_well_formed_response() {
             .get("hits")
             .and_then(Value::as_array)
             .is_some(),
-        "source.search should return hits array: {payload}"
+        "source_search should return hits array: {payload}"
     );
 }
 
@@ -73,7 +73,7 @@ async fn tool_source_read_returns_error_for_contentless_file() {
     // produce a tool-level error explaining the content is not available.
     let response = call_tool_response(
         &context.rust_mcp,
-        "source.read",
+        "source_read",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_VERSION,
@@ -86,7 +86,7 @@ async fn tool_source_read_returns_error_for_contentless_file() {
 
     let result = response
         .get("result")
-        .expect("source.read should return a result");
+        .expect("source_read should return a result");
     assert_eq!(
         result
             .get("isError")
@@ -102,7 +102,7 @@ async fn tool_source_context_returns_error_for_contentless_file() {
 
     let response = call_tool_response(
         &context.rust_mcp,
-        "source.context",
+        "source_context",
         json!({
             "crate_name": SEEDED_CRATE_NAME,
             "version": SEEDED_CRATE_VERSION,
@@ -114,7 +114,7 @@ async fn tool_source_context_returns_error_for_contentless_file() {
 
     let result = response
         .get("result")
-        .expect("source.context should return a result");
+        .expect("source_context should return a result");
     assert_eq!(
         result
             .get("isError")

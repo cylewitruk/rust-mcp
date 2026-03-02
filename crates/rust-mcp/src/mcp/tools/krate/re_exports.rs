@@ -9,7 +9,8 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
-    normalize_required, re_exports_limit, resolve_pagination, sync_page,
+    normalize_required, re_exports_limit, read_source_file_from_disk, resolve_pagination,
+    sync_page,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -210,7 +211,7 @@ impl McpServer {
             i64::from(pag.offset),
         )
         .await
-        .map_err(|e| format!("crate.re_exports rustdoc query failed: {e}"))?;
+        .map_err(|e| format!("crate_re_exports rustdoc query failed: {e}"))?;
 
         let (mut re_exports, confidence_assessment, provenance) = if !rustdoc_re_exports.is_empty()
         {
@@ -245,7 +246,7 @@ impl McpServer {
                 resolution.selected_version.id,
             )
             .await
-            .map_err(|e| format!("crate.re_exports source query failed: {e}"))?;
+            .map_err(|e| format!("crate_re_exports source query failed: {e}"))?;
 
             let max_results = pag
                 .offset
@@ -253,7 +254,18 @@ impl McpServer {
                 .saturating_add(1) as usize;
             let mut entries = Vec::<CrateReExportEntry>::new();
             for source in sources {
-                let Some(content) = source.content.as_deref() else {
+                let content = read_source_file_from_disk(
+                    &self
+                        .state
+                        .config
+                        .cargo_registry_dir,
+                    &ctx.crate_row.name,
+                    &resolution
+                        .selected_version
+                        .version,
+                    &source.path,
+                );
+                let Some(ref content) = content else {
                     continue;
                 };
                 let module_prefix = module_prefix_from_path(&ctx.crate_row.name, &source.path);
@@ -276,7 +288,7 @@ impl McpServer {
                             &entry.exported_name,
                         )
                         .await
-                        .map_err(|e| format!("crate.re_exports symbol lookup failed: {e}"))?;
+                        .map_err(|e| format!("crate_re_exports symbol lookup failed: {e}"))?;
 
                         let kind = symbol
                             .as_ref()
@@ -398,9 +410,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.api".to_string(),
-                "symbol.search".to_string(),
-                "source.read".to_string(),
+                "crate_api".to_string(),
+                "symbol_search".to_string(),
+                "source_read".to_string(),
             ],
             provenance,
         }))

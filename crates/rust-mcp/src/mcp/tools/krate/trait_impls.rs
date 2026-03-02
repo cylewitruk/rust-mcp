@@ -258,7 +258,7 @@ impl McpServer {
             Some(i64::from(pag.offset)),
         )
         .await
-        .map_err(|e| format!("crate.trait_impls query failed: {e}"))?;
+        .map_err(|e| format!("crate_trait_impls query failed: {e}"))?;
 
         let mut impl_rows = prioritize_impl_rows(impl_rows);
         let has_more = impl_rows.len() > pag.limit as usize;
@@ -319,7 +319,7 @@ impl McpServer {
                 &trait_names,
             )
             .await
-            .map_err(|e| format!("crate.trait_impls trait definition query failed: {e}"))?;
+            .map_err(|e| format!("crate_trait_impls trait definition query failed: {e}"))?;
 
             for row in rows {
                 definitions_by_name
@@ -401,9 +401,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.type_info".to_string(),
-                "crate.api".to_string(),
-                "symbol.search".to_string(),
+                "crate_type_info".to_string(),
+                "crate_api".to_string(),
+                "symbol_search".to_string(),
             ],
             provenance: "local_postgres_index(crate_impls, source_files)".to_string(),
         }))

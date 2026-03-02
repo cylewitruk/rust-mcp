@@ -210,6 +210,7 @@ pub async fn run_refresh_worker(state: AppState) {
                     payload.page,
                     payload.per_page,
                     locally_present_only,
+                    false,
                 )
                 .await
                 .map(RefreshJobOutcome::RustdocJson),
@@ -388,9 +389,12 @@ pub async fn run_startup_rustdoc_json_refresh_with_page_size(state: AppState, pe
     let mut total_traits_written = 0_usize;
     let mut total_errors = 0_usize;
 
+    // Always query page 1: the `skip_enriched` filter excludes
+    // already-processed versions, so each batch naturally returns the
+    // next set of un-enriched candidates without needing OFFSET.
     loop {
         let outcome = match server
-            .sync_rustdoc_json_cache(None, Some(page), Some(page_size), true)
+            .sync_rustdoc_json_cache(None, Some(1), Some(page_size), true, true)
             .await
         {
             Ok(outcome) => outcome,

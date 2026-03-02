@@ -1,20 +1,19 @@
 use rust_mcp_types::types::krate::CrateSearchSort;
-use rust_mcp_types::types::source::SourceSearchMode;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 use super::models::{
     AlternativesCandidateRow, ApiDiffSymbolRow, ApiSurfaceRow, CrateAdvisoryRow,
     CrateCompareCountsRow, CrateCompareVersionRow, CrateCoreRow, CrateDependencyRow,
-    CrateDependentRow, CrateTypeInfoRow, CrateUsageSourceRow, CrateVersionHistoryRow,
-    CrateVersionLicenseRow, CrateVersionSelectionRow, CrateVersionTimelineRow, DependencyCrateRow,
-    DependencyResolveEdgeRow, DependencyVersionRow, DeprecatedItemRow, DocsSearchRow,
-    ErrorTypeImplRow, ErrorTypeReturnRow, ErrorTypeTypeRow, FeatureImpactDependencyRow,
-    FeatureImpactFeatureRow, GraphDependencyTraversalRow, GraphDependentTraversalRow,
-    GraphLatestVersionRow, HotspotSourceFileRow, ImportPathRow, ReExportSourceRow,
-    ReExportSymbolKindRow, RustdocReExportRow, SourceContextImplLookupRow,
-    SourceContextLineLookupRow, SourceContextTypeLookupRow, SourceReadRow, SourceSearchRow,
-    SymbolSearchRow,
+    CrateDependentRow, CrateTypeInfoRow, CrateVersionHistoryRow, CrateVersionLicenseRow,
+    CrateVersionSelectionRow, CrateVersionTimelineRow, DependencyCrateRow,
+    DependencyResolveEdgeRow, DependencyVersionRow, DependentCrateVersionRow, DeprecatedItemRow,
+    DocsSearchRow, ErrorTypeImplRow, ErrorTypeReturnRow, ErrorTypeTypeRow,
+    FeatureImpactDependencyRow, FeatureImpactFeatureRow, GraphDependencyTraversalRow,
+    GraphDependentTraversalRow, GraphLatestVersionRow, ImportPathRow, ReExportSourceRow,
+    ReExportSymbolKindRow, RustdocReExportRow, SearchableCrateVersionRow,
+    SourceContextImplLookupRow, SourceContextLineLookupRow, SourceContextTypeLookupRow,
+    SourceFilePathRow, SourceReadRow, SymbolSearchRow,
 };
 
 /// Executes a lightweight readiness probe against PostgreSQL.
@@ -484,7 +483,7 @@ pub async fn fetch_crate_advisories_for_version(
     .await
 }
 
-/// Loads indexed source content for one crate version and path.
+/// Loads indexed source metadata for one crate version and path.
 pub async fn fetch_source_read_for_crate_version_path(
     db: &PgPool,
     crate_name: &str,
@@ -495,8 +494,7 @@ pub async fn fetch_source_read_for_crate_version_path(
         "SELECT
             c.name AS crate_name,
             cv.version,
-            sf.path,
-            sf.content
+            sf.path
          FROM source_files sf
          JOIN crate_versions cv ON cv.id = sf.crate_version_id
          JOIN crates c ON c.id = cv.crate_id
@@ -510,7 +508,7 @@ pub async fn fetch_source_read_for_crate_version_path(
     .await
 }
 
-/// Loads indexed source content for the latest crate version and one path.
+/// Loads indexed source metadata for the latest crate version and one path.
 pub async fn fetch_source_read_latest_for_crate_path(
     db: &PgPool,
     crate_name: &str,
@@ -520,8 +518,7 @@ pub async fn fetch_source_read_latest_for_crate_path(
         "SELECT
             c.name AS crate_name,
             cv.version,
-            sf.path,
-            sf.content
+            sf.path
          FROM source_files sf
          JOIN crate_versions cv ON cv.id = sf.crate_version_id
          JOIN crates c ON c.id = cv.crate_id
@@ -764,24 +761,6 @@ pub async fn list_error_return_rows(
     .await
 }
 
-/// Loads raw source content for one crate version and file path.
-pub async fn fetch_source_content_for_version_path(
-    db: &PgPool,
-    crate_version_id: i64,
-    path: &str,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar::<_, String>(
-        "SELECT content
-         FROM source_files
-         WHERE crate_version_id = $1 AND path = $2
-         LIMIT 1",
-    )
-    .bind(crate_version_id)
-    .bind(path)
-    .fetch_optional(db)
-    .await
-}
-
 /// Lists rustdoc-derived public re-export symbol rows for a crate version.
 pub async fn list_rustdoc_re_exports(
     db: &PgPool,
@@ -829,7 +808,7 @@ pub async fn list_re_export_sources_for_version(
     crate_version_id: i64,
 ) -> Result<Vec<ReExportSourceRow>, sqlx::Error> {
     sqlx::query_as::<_, ReExportSourceRow>(
-        "SELECT path, content
+        "SELECT path
          FROM source_files
          WHERE crate_version_id = $1
            AND (path = 'src/lib.rs' OR path LIKE 'src/%/mod.rs')
@@ -862,48 +841,45 @@ pub async fn fetch_re_export_symbol_kind(
     .await
 }
 
-/// Lists dependent source files that mention a requested crate symbol pattern.
-pub async fn list_crate_usage_sources(
+/// Lists dependent crate versions for usage pattern analysis.
+///
+/// Returns the latest version of each crate that depends on `crate_id`,
+/// ordered by download count descending. Content search is done via ripgrep
+/// on disk, not in SQL.
+pub async fn list_dependent_crate_versions(
     db: &PgPool,
     crate_id: i64,
-    symbol_filter: &str,
     limit: i64,
     offset: i64,
-) -> Result<Vec<CrateUsageSourceRow>, sqlx::Error> {
-    sqlx::query_as::<_, CrateUsageSourceRow>(
-        "WITH dependents AS (
-            SELECT DISTINCT ON (dc.id)
-                dc.id AS dependent_crate_id,
-                dc.name AS dependent_crate_name,
-                dcv.id AS dependent_version_id,
-                dcv.version AS dependent_version,
-                dcv.total_downloads AS dependent_downloads
-            FROM dependency_edges de
-            JOIN crate_versions dcv ON dcv.id = de.from_version_id
-            JOIN crates dc ON dc.id = dcv.crate_id
-            WHERE de.to_crate_id = $1
-            ORDER BY dc.id, dcv.published_at DESC NULLS LAST, dcv.id DESC
-        )
-        SELECT
-            d.dependent_crate_name AS dependent_crate,
-            d.dependent_version,
-            d.dependent_downloads,
-            sf.path,
-            sf.content
-        FROM dependents d
-        JOIN source_files sf ON sf.crate_version_id = d.dependent_version_id
-        WHERE sf.content ILIKE $2
-          AND (sf.language IS NULL OR sf.language != 'rustdoc_json')
-        ORDER BY d.dependent_downloads DESC, d.dependent_crate_name ASC, sf.path ASC
-        LIMIT $3
-        OFFSET $4",
+) -> Result<Vec<DependentCrateVersionRow>, sqlx::Error> {
+    sqlx::query_as::<_, DependentCrateVersionRow>(
+        "SELECT DISTINCT ON (dc.id)
+            dc.name AS dependent_crate,
+            dcv.version AS dependent_version,
+            dcv.total_downloads AS dependent_downloads
+         FROM dependency_edges de
+         JOIN crate_versions dcv ON dcv.id = de.from_version_id
+         JOIN crates dc ON dc.id = dcv.crate_id
+         WHERE de.to_crate_id = $1
+         ORDER BY dc.id, dcv.published_at DESC NULLS LAST, dcv.id DESC",
     )
     .bind(crate_id)
-    .bind(symbol_filter)
-    .bind(limit.max(1))
-    .bind(offset.max(0))
     .fetch_all(db)
     .await
+    .map(|mut rows| {
+        rows.sort_by(|a, b| {
+            b.dependent_downloads
+                .cmp(&a.dependent_downloads)
+                .then_with(|| {
+                    a.dependent_crate
+                        .cmp(&b.dependent_crate)
+                })
+        });
+        rows.into_iter()
+            .skip(offset.max(0) as usize)
+            .take(limit.max(1) as usize)
+            .collect()
+    })
 }
 
 /// Loads license metadata from the latest indexed version of a crate.
@@ -945,17 +921,16 @@ pub async fn fetch_crate_license_for_version(
     .await
 }
 
-/// Lists source files used for hotspot analysis, optionally filtered by path.
-pub async fn list_source_files_for_hotspots(
+/// Lists source file paths for hotspot analysis, optionally filtered by path.
+pub async fn list_source_file_paths_for_hotspots(
     db: &PgPool,
     crate_version_id: i64,
     path_like: Option<&str>,
-) -> Result<Vec<HotspotSourceFileRow>, sqlx::Error> {
+) -> Result<Vec<SourceFilePathRow>, sqlx::Error> {
     if let Some(path_like) = path_like {
-        sqlx::query_as::<_, HotspotSourceFileRow>(
+        sqlx::query_as::<_, SourceFilePathRow>(
             "SELECT
-                sf.path,
-                sf.content
+                sf.path
              FROM source_files sf
              WHERE sf.crate_version_id = $1
                AND sf.path ILIKE $2 ESCAPE '\\\\'
@@ -968,10 +943,9 @@ pub async fn list_source_files_for_hotspots(
         .fetch_all(db)
         .await
     } else {
-        sqlx::query_as::<_, HotspotSourceFileRow>(
+        sqlx::query_as::<_, SourceFilePathRow>(
             "SELECT
-                sf.path,
-                sf.content
+                sf.path
              FROM source_files sf
              WHERE sf.crate_version_id = $1
                AND (sf.language IS NULL OR sf.language != 'rustdoc_json')
@@ -984,13 +958,13 @@ pub async fn list_source_files_for_hotspots(
     }
 }
 
-/// Lists Rust-language source files for a crate version.
-pub async fn list_rust_source_files_for_version(
+/// Lists Rust-language source file paths for a crate version.
+pub async fn list_rust_source_file_paths_for_version(
     db: &PgPool,
     crate_version_id: i64,
-) -> Result<Vec<HotspotSourceFileRow>, sqlx::Error> {
-    sqlx::query_as::<_, HotspotSourceFileRow>(
-        "SELECT path, content
+) -> Result<Vec<SourceFilePathRow>, sqlx::Error> {
+    sqlx::query_as::<_, SourceFilePathRow>(
+        "SELECT path
          FROM source_files
          WHERE crate_version_id = $1
            AND language = 'rust'
@@ -1648,89 +1622,41 @@ pub async fn list_crate_trait_rows_for_names(
 
 /// Searches indexed source files with crate/version/path filters and mode
 /// selection.
-#[derive(Debug, Clone, Copy)]
-pub struct SourceFileSearchParams<'a> {
-    /// Search term for text or regex matching.
-    pub query: &'a str,
-    /// Optional exact crate-name filter.
-    pub crate_name: Option<&'a str>,
-    /// Optional exact version filter.
-    pub version: Option<&'a str>,
-    /// Optional path pattern for `ILIKE` search.
-    pub path_like: Option<&'a str>,
-    /// Search mode (`text` or `regex`).
-    pub mode: SourceSearchMode,
-    /// Maximum rows to return.
-    pub limit: i64,
-    /// Zero-based offset for pagination.
-    pub offset: i64,
-}
-
-/// Searches indexed source files with crate/version/path filters and mode
-/// selection.
-pub async fn search_source_files(
+/// Lists crate versions that have indexed source files, optionally filtered
+/// by crate name and/or version. Used to scope ripgrep-based content searches.
+pub async fn list_searchable_crate_versions(
     db: &PgPool,
-    params: &SourceFileSearchParams<'_>,
-) -> Result<Vec<SourceSearchRow>, sqlx::Error> {
+    crate_name: Option<&str>,
+    version: Option<&str>,
+    limit: i64,
+) -> Result<Vec<SearchableCrateVersionRow>, sqlx::Error> {
     let mut qb = QueryBuilder::<Postgres>::new(
-        "SELECT
+        "SELECT DISTINCT
             c.name AS crate_name,
-            cv.version,
-            sf.path,
-            sf.content,
-            sf.indexed_at::TEXT AS indexed_at
+            cv.version
          FROM source_files sf
          JOIN crate_versions cv ON cv.id = sf.crate_version_id
          JOIN crates c ON c.id = cv.crate_id ",
     );
 
     let mut has_where = false;
-    if let Some(crate_name_filter) = params.crate_name {
-        qb.push(if has_where { "AND " } else { "WHERE " });
-        has_where = true;
-        qb.push("c.name = ");
-        qb.push_bind(crate_name_filter);
+    if let Some(cn) = crate_name {
+        qb.push("WHERE c.name = ");
+        qb.push_bind(cn);
         qb.push(' ');
-    }
-
-    if let Some(version_filter) = params.version {
-        qb.push(if has_where { "AND " } else { "WHERE " });
         has_where = true;
+    }
+    if let Some(v) = version {
+        qb.push(if has_where { "AND " } else { "WHERE " });
         qb.push("cv.version = ");
-        qb.push_bind(version_filter);
+        qb.push_bind(v);
         qb.push(' ');
     }
 
-    if let Some(path_filter) = params.path_like {
-        qb.push(if has_where { "AND " } else { "WHERE " });
-        has_where = true;
-        qb.push("sf.path ILIKE ");
-        qb.push_bind(path_filter);
-        qb.push(" ESCAPE '\\\\' ");
-    }
+    qb.push("ORDER BY c.name ASC, cv.version DESC LIMIT ");
+    qb.push_bind(limit.max(1));
 
-    qb.push(if has_where { "AND " } else { "WHERE " });
-    match params.mode {
-        SourceSearchMode::Text => {
-            qb.push("sf.content ILIKE ");
-            qb.push_bind(format!("%{}%", params.query));
-            qb.push(' ');
-        }
-        SourceSearchMode::Regex => {
-            qb.push("sf.content ~* ");
-            qb.push_bind(params.query);
-            qb.push(' ');
-        }
-    }
-
-    qb.push("AND (sf.language IS NULL OR sf.language != 'rustdoc_json') ");
-
-    qb.push("ORDER BY sf.indexed_at DESC, c.name ASC, sf.path ASC LIMIT ");
-    qb.push_bind(params.limit.max(1));
-    qb.push(" OFFSET ");
-    qb.push_bind(params.offset.max(0));
-
-    qb.build_query_as::<SourceSearchRow>()
+    qb.build_query_as::<SearchableCrateVersionRow>()
         .fetch_all(db)
         .await
 }

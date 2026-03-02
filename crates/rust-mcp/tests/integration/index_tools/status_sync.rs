@@ -8,9 +8,9 @@ async fn index_status_reports_seeded_coverage_counts() {
 
     let response = context
         .mcp
-        .call_tool("index.status", json!({}))
+        .call_tool("index_status", json!({}))
         .await
-        .expect("index.status call failed");
+        .expect("index_status call failed");
     let payload = common::structured_content(&response);
 
     let coverage = payload
@@ -53,14 +53,14 @@ async fn index_refresh_local_cache_returns_terminal_status() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "local_cache",
                 "crate_name": "serde_json"
             }),
         )
         .await
-        .expect("index.refresh call failed");
+        .expect("index_refresh call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -92,7 +92,7 @@ async fn index_sync_crates_writes_versions_features_and_dependencies_from_mock_a
     let response = context
         .mcp
         .call_tool(
-            "index.sync_crates",
+            "index_sync_crates",
             json!({
                 "query": "demo",
                 "page": 1,
@@ -101,7 +101,7 @@ async fn index_sync_crates_writes_versions_features_and_dependencies_from_mock_a
             }),
         )
         .await
-        .expect("index.sync_crates call failed");
+        .expect("index_sync_crates call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -189,7 +189,7 @@ async fn index_refresh_crate_scope_uses_mock_sync_pipeline() {
     let response = context
         .mcp
         .call_tool(
-            "index.refresh",
+            "index_refresh",
             json!({
                 "scope": "crate",
                 "crate_name": "demo_crate",
@@ -197,7 +197,7 @@ async fn index_refresh_crate_scope_uses_mock_sync_pipeline() {
             }),
         )
         .await
-        .expect("index.refresh crate-scope call failed");
+        .expect("index_refresh crate-scope call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

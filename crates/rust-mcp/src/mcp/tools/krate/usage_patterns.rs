@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
-    normalize_required, resolve_pagination, sync_page, usage_patterns_limit,
+    normalize_required, resolve_pagination, resolve_registry_source_dir, sync_page,
+    usage_patterns_limit,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,36 +34,6 @@ impl CursorToken for CrateUsagePatternsCursorToken {
     fn offset(&self) -> u32 {
         self.offset
     }
-}
-
-fn extract_usage_snippet(content: &str, symbol_name: &str) -> (u32, u32, String) {
-    let lines = content
-        .lines()
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return (1, 1, String::new());
-    }
-
-    let needle = symbol_name.to_ascii_lowercase();
-    let line_index = lines
-        .iter()
-        .position(|line| {
-            line.to_ascii_lowercase()
-                .contains(&needle)
-        })
-        .unwrap_or(0);
-
-    let line_number = (line_index + 1) as u32;
-    let start = line_index.saturating_sub(1);
-    let end = (line_index + 1).min(lines.len() - 1);
-
-    let snippet = lines[start..=end]
-        .join("\n")
-        .chars()
-        .take(300)
-        .collect::<String>();
-
-    (line_number, line_number, snippet)
 }
 
 impl McpServer {
@@ -98,35 +70,63 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref())
             .await?;
 
-        let symbol_filter = format!("%{}%", symbol_name);
+        let dependents =
+            tools::list_dependent_crate_versions(&self.state.db, ctx.crate_row.id, 200, 0)
+                .await
+                .map_err(|e| format!("crate_usage_patterns dependency query failed: {e}"))?;
 
-        let rows = tools::list_crate_usage_sources(
-            &self.state.db,
-            ctx.crate_row.id,
-            &symbol_filter,
-            i64::from(pag.limit.saturating_add(1)),
-            i64::from(pag.offset),
-        )
-        .await
-        .map_err(|e| format!("crate.usage_patterns query failed: {e}"))?;
+        let target_count = (pag.offset as usize) + (pag.limit as usize) + 1;
+        let mut all_patterns = Vec::<CrateUsagePattern>::new();
 
-        let mut patterns = rows
+        for dep in &dependents {
+            if all_patterns.len() >= target_count {
+                break;
+            }
+            let Some(version_dir) = resolve_registry_source_dir(
+                &self
+                    .state
+                    .config
+                    .cargo_registry_dir,
+                &dep.dependent_crate,
+                &dep.dependent_version,
+            ) else {
+                continue;
+            };
+
+            let matches = ripgrep::search(
+                &version_dir,
+                &symbol_name,
+                RipgrepMode::FixedString,
+                Some("*.rs"),
+                20,
+            )
+            .unwrap_or_default();
+
+            for m in matches {
+                if all_patterns.len() >= target_count {
+                    break;
+                }
+                all_patterns.push(CrateUsagePattern {
+                    dependent_crate: dep.dependent_crate.clone(),
+                    dependent_version: dep.dependent_version.clone(),
+                    dependent_downloads: dep.dependent_downloads,
+                    path: m.path,
+                    line_start: m.line_number,
+                    line_end: m.line_number,
+                    snippet: m
+                        .line_content
+                        .trim()
+                        .chars()
+                        .take(300)
+                        .collect(),
+                });
+            }
+        }
+
+        let mut patterns: Vec<_> = all_patterns
             .into_iter()
-            .filter_map(|row| {
-                let content = row.content.as_deref()?;
-                let (line_start, line_end, snippet) = extract_usage_snippet(content, &symbol_name);
-                Some(CrateUsagePattern {
-                    dependent_crate: row.dependent_crate,
-                    dependent_version: row.dependent_version,
-                    dependent_downloads: row.dependent_downloads,
-                    path: row.path,
-                    line_start,
-                    line_end,
-                    snippet,
-                })
-            })
-            .collect::<Vec<_>>();
-
+            .skip(pag.offset as usize)
+            .collect();
         let has_more = patterns.len() > pag.limit as usize;
         if has_more {
             patterns.truncate(pag.limit as usize);
@@ -198,11 +198,11 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "source.read".to_string(),
-                "crate.type_info".to_string(),
-                "crate.api".to_string(),
+                "source_read".to_string(),
+                "crate_type_info".to_string(),
+                "crate_api".to_string(),
             ],
-            provenance: "local_postgres_index(dependency_edges, crate_versions, source_files)"
+            provenance: "local_postgres_index(dependency_edges) + cargo_registry(ripgrep)"
                 .to_string(),
         }))
     }

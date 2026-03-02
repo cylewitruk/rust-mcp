@@ -22,48 +22,48 @@ Local-first Rust dependency intelligence MCP server.
 Core and indexing:
 
 - `ping`
-- `schema.get`
-- `index.sync_crates`
-- `index.status`
-- `index.refresh`
+- `schema_get`
+- `index_sync_crates`
+- `index_status`
+- `index_refresh`
 
 Crate intelligence:
 
-- `crate.search`
-- `crate.intel`
-- `crate.features`
-- `crate.api_diff`
-- `crate.api`
-- `crate.type_info`
-- `crate.trait_impls`
-- `crate.re_exports`
-- `crate.import_path`
-- `crate.error_types`
-- `crate.derive_macros`
-- `crate.compare`
-- `crate.compatibility`
-- `crate.compatibility_matrix`
-- `crate.migration_path`
-- `crate.license_check`
-- `crate.alternatives`
-- `crate.versions`
-- `crate.graph`
-- `crate.hotspots`
-- `crate.usage_patterns`
+- `crate_search`
+- `crate_intel`
+- `crate_features`
+- `crate_api_diff`
+- `crate_api`
+- `crate_type_info`
+- `crate_trait_impls`
+- `crate_re_exports`
+- `crate_import_path`
+- `crate_error_types`
+- `crate_derive_macros`
+- `crate_compare`
+- `crate_compatibility`
+- `crate_compatibility_matrix`
+- `crate_migration_path`
+- `crate_license_check`
+- `crate_alternatives`
+- `crate_versions`
+- `crate_graph`
+- `crate_hotspots`
+- `crate_usage_patterns`
 
 Dependency intelligence:
 
-- `dependency.audit`
-- `dependency.resolve`
-- `dependency.feature_impact`
+- `dependency_audit`
+- `dependency_resolve`
+- `dependency_feature_impact`
 
 Source/symbol/docs:
 
-- `source.search`
-- `source.read`
-- `source.context`
-- `symbol.search`
-- `docs.search`
+- `source_search`
+- `source_read`
+- `source_context`
+- `symbol_search`
+- `docs_search`
 
 ## Quick Start
 
@@ -128,16 +128,16 @@ curl -sS \
 
 ## Indexing Notes
 
-- `index.sync_crates` bootstraps crates.io metadata into local tables.
-- `index.refresh` supports scope-specific refreshes (`crate`, `all`, `security`, `docs`, `local_cache`, `rustdoc_json`).
-- `crate.search` and `crate.intel` can trigger freshness checks and enqueue deeper refresh work.
+- `index_sync_crates` bootstraps crates.io metadata into local tables.
+- `index_refresh` supports scope-specific refreshes (`crate`, `all`, `security`, `docs`, `local_cache`, `rustdoc_json`).
+- `crate_search` and `crate_intel` can trigger freshness checks and enqueue deeper refresh work.
 
 ## Rustdoc Freshness and Confidence
 
 - Rustdoc-backed crate tools continue to report freshness checks against crates.io and local index provenance in `freshness`, `freshness_check_result`, and `refresh_enqueued` fields.
-- Rustdoc-backed path/shape resolution tools (`crate.re_exports`, `crate.import_path`) return high confidence when canonical rustdoc symbol metadata is available, and degrade to medium/low confidence when falling back to sparse local metadata.
-- Rustdoc-backed type/impl tools (`crate.type_info`, `crate.trait_impls`) prefer richer rustdoc-derived rows when duplicate syn/local and rustdoc rows coexist, and confidence reflects whether definitions/impl metadata were actually resolved.
-- API diffing (`crate.api_diff`) now prioritizes rustdoc-derived public symbols when dual-source duplicates exist, reducing false negatives caused by sparse duplicate snapshots.
+- Rustdoc-backed path/shape resolution tools (`crate_re_exports`, `crate_import_path`) return high confidence when canonical rustdoc symbol metadata is available, and degrade to medium/low confidence when falling back to sparse local metadata.
+- Rustdoc-backed type/impl tools (`crate_type_info`, `crate_trait_impls`) prefer richer rustdoc-derived rows when duplicate syn/local and rustdoc rows coexist, and confidence reflects whether definitions/impl metadata were actually resolved.
+- API diffing (`crate_api_diff`) now prioritizes rustdoc-derived public symbols when dual-source duplicates exist, reducing false negatives caused by sparse duplicate snapshots.
 
 ## Search Pagination Contract
 
@@ -145,7 +145,7 @@ curl -sS \
 - `cursor` is an opaque token; when provided, clients should keep filters unchanged and either omit `limit` or reuse the same page size.
 - `next_cursor` is only populated when additional results are available.
 - `truncated=true` indicates the current page is incomplete relative to available matches and can be continued with `next_cursor`.
-- This contract is now implemented for `symbol.search`, `crate.search`, `source.search`, `docs.search`, `crate.versions`, `crate.alternatives`, `crate.hotspots`, `crate.usage_patterns`, `crate.api`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, and `crate.trait_impls`.
+- This contract is now implemented for `symbol_search`, `crate_search`, `source_search`, `docs_search`, `crate_versions`, `crate_alternatives`, `crate_hotspots`, `crate_usage_patterns`, `crate_api`, `crate_re_exports`, `crate_import_path`, `crate_error_types`, and `crate_trait_impls`.
 
 ## MCP Protocol Version Policy
 

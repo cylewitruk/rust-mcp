@@ -55,7 +55,7 @@ impl McpServer {
             i64::from(offset),
         )
         .await
-        .map_err(|e| format!("crate.deprecated query failed for {}: {e}", ctx.crate_row.name))?;
+        .map_err(|e| format!("crate_deprecated query failed for {}: {e}", ctx.crate_row.name))?;
 
         let has_more = rows.len() > limit as usize;
         let mut items = rows
@@ -119,9 +119,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.api".to_string(),
-                "crate.type_info".to_string(),
-                "crate.migration_path".to_string(),
+                "crate_api".to_string(),
+                "crate_type_info".to_string(),
+                "crate_migration_path".to_string(),
             ],
             provenance: "local_postgres_index(symbols, crate_types)".to_string(),
         }))

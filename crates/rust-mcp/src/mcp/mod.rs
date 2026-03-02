@@ -8,6 +8,8 @@ pub mod models;
 pub mod queries;
 /// Short-lived query result memoization.
 pub mod query_cache;
+/// Ripgrep wrapper for structured source-file content search.
+pub mod ripgrep;
 /// MCP server handler and tool registration.
 pub mod server;
 /// MCP tool handler implementations.

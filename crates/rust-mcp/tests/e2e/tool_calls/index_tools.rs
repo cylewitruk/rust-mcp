@@ -24,7 +24,7 @@ async fn tool_index_sync_crates_syncs_seeded_fixtures() {
     let selected_versions = payload
         .get("selected_versions")
         .and_then(Value::as_array)
-        .expect("index.sync_crates should return selected_versions array");
+        .expect("index_sync_crates should return selected_versions array");
     let expected_primary = format!("{SEEDED_CRATE_NAME}@{SEEDED_CRATE_NEXT_VERSION}");
     assert!(
         selected_versions
@@ -57,12 +57,12 @@ async fn tool_index_refresh_rustdoc_json_completes_for_seeded_fixtures() {
 async fn tool_index_status_reports_seeded_coverage() {
     let context = seeded_indexed_context().await;
 
-    let payload = call_tool_payload(&context.rust_mcp, "index.status", json!({})).await;
+    let payload = call_tool_payload(&context.rust_mcp, "index_status", json!({})).await;
 
     let coverage = payload
         .get("coverage")
         .and_then(Value::as_object)
-        .expect("index.status should return coverage object");
+        .expect("index_status should return coverage object");
     assert!(
         coverage
             .get("crates")
@@ -87,7 +87,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
 
     let sync_payload = call_tool_payload(
         &context.rust_mcp,
-        "index.sync_crates",
+        "index_sync_crates",
         json!({
             "query": TOKIO_FALLBACK_CRATE_NAME,
             "page": 1,
@@ -101,7 +101,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
     let selected_versions = sync_payload
         .get("selected_versions")
         .and_then(Value::as_array)
-        .expect("index.sync_crates should return selected_versions array");
+        .expect("index_sync_crates should return selected_versions array");
     assert!(
         selected_versions
             .iter()
@@ -112,7 +112,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
 
     let refresh_payload = call_tool_payload(
         &context.rust_mcp,
-        "index.refresh",
+        "index_refresh",
         json!({
             "scope": "rustdoc_json",
             "crate_name": TOKIO_FALLBACK_CRATE_NAME,
@@ -134,7 +134,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
     let result = refresh_payload
         .get("result")
         .and_then(Value::as_object)
-        .expect("index.refresh should return result object");
+        .expect("index_refresh should return result object");
     assert!(
         result
             .get("synced_versions")
@@ -145,7 +145,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
 
     let symbol_payload = call_tool_payload(
         &context.rust_mcp,
-        "symbol.search",
+        "symbol_search",
         json!({
             "query": "Runtime",
             "crate_name": TOKIO_FALLBACK_CRATE_NAME,
@@ -158,7 +158,7 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
     let hits = symbol_payload
         .get("hits")
         .and_then(Value::as_array)
-        .expect("symbol.search should return hits array");
+        .expect("symbol_search should return hits array");
     assert!(
         hits.iter().any(|hit| {
             hit.get("name")

@@ -439,7 +439,7 @@ async fn mock_docs_module_subpage(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    if doc_page == "index.html" {
+    if doc_page == "index_html" {
         return (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "text/html; charset=utf-8")],

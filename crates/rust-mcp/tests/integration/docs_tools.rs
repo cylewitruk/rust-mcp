@@ -13,7 +13,7 @@ async fn docs_search_returns_seeded_docs_page() {
     let response = context
         .mcp
         .call_tool(
-            "docs.search",
+            "docs_search",
             json!({
                 "query": "Deserialize",
                 "crate_name": "serde_json",
@@ -21,7 +21,7 @@ async fn docs_search_returns_seeded_docs_page() {
             }),
         )
         .await
-        .expect("docs.search call failed");
+        .expect("docs_search call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
@@ -52,7 +52,7 @@ async fn docs_search_returns_seeded_docs_page() {
         payload
             .get("next_cursor")
             .is_some(),
-        "docs.search response should include next_cursor field"
+        "docs_search response should include next_cursor field"
     );
     let first_hit = payload
         .get("hits")

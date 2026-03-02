@@ -34,18 +34,18 @@ crates/rust-mcp/
       query_cache.rs            # short-lived result memoization
       models.rs                 # shared model types
       indexing/
-        handlers.rs             # index.sync_crates / index.status / index.refresh
+        handlers.rs             # index_sync_crates / index_status / index_refresh
         worker.rs               # durable refresh worker loop
         freshness.rs
         local_cache.rs
         rustdoc_json.rs
         security.rs
       tools/
-        krate/                  # crate.* handlers
-        dependency/             # dependency.* handlers
-        source/                 # source.* handlers
-        docs.rs                 # docs.search
-        symbol.rs               # symbol.search
+        krate/                  # crate_* handlers
+        dependency/             # dependency_* handlers
+        source/                 # source_* handlers
+        docs.rs                 # docs_search
+        symbol.rs               # symbol_search
   tests/
     common.rs
     integration/
@@ -69,10 +69,10 @@ crates/rust-mcp/
 
 ## MCP Tool Inventory (Current)
 
-- Core/index: `ping`, `schema.get`, `index.sync_crates`, `index.status`, `index.refresh`
-- Crate: `crate.search`, `crate.intel`, `crate.features`, `crate.api_diff`, `crate.api`, `crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, `crate.derive_macros`, `crate.compare`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.migration_path`, `crate.license_check`, `crate.alternatives`, `crate.versions`, `crate.graph`, `crate.hotspots`, `crate.usage_patterns`
-- Dependency: `dependency.audit`, `dependency.resolve`, `dependency.feature_impact`
-- Source/symbol/docs: `source.search`, `source.read`, `source.context`, `symbol.search`, `docs.search`
+- Core/index: `ping`, `schema_get`, `index_sync_crates`, `index_status`, `index_refresh`
+- Crate: `crate_search`, `crate_intel`, `crate_features`, `crate_api_diff`, `crate_api`, `crate_type_info`, `crate_trait_impls`, `crate_re_exports`, `crate_import_path`, `crate_error_types`, `crate_derive_macros`, `crate_compare`, `crate_compatibility`, `crate_compatibility_matrix`, `crate_migration_path`, `crate_license_check`, `crate_alternatives`, `crate_versions`, `crate_graph`, `crate_hotspots`, `crate_usage_patterns`
+- Dependency: `dependency_audit`, `dependency_resolve`, `dependency_feature_impact`
+- Source/symbol/docs: `source_search`, `source_read`, `source_context`, `symbol_search`, `docs_search`
 
 ## Implementation Conventions
 

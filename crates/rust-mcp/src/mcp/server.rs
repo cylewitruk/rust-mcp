@@ -185,7 +185,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "schema.get",
+        name = "schema_get",
         description = "Return request/response JSON Schemas for one MCP tool or for the full tool \
                        catalog."
     )]
@@ -195,14 +195,14 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<ToolSchemasRequest>,
     ) -> Result<Json<ToolSchemasResponse>, String> {
-        self.instrument_tool_with_progress("schema.get", &meta, &client, async move {
+        self.instrument_tool_with_progress("schema_get", &meta, &client, async move {
             crate::contracts::tool_schemas_response(request.tool_name).map(Json)
         })
         .await
     }
 
     #[tool(
-        name = "index.sync_crates",
+        name = "index_sync_crates",
         description = "Fetch crate metadata from crates.io and upsert it into the local Postgres \
                        index."
     )]
@@ -213,7 +213,7 @@ impl McpServer {
         Parameters(request): Parameters<IndexSyncCratesRequest>,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
         self.instrument_tool_with_progress(
-            "index.sync_crates",
+            "index_sync_crates",
             &meta,
             &client,
             self.handle_index_sync_crates(request),
@@ -222,7 +222,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "index.status",
+        name = "index_status",
         description = "Return index freshness, coverage, and queue state."
     )]
     async fn index_status(
@@ -232,7 +232,7 @@ impl McpServer {
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
         self.instrument_tool_with_progress(
-            "index.status",
+            "index_status",
             &meta,
             &client,
             self.handle_index_status(request),
@@ -241,7 +241,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "index.refresh",
+        name = "index_refresh",
         description = "Trigger index refresh for a scope and return job-style status."
     )]
     async fn index_refresh(
@@ -251,7 +251,7 @@ impl McpServer {
         Parameters(request): Parameters<IndexRefreshRequest>,
     ) -> Result<Json<IndexRefreshResponse>, String> {
         self.instrument_tool_with_progress(
-            "index.refresh",
+            "index_refresh",
             &meta,
             &client,
             self.handle_index_refresh(request),
@@ -260,7 +260,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.search",
+        name = "crate_search",
         description = "Search locally indexed crates by name, category, keyword, and description."
     )]
     async fn crate_search(
@@ -270,7 +270,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.search",
+            "crate_search",
             &meta,
             &client,
             self.handle_crate_search(request),
@@ -279,7 +279,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.intel",
+        name = "crate_intel",
         description = "Return dense crate intelligence including versions, dependencies, \
                        dependents, and advisory matches."
     )]
@@ -290,7 +290,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.intel",
+            "crate_intel",
             &meta,
             &client,
             self.handle_crate_intel(request),
@@ -299,7 +299,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.features",
+        name = "crate_features",
         description = "Return indexed crate feature flags, defaults, and transitive feature \
                        enables."
     )]
@@ -310,7 +310,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateFeaturesRequest>,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.features",
+            "crate_features",
             &meta,
             &client,
             self.handle_crate_features(request),
@@ -319,7 +319,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.api_diff",
+        name = "crate_api_diff",
         description = "Compare indexed public symbols between two crate versions and report \
                        added, removed, and changed API entries."
     )]
@@ -330,7 +330,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateApiDiffRequest>,
     ) -> Result<Json<CrateApiDiffResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.api_diff",
+            "crate_api_diff",
             &meta,
             &client,
             self.handle_crate_api_diff(request),
@@ -339,7 +339,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.api",
+        name = "crate_api",
         description = "Return indexed public API symbols for a crate version with optional \
                        kind/path filters."
     )]
@@ -350,7 +350,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateApiRequest>,
     ) -> Result<Json<CrateApiResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.api",
+            "crate_api",
             &meta,
             &client,
             self.handle_crate_api(request),
@@ -359,7 +359,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.type_info",
+        name = "crate_type_info",
         description = "Return indexed type definition metadata and associated impl details for a \
                        crate type."
     )]
@@ -370,7 +370,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateTypeInfoRequest>,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.type_info",
+            "crate_type_info",
             &meta,
             &client,
             self.handle_crate_type_info(request),
@@ -379,7 +379,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.trait_impls",
+        name = "crate_trait_impls",
         description = "Return indexed trait/type implementation relationships with optional trait \
                        or type filtering."
     )]
@@ -390,7 +390,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateTraitImplsRequest>,
     ) -> Result<Json<CrateTraitImplsResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.trait_impls",
+            "crate_trait_impls",
             &meta,
             &client,
             self.handle_crate_trait_impls(request),
@@ -399,7 +399,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.re_exports",
+        name = "crate_re_exports",
         description = "Return public re-export mappings to canonical import paths for an indexed \
                        crate version."
     )]
@@ -410,7 +410,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateReExportsRequest>,
     ) -> Result<Json<CrateReExportsResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.re_exports",
+            "crate_re_exports",
             &meta,
             &client,
             self.handle_crate_re_exports(request),
@@ -419,7 +419,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.import_path",
+        name = "crate_import_path",
         description = "Resolve best-known public import paths for a crate symbol from indexed \
                        metadata."
     )]
@@ -430,7 +430,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateImportPathRequest>,
     ) -> Result<Json<CrateImportPathResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.import_path",
+            "crate_import_path",
             &meta,
             &client,
             self.handle_crate_import_path(request),
@@ -439,7 +439,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.error_types",
+        name = "crate_error_types",
         description = "Return indexed error-type metadata, conversion impls, and functions \
                        returning each error type."
     )]
@@ -450,7 +450,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateErrorTypesRequest>,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.error_types",
+            "crate_error_types",
             &meta,
             &client,
             self.handle_crate_error_types(request),
@@ -459,7 +459,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.deprecated",
+        name = "crate_deprecated",
         description = "Return all deprecated symbols and types in a crate version, with \
                        deprecation notes and suggested replacements where available."
     )]
@@ -470,7 +470,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateDeprecatedRequest>,
     ) -> Result<Json<CrateDeprecatedResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.deprecated",
+            "crate_deprecated",
             &meta,
             &client,
             self.handle_crate_deprecated(request),
@@ -479,7 +479,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.derive_macros",
+        name = "crate_derive_macros",
         description = "Return indexed proc-macro exports (derive, attribute, and function-like) \
                        for a crate version."
     )]
@@ -490,7 +490,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateDeriveMacrosRequest>,
     ) -> Result<Json<CrateDeriveMacrosResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.derive_macros",
+            "crate_derive_macros",
             &meta,
             &client,
             self.handle_crate_derive_macros(request),
@@ -499,7 +499,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.compare",
+        name = "crate_compare",
         description = "Compare two crates across adoption, risk, and maintenance signals and \
                        return a recommendation."
     )]
@@ -510,7 +510,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateCompareRequest>,
     ) -> Result<Json<CrateCompareResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.compare",
+            "crate_compare",
             &meta,
             &client,
             self.handle_crate_compare(request),
@@ -519,7 +519,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.compatibility",
+        name = "crate_compatibility",
         description = "Check pairwise dependency compatibility between two crates using the \
                        indexed resolver."
     )]
@@ -530,7 +530,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateCompatibilityRequest>,
     ) -> Result<Json<CrateCompatibilityResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.compatibility",
+            "crate_compatibility",
             &meta,
             &client,
             self.handle_crate_compatibility(request),
@@ -539,7 +539,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.compatibility_matrix",
+        name = "crate_compatibility_matrix",
         description = "Evaluate compatibility across multiple version pairs between two crates \
                        using indexed resolver data."
     )]
@@ -550,7 +550,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateCompatibilityMatrixRequest>,
     ) -> Result<Json<CrateCompatibilityMatrixResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.compatibility_matrix",
+            "crate_compatibility_matrix",
             &meta,
             &client,
             self.handle_crate_compatibility_matrix(request),
@@ -559,7 +559,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.migration_path",
+        name = "crate_migration_path",
         description = "Summarize migration actions for a crate upgrade using indexed API diff \
                        breaking changes."
     )]
@@ -570,7 +570,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateMigrationPathRequest>,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.migration_path",
+            "crate_migration_path",
             &meta,
             &client,
             self.handle_crate_migration_path(request),
@@ -579,7 +579,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.license_check",
+        name = "crate_license_check",
         description = "Return indexed license metadata for a crate version and evaluate optional \
                        allow/deny policy lists."
     )]
@@ -590,7 +590,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateLicenseCheckRequest>,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.license_check",
+            "crate_license_check",
             &meta,
             &client,
             self.handle_crate_license_check(request),
@@ -599,7 +599,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.alternatives",
+        name = "crate_alternatives",
         description = "Suggest ranked alternative crates using taxonomy overlap, adoption/risk \
                        signals, and optional license policy filters."
     )]
@@ -610,7 +610,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateAlternativesRequest>,
     ) -> Result<Json<CrateAlternativesResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.alternatives",
+            "crate_alternatives",
             &meta,
             &client,
             self.handle_crate_alternatives(request),
@@ -619,7 +619,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.versions",
+        name = "crate_versions",
         description = "Return a normalized crate version timeline with yanked/security/adoption \
                        markers."
     )]
@@ -630,7 +630,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateVersionsRequest>,
     ) -> Result<Json<CrateVersionsResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.versions",
+            "crate_versions",
             &meta,
             &client,
             self.handle_crate_versions(request),
@@ -639,7 +639,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.graph",
+        name = "crate_graph",
         description = "Return depth-bounded dependency/dependent graph edges and nodes for a \
                        crate."
     )]
@@ -650,7 +650,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.graph",
+            "crate_graph",
             &meta,
             &client,
             self.handle_crate_graph(request),
@@ -659,7 +659,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.hotspots",
+        name = "crate_hotspots",
         description = "Detect unsafe and concurrency hotspots in indexed crate source for a \
                        selected version."
     )]
@@ -670,7 +670,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateHotspotsRequest>,
     ) -> Result<Json<CrateHotspotsResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.hotspots",
+            "crate_hotspots",
             &meta,
             &client,
             self.handle_crate_hotspots(request),
@@ -679,7 +679,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "dependency.audit",
+        name = "dependency_audit",
         description = "Audit a Cargo.toml dependency set for yanked versions, advisories, \
                        outdated requirements, and MSRV conflicts."
     )]
@@ -690,7 +690,7 @@ impl McpServer {
         Parameters(request): Parameters<DependencyAuditRequest>,
     ) -> Result<Json<DependencyAuditResponse>, String> {
         self.instrument_tool_with_progress(
-            "dependency.audit",
+            "dependency_audit",
             &meta,
             &client,
             self.handle_dependency_audit(request),
@@ -699,7 +699,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "dependency.resolve",
+        name = "dependency_resolve",
         description = "Run a best-effort compatibility simulation for proposed dependencies and \
                        report resolvable versions or conflicts."
     )]
@@ -710,7 +710,7 @@ impl McpServer {
         Parameters(request): Parameters<DependencyResolveRequest>,
     ) -> Result<Json<DependencyResolveResponse>, String> {
         self.instrument_tool_with_progress(
-            "dependency.resolve",
+            "dependency_resolve",
             &meta,
             &client,
             self.handle_dependency_resolve(request),
@@ -719,7 +719,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "dependency.feature_impact",
+        name = "dependency_feature_impact",
         description = "Estimate additional dependency surface introduced by selected crate \
                        feature flags."
     )]
@@ -730,7 +730,7 @@ impl McpServer {
         Parameters(request): Parameters<DependencyFeatureImpactRequest>,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
         self.instrument_tool_with_progress(
-            "dependency.feature_impact",
+            "dependency_feature_impact",
             &meta,
             &client,
             self.handle_dependency_feature_impact(request),
@@ -739,7 +739,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "source.search",
+        name = "source_search",
         description = "Search indexed source files by text/regex with optional crate/version/path \
                        filters."
     )]
@@ -750,7 +750,7 @@ impl McpServer {
         Parameters(request): Parameters<SourceSearchRequest>,
     ) -> Result<Json<SourceSearchResponse>, String> {
         self.instrument_tool_with_progress(
-            "source.search",
+            "source_search",
             &meta,
             &client,
             self.handle_source_search(request),
@@ -759,7 +759,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "source.read",
+        name = "source_read",
         description = "Read a line range from an indexed source file for a crate (optionally \
                        pinned to a version)."
     )]
@@ -770,7 +770,7 @@ impl McpServer {
         Parameters(request): Parameters<SourceReadRequest>,
     ) -> Result<Json<SourceReadResponse>, String> {
         self.instrument_tool_with_progress(
-            "source.read",
+            "source_read",
             &meta,
             &client,
             self.handle_source_read(request),
@@ -779,7 +779,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "source.context",
+        name = "source_context",
         description = "Return semantic source context around a file location, including module \
                        path, imports, containing impl, and nearby types."
     )]
@@ -790,7 +790,7 @@ impl McpServer {
         Parameters(request): Parameters<SourceContextRequest>,
     ) -> Result<Json<SourceContextResponse>, String> {
         self.instrument_tool_with_progress(
-            "source.context",
+            "source_context",
             &meta,
             &client,
             self.handle_source_context(request),
@@ -799,7 +799,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "symbol.search",
+        name = "symbol_search",
         description = "Search indexed symbols by name with optional crate/version/kind filters."
     )]
     async fn symbol_search(
@@ -809,7 +809,7 @@ impl McpServer {
         Parameters(request): Parameters<SymbolSearchRequest>,
     ) -> Result<Json<SymbolSearchResponse>, String> {
         self.instrument_tool_with_progress(
-            "symbol.search",
+            "symbol_search",
             &meta,
             &client,
             self.handle_symbol_search(request),
@@ -818,7 +818,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "docs.search",
+        name = "docs_search",
         description = "Search indexed docs.rs pages by query with optional crate/version/path \
                        filters."
     )]
@@ -829,7 +829,7 @@ impl McpServer {
         Parameters(request): Parameters<DocsSearchRequest>,
     ) -> Result<Json<DocsSearchResponse>, String> {
         self.instrument_tool_with_progress(
-            "docs.search",
+            "docs_search",
             &meta,
             &client,
             self.handle_docs_search(request),
@@ -838,7 +838,7 @@ impl McpServer {
     }
 
     #[tool(
-        name = "crate.usage_patterns",
+        name = "crate_usage_patterns",
         description = "Return real source snippets from indexed dependent crates that use a \
                        target symbol."
     )]
@@ -849,7 +849,7 @@ impl McpServer {
         Parameters(request): Parameters<CrateUsagePatternsRequest>,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {
         self.instrument_tool_with_progress(
-            "crate.usage_patterns",
+            "crate_usage_patterns",
             &meta,
             &client,
             self.handle_crate_usage_patterns(request),
@@ -874,7 +874,7 @@ impl ServerHandler for McpServer {
             protocol_version,
             instructions: Some(
                 "Local Rust dependency intelligence MCP server. Crates are indexed on-demand when \
-                 first requested. Use crate.search and crate.intel for fast lookup. The index.* \
+                 first requested. Use crate_search and crate_intel for fast lookup. The index_* \
                  tools are available for explicit bulk sync and status inspection."
                     .to_string(),
             ),

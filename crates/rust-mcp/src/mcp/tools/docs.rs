@@ -106,6 +106,7 @@ impl McpServer {
             i64::from(per_page),
             i64::from(offset),
             false,
+            false,
         )
         .await
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;
@@ -246,7 +247,7 @@ impl McpServer {
         })
         .map_err(|e| format!("failed to build docs.search cache key: {e}"))?;
         if let Some(cached) = self
-            .query_cache_get("docs.search", &cache_key)
+            .query_cache_get("docs_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<DocsSearchResponse>(cached)
@@ -266,7 +267,7 @@ impl McpServer {
             },
         )
         .await
-        .map_err(|e| format!("docs.search query failed: {e}"))?;
+        .map_err(|e| format!("docs_search query failed: {e}"))?;
 
         let mut hits = rows
             .into_iter()
@@ -329,16 +330,16 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: if hits.is_empty() {
-                vec!["index.refresh".to_string(), "crate.intel".to_string()]
+                vec!["index_refresh".to_string(), "crate_intel".to_string()]
             } else {
-                vec!["source.read".to_string(), "crate.intel".to_string()]
+                vec!["source_read".to_string(), "crate_intel".to_string()]
             },
             provenance: "local_postgres_index".to_string(),
             hits,
         };
 
         self.query_cache_put(
-            "docs.search",
+            "docs_search",
             &cache_key,
             &serde_json::to_value(&response)
                 .map_err(|e| format!("failed to encode docs.search cache value: {e}"))?,

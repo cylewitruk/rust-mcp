@@ -12,7 +12,8 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, error_types_limit,
-    normalize_optional, normalize_required, resolve_pagination, sync_page,
+    normalize_optional, normalize_required, read_source_file_from_disk, resolve_pagination,
+    sync_page,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -160,11 +161,11 @@ impl McpServer {
 
         let type_rows = tools::list_error_type_rows(&self.state.db, resolution.selected_version.id)
             .await
-            .map_err(|e| format!("crate.error_types type query failed: {e}"))?;
+            .map_err(|e| format!("crate_error_types type query failed: {e}"))?;
 
         let impl_rows = tools::list_error_impl_rows(&self.state.db, resolution.selected_version.id)
             .await
-            .map_err(|e| format!("crate.error_types impl query failed: {e}"))?;
+            .map_err(|e| format!("crate_error_types impl query failed: {e}"))?;
 
         let mut candidate_names = BTreeSet::<String>::new();
         for row in &type_rows {
@@ -252,7 +253,7 @@ impl McpServer {
                 &format!("%{}%", candidate),
             )
             .await
-            .map_err(|e| format!("crate.error_types return signature query failed: {e}"))?;
+            .map_err(|e| format!("crate_error_types return signature query failed: {e}"))?;
 
             let returned_by = return_rows
                 .into_iter()
@@ -279,13 +280,17 @@ impl McpServer {
                     continue;
                 }
 
-                let content = tools::fetch_source_content_for_version_path(
-                    &self.state.db,
-                    resolution.selected_version.id,
+                let content = read_source_file_from_disk(
+                    &self
+                        .state
+                        .config
+                        .cargo_registry_dir,
+                    &crate_name,
+                    &resolution
+                        .selected_version
+                        .version,
                     &row.source_path,
                 )
-                .await
-                .map_err(|e| format!("crate.error_types display source lookup failed: {e}"))?
                 .unwrap_or_default();
 
                 for pattern in extract_display_patterns(&content, &candidate) {
@@ -405,9 +410,9 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             next_best_calls: vec![
-                "crate.type_info".to_string(),
-                "crate.trait_impls".to_string(),
-                "source.search".to_string(),
+                "crate_type_info".to_string(),
+                "crate_trait_impls".to_string(),
+                "source_search".to_string(),
             ],
             provenance: "local_postgres_index(crate_types, crate_impls, symbols, source_files)"
                 .to_string(),

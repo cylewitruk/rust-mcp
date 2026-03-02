@@ -12,6 +12,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep};
+use tracing::debug;
 
 /// MCP session header name per the Streamable HTTP spec.
 const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
@@ -121,7 +122,11 @@ impl LocalMcpHttpHarness {
     /// Sends the MCP `initialize` request followed by the required
     /// `notifications/initialized` notification. Returns the initialize
     /// JSON-RPC response.
+    #[tracing::instrument(skip(self))]
     pub async fn initialize(&self, client_name: &str) -> Result<Value> {
+        debug!("Initializing MCP session");
+        let start = Instant::now();
+
         let result = self
             .rpc_call(
                 "initialize",
@@ -133,6 +138,9 @@ impl LocalMcpHttpHarness {
             )
             .await?;
 
+        let elapsed_secs = start.elapsed().as_secs_f32();
+        debug!(%elapsed_secs, "MCP initialize finished");
+
         // The MCP spec requires the client to send `notifications/initialized`
         // after receiving the initialize result.
         self.notify("notifications/initialized", json!({}))
@@ -142,15 +150,25 @@ impl LocalMcpHttpHarness {
     }
 
     /// Calls an MCP tool and returns raw JSON-RPC response.
+    #[tracing::instrument(skip(self, arguments))]
     pub async fn call_tool(&self, tool_name: &str, arguments: Value) -> Result<Value> {
-        self.rpc_call(
-            "tools/call",
-            json!({
-                "name": tool_name,
-                "arguments": arguments,
-            }),
-        )
-        .await
+        debug!(?arguments, "Calling tool");
+        let start = Instant::now();
+
+        let result = self
+            .rpc_call(
+                "tools/call",
+                json!({
+                    "name": tool_name,
+                    "arguments": arguments,
+                }),
+            )
+            .await?;
+
+        let elapsed_secs = start.elapsed().as_secs_f32();
+        debug!(%elapsed_secs, "Tool call finished");
+
+        Ok(result)
     }
 
     /// Sends a JSON-RPC notification (no `id`, no response expected).

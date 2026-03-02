@@ -9,7 +9,7 @@ async fn dependency_feature_impact_reports_optional_dependency_expansion() {
     let response = context
         .mcp
         .call_tool(
-            "dependency.feature_impact",
+            "dependency_feature_impact",
             json!({
                 "crate_name": "serde_json",
                 "features": ["preserve_order"],
@@ -17,7 +17,7 @@ async fn dependency_feature_impact_reports_optional_dependency_expansion() {
             }),
         )
         .await
-        .expect("dependency.feature_impact call failed");
+        .expect("dependency_feature_impact call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(

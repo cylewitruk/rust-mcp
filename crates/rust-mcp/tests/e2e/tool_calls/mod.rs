@@ -162,7 +162,7 @@ async fn sync_seeded_demo_crates(
 ) -> Value {
     call_tool_payload(
         rust_mcp,
-        "index.sync_crates",
+        "index_sync_crates",
         json!({
             "query": "demo",
             "page": 1,
@@ -176,7 +176,7 @@ async fn sync_seeded_demo_crates(
 async fn refresh_seeded_rustdoc_json(rust_mcp: &RustMcpTestContainer) -> Value {
     call_tool_payload(
         rust_mcp,
-        "index.refresh",
+        "index_refresh",
         json!({
             "scope": "rustdoc_json",
             "page": 1,
@@ -189,7 +189,7 @@ async fn refresh_seeded_rustdoc_json(rust_mcp: &RustMcpTestContainer) -> Value {
 async fn refresh_seeded_docs_pages(rust_mcp: &RustMcpTestContainer) -> Value {
     call_tool_payload(
         rust_mcp,
-        "index.refresh",
+        "index_refresh",
         json!({
             "scope": "docs",
             "page": 1,

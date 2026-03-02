@@ -9,7 +9,7 @@ async fn source_context_resolves_line_from_symbol_name() {
     let response = context
         .mcp
         .call_tool(
-            "source.context",
+            "source_context",
             json!({
                 "crate_name": "serde_json",
                 "path": "src/lib.rs",
@@ -17,7 +17,7 @@ async fn source_context_resolves_line_from_symbol_name() {
             }),
         )
         .await
-        .expect("source.context call failed");
+        .expect("source_context call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
