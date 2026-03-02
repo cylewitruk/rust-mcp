@@ -57,6 +57,10 @@ pub mod env_vars {
     pub const REGISTRY_SCAN_BATCH_LIMIT: &str = "REGISTRY_SCAN_BATCH_LIMIT";
     /// Comma-separated crate names to pre-warm at startup.
     pub const PRE_WARM_CRATES: &str = "PRE_WARM_CRATES";
+    /// Seconds between enrichment maintenance scans.
+    pub const ENRICHMENT_MAINTENANCE_INTERVAL_SECS: &str = "ENRICHMENT_MAINTENANCE_INTERVAL_SECS";
+    /// Minimum seconds before retrying a failed rustdoc enrichment attempt.
+    pub const RUSTDOC_RETRY_COOLDOWN_SECS: &str = "RUSTDOC_RETRY_COOLDOWN_SECS";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -190,6 +194,15 @@ pub struct Config {
     /// the general registry scan.
     #[arg(long, env = env_vars::PRE_WARM_CRATES, default_value = "")]
     pub pre_warm_crates: String,
+
+    /// Seconds between enrichment maintenance scans. 0 = disabled after
+    /// startup.
+    #[arg(long, env = env_vars::ENRICHMENT_MAINTENANCE_INTERVAL_SECS, default_value_t = 300)]
+    pub enrichment_maintenance_interval_secs: u64,
+
+    /// Minimum seconds before retrying a failed rustdoc enrichment attempt.
+    #[arg(long, env = env_vars::RUSTDOC_RETRY_COOLDOWN_SECS, default_value_t = 86400)]
+    pub rustdoc_retry_cooldown_secs: u64,
 }
 
 impl Config {

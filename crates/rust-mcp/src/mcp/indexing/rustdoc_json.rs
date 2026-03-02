@@ -14,8 +14,8 @@ use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
 use crate::db::indexing::{
-    fetch_rustdoc_sync_candidates, replace_crate_version_index_rows,
-    upsert_source_file_unconditional,
+    fetch_rustdoc_sync_candidates, mark_version_rustdoc_attempted, mark_version_rustdoc_enriched,
+    replace_crate_version_index_rows, upsert_source_file_unconditional,
 };
 use crate::db::models::{
     IndexedExtractionBatch, IndexedImplInsert, IndexedSymbolInsert, IndexedTraitInsert,
@@ -1584,6 +1584,7 @@ impl McpServer {
         per_page: Option<u32>,
         locally_present_only: bool,
         skip_enriched: bool,
+        retry_cooldown_seconds: Option<i64>,
     ) -> Result<RustdocJsonRefreshOutcome, String> {
         let crate_filter = match crate_name {
             Some(value) => Some(normalize_required(value, "crate_name")?),
@@ -1602,6 +1603,7 @@ impl McpServer {
             i64::from(offset),
             locally_present_only,
             skip_enriched,
+            retry_cooldown_seconds,
         )
         .await
         .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;
@@ -1700,7 +1702,14 @@ impl McpServer {
                             )
                             .await
                         {
-                            Ok(()) => continue,
+                            Ok(()) => {
+                                let _ = mark_version_rustdoc_enriched(
+                                    &self.state.db,
+                                    candidate.crate_version_id,
+                                )
+                                .await;
+                                continue;
+                            }
                             Err(error) => source_errors.push(error),
                         }
                     }
@@ -1761,7 +1770,12 @@ impl McpServer {
                 source_errors.push(reason.clone());
             }
 
-            if !local_ingested {
+            if local_ingested {
+                let _ =
+                    mark_version_rustdoc_enriched(&self.state.db, candidate.crate_version_id).await;
+            } else {
+                let _ = mark_version_rustdoc_attempted(&self.state.db, candidate.crate_version_id)
+                    .await;
                 outcome
                     .errors
                     .push(format_candidate_sync_failure(

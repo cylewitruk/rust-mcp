@@ -222,6 +222,13 @@ All server environment variables with their defaults:
 | `REGISTRY_SCAN_BATCH_LIMIT` | `0` | Max new crate jobs per discovery scan (0 = unlimited) |
 | `PRE_WARM_CRATES` | _(empty)_ | Comma-separated crate names to index first at startup |
 
+**Enrichment maintenance:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENRICHMENT_MAINTENANCE_INTERVAL_SECS` | `300` | Seconds between enrichment maintenance scans (0 = disabled after startup) |
+| `RUSTDOC_RETRY_COOLDOWN_SECS` | `86400` | Minimum seconds before retrying a failed rustdoc enrichment attempt |
+
 **Logging:**
 
 | Variable | Default | Description |

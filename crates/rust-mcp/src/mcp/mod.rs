@@ -19,7 +19,7 @@ pub mod utils;
 
 mod transport;
 
-pub use indexing::{run_refresh_worker, run_registry_discovery, run_startup_rustdoc_json_refresh};
+pub use indexing::{run_enrichment_maintenance, run_refresh_worker, run_registry_discovery};
 pub use transport::streamable_http_service;
 
 #[cfg(feature = "testing")]
@@ -29,12 +29,11 @@ pub async fn run_refresh_worker_for_tests(state: crate::state::AppState) {
 }
 
 #[cfg(feature = "testing")]
-/// Test-only wrapper that runs startup rustdoc sync with a custom page size.
-pub async fn run_startup_rustdoc_json_refresh_for_tests(
-    state: crate::state::AppState,
-    per_page: u32,
-) {
-    indexing::run_startup_rustdoc_json_refresh_with_page_size(state, per_page).await;
+/// Test-only wrapper that runs a single enrichment maintenance scan.
+pub async fn run_enrichment_maintenance_scan_for_tests(
+    state: &crate::state::AppState,
+) -> indexing::maintenance::EnrichmentMaintenanceOutcome {
+    indexing::maintenance::run_enrichment_maintenance_scan(state).await
 }
 
 #[cfg(feature = "testing")]

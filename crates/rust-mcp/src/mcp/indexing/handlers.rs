@@ -185,7 +185,7 @@ impl McpServer {
         include_dependencies: bool,
         payload: Value,
     ) -> Result<String, String> {
-        let job_id = enqueue_or_get_refresh_job_id(
+        let outcome = enqueue_or_get_refresh_job_id(
             &self.state.db,
             crate_name,
             scope,
@@ -196,7 +196,7 @@ impl McpServer {
         .await
         .map_err(|e| format!("failed to enqueue refresh job for {crate_name}: {e}"))?;
 
-        Ok(format!("refresh-job-{job_id}"))
+        Ok(format!("refresh-job-{}", outcome.job_id))
     }
 
     /// Handles the `index.sync_crates` tool call.
@@ -714,6 +714,7 @@ impl McpServer {
                         request.per_page,
                         false,
                         false,
+                        None,
                     )
                     .await?;
 

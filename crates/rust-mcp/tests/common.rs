@@ -49,6 +49,8 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         registry_scan_interval_secs: 0,
         registry_scan_batch_limit: 0,
         pre_warm_crates: String::new(),
+        enrichment_maintenance_interval_secs: 0,
+        rustdoc_retry_cooldown_secs: 86400,
     }
 }
 

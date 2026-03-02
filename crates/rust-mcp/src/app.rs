@@ -59,7 +59,7 @@ pub async fn run() -> Result<()> {
     info!(bind = %config.http_bind, "starting server");
 
     tokio::spawn(mcp::run_refresh_worker(state.clone()));
-    tokio::spawn(mcp::run_startup_rustdoc_json_refresh(state.clone()));
+    tokio::spawn(mcp::run_enrichment_maintenance(state.clone()));
     tokio::spawn(mcp::run_registry_discovery(state.clone()));
 
     let shutdown = make_shutdown_signal().context("failed to install shutdown signal handlers")?;

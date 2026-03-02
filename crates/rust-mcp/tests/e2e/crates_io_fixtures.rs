@@ -2,8 +2,6 @@
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use axum::extract::{Path, Query};
@@ -25,7 +23,6 @@ pub const SEEDED_ALT_CRATE_NAME: &str = "demo-alt";
 pub const SEEDED_ALT_CRATE_VERSION: &str = "0.9.0";
 pub const SEEDED_TOKIO_CRATE_NAME: &str = "tokio";
 pub const SEEDED_TOKIO_CRATE_VERSION: &str = "1.49.0";
-const SEEDED_AUDIT_MOUNT_PATH: &str = "/e2e-fixtures";
 
 struct DocsHtmlFixture {
     function_page: &'static str,
@@ -84,61 +81,6 @@ impl MockRegistryServer {
 
     fn container_base_url(&self) -> &str {
         &self.container_base_url
-    }
-}
-
-pub struct ManifestFixtureMount {
-    host_dir: PathBuf,
-    container_manifest_path: String,
-}
-
-impl ManifestFixtureMount {
-    pub fn create() -> Result<Self> {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let host_dir = std::env::temp_dir().join(format!("rust-mcp-e2e-manifest-{nanos}"));
-        std::fs::create_dir_all(&host_dir)?;
-        std::fs::write(
-            host_dir.join("Cargo.toml"),
-            format!(
-                "[package]
-name = \"e2e-manifest\"
-version = \"0.1.0\"
-edition = \"2021\"
-rust-version = \"1.75\"
-
-[dependencies]
-{SEEDED_CRATE_NAME} = \"^{SEEDED_CRATE_VERSION}\"
-{SEEDED_ALT_CRATE_NAME} = \"^{SEEDED_ALT_CRATE_VERSION}\"
-"
-            ),
-        )?;
-
-        Ok(Self {
-            host_dir,
-            container_manifest_path: format!("{SEEDED_AUDIT_MOUNT_PATH}/Cargo.toml"),
-        })
-    }
-
-    pub fn bind_mount(&self) -> (String, String) {
-        (
-            self.host_dir
-                .to_string_lossy()
-                .to_string(),
-            SEEDED_AUDIT_MOUNT_PATH.to_string(),
-        )
-    }
-
-    pub fn container_manifest_path(&self) -> &str {
-        &self.container_manifest_path
-    }
-}
-
-impl Drop for ManifestFixtureMount {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.host_dir);
     }
 }
 

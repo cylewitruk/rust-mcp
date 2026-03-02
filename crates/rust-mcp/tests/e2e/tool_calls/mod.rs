@@ -5,8 +5,8 @@ use rust_mcp_testing::rust_mcp::RustMcpTestContainer;
 use serde_json::{Value, json};
 
 use super::crates_io_fixtures::{
-    ManifestFixtureMount, MockRegistryServer, SEEDED_ALT_CRATE_NAME, SEEDED_ALT_CRATE_VERSION,
-    SEEDED_CRATE_NAME, SEEDED_CRATE_NEXT_VERSION, SEEDED_CRATE_VERSION, mock_registry_env,
+    MockRegistryServer, SEEDED_ALT_CRATE_NAME, SEEDED_ALT_CRATE_VERSION, SEEDED_CRATE_NAME,
+    SEEDED_CRATE_NEXT_VERSION, SEEDED_CRATE_VERSION, mock_registry_env,
 };
 use super::docs_rs_fixtures::SEEDED_RUSTDOC_PATH;
 use super::helpers::{
@@ -39,13 +39,6 @@ struct SeededRustdocFallbackContext {
     _mock_server: MockRegistryServer,
     _rustdoc_fixture_dir: RustdocFixtureDir,
     rust_mcp: RustMcpTestContainer,
-}
-
-struct SeededManifestContext {
-    _mock_server: MockRegistryServer,
-    _manifest_fixture: ManifestFixtureMount,
-    rust_mcp: RustMcpTestContainer,
-    manifest_path: String,
 }
 
 async fn initialized_container() -> RustMcpTestContainer {
@@ -106,32 +99,6 @@ async fn seeded_rustdoc_fallback_initialized_context() -> SeededRustdocFallbackC
     SeededRustdocFallbackContext {
         _mock_server: mock_server,
         _rustdoc_fixture_dir: rustdoc_fixture_dir,
-        rust_mcp,
-    }
-}
-
-async fn seeded_indexed_manifest_context() -> SeededManifestContext {
-    let mock_server = MockRegistryServer::start()
-        .await
-        .expect("failed to start mock crates/docs server");
-    let manifest_fixture =
-        ManifestFixtureMount::create().expect("failed to create manifest fixture");
-    let rust_mcp = start_ready_rust_mcp_with_env_and_mounts(
-        mock_registry_env(&mock_server),
-        vec![manifest_fixture.bind_mount()],
-    )
-    .await;
-
-    let _ = initialize_mcp_session(&rust_mcp).await;
-
-    seed_index_data(&rust_mcp).await;
-
-    SeededManifestContext {
-        _mock_server: mock_server,
-        manifest_path: manifest_fixture
-            .container_manifest_path()
-            .to_string(),
-        _manifest_fixture: manifest_fixture,
         rust_mcp,
     }
 }

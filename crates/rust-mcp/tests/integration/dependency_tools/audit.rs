@@ -1,12 +1,48 @@
-use super::{Value, common, json, write_temp_manifest};
+use super::{Value, common, json};
+
+#[tokio::test]
+async fn dependency_audit_audits_inline_manifest() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let manifest = r#"[package]
+name = "inline-audit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "1.0"
+"#;
+
+    let response = context
+        .mcp
+        .call_tool("dependency_audit", json!({ "cargo_toml": manifest }))
+        .await
+        .expect("dependency_audit call failed");
+    let payload = common::structured_content(&response);
+
+    assert_eq!(
+        payload
+            .get("package_name")
+            .and_then(Value::as_str),
+        Some("inline-audit"),
+    );
+    assert_eq!(
+        payload
+            .get("dependency_count")
+            .and_then(Value::as_u64),
+        Some(1),
+    );
+}
 
 #[tokio::test]
 async fn dependency_audit_flags_unresolved_manifest_dependencies() {
     let context = common::seeded_mcp_context()
         .await
         .expect("failed to build seeded MCP context");
-    let manifest_path = write_temp_manifest(
-        r#"[package]
+
+    let manifest = r#"[package]
 name = "integration-audit"
 version = "0.1.0"
 edition = "2021"
@@ -15,12 +51,11 @@ rust-version = "1.70"
 [dependencies]
 serde_json = "1.0"
 definitely_missing_crate = "1.0"
-"#,
-    );
+"#;
 
     let response = context
         .mcp
-        .call_tool("dependency_audit", json!({ "cargo_toml_path": manifest_path }))
+        .call_tool("dependency_audit", json!({ "cargo_toml": manifest }))
         .await
         .expect("dependency_audit call failed");
     let payload = common::structured_content(&response);

@@ -8,6 +8,8 @@ pub mod freshness;
 pub mod handlers;
 /// Local cargo registry source cache indexing.
 pub mod local_cache;
+/// Periodic enrichment maintenance (rustdoc JSON queue management).
+pub mod maintenance;
 /// Rustdoc JSON fetching, parsing, and symbol extraction.
 pub mod rustdoc_json;
 /// OSV and RustSec advisory synchronization.
@@ -16,6 +18,5 @@ pub mod security;
 pub mod worker;
 
 pub use discovery::{collect_local_versions_for_crate, run_registry_discovery};
-#[cfg(feature = "testing")]
-pub use worker::run_startup_rustdoc_json_refresh_with_page_size;
-pub use worker::{run_refresh_worker, run_startup_rustdoc_json_refresh};
+pub use maintenance::run_enrichment_maintenance;
+pub use worker::run_refresh_worker;

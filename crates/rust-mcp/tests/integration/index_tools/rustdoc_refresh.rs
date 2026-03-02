@@ -4,7 +4,8 @@ use rust_mcp_testing::fixtures::{
 
 use super::{
     Value, common, json, mock_index_sync_context, mock_index_sync_context_with_rustdoc_dir,
-    seed_crate_release, write_rustdoc_fixture_file,
+    run_enrichment_maintenance_scan_for_tests, seed_crate_release, write_rustdoc_fixture_file,
+    write_rustdoc_fixture_files,
 };
 
 const TOKIO_RUSTDOC_FIXTURE: &str = "tokio_1.49.0_x86_64-unknown-linux-gnu_latest.json.zst";
@@ -564,5 +565,220 @@ async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
             .and_then(Value::as_array)
             .is_some_and(|changes| !changes.is_empty()),
         "expected api_diff changes from indexed rustdoc versions"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Enrichment tracking tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// After successful enrichment via `index_refresh`, the version's
+/// `rustdoc_enriched_at` column should be set and the maintenance scan should
+/// NOT re-enqueue it.
+#[tokio::test]
+async fn rustdoc_enrichment_marks_version_and_is_skipped_on_retry() {
+    let (rustdoc_dir, crate_name, crate_version) = write_rustdoc_fixture_file();
+    let context = mock_index_sync_context_with_rustdoc_dir(Some(rustdoc_dir))
+        .await
+        .expect("failed to build rustdoc index context");
+
+    let seeded = seed_crate_release(
+        &context.state.db,
+        &crate_name,
+        &crate_version,
+        42,
+        Some("2026-01-01T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed crate release");
+
+    // Mark version as locally present so it qualifies for enrichment.
+    sqlx::query("UPDATE crate_versions SET locally_present = TRUE WHERE id = $1")
+        .bind(seeded.version_id)
+        .execute(&context.state.db)
+        .await
+        .expect("failed to mark version as locally present");
+
+    // Run enrichment via tool call.
+    let _response = context
+        .mcp
+        .call_tool(
+            "index_refresh",
+            json!({
+                "scope": "rustdoc_json",
+                "crate_name": crate_name,
+                "page": 1,
+                "per_page": 20
+            }),
+        )
+        .await
+        .expect("index_refresh rustdoc_json call failed");
+
+    // Verify rustdoc_enriched_at is set.
+    let is_enriched = sqlx::query_scalar::<_, bool>(
+        "SELECT rustdoc_enriched_at IS NOT NULL FROM crate_versions WHERE id = $1",
+    )
+    .bind(seeded.version_id)
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to check rustdoc_enriched_at");
+    assert!(is_enriched, "rustdoc_enriched_at should be set after successful enrichment");
+
+    // Run maintenance scan — should find 0 unenriched crates since the
+    // version we just enriched is the only locally-present one.
+    let outcome = run_enrichment_maintenance_scan_for_tests(&context.state).await;
+    assert_eq!(
+        outcome.scanned, 0,
+        "maintenance scan should find 0 unenriched crate names after enrichment"
+    );
+}
+
+/// When a version has no local fallback file and docs.rs returns 404, the
+/// enrichment attempt timestamp should be recorded but `rustdoc_enriched_at`
+/// should remain NULL.
+#[tokio::test]
+async fn rustdoc_failed_attempt_records_last_attempt_timestamp() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("failed to build rustdoc index context");
+
+    // Seed a crate that has no local fallback AND will 404 on docs.rs mock.
+    let seeded = seed_crate_release(
+        &context.state.db,
+        "nonexistent-rustdoc",
+        "0.0.1",
+        99,
+        Some("2026-01-01T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed crate release");
+
+    sqlx::query("UPDATE crate_versions SET locally_present = TRUE WHERE id = $1")
+        .bind(seeded.version_id)
+        .execute(&context.state.db)
+        .await
+        .expect("failed to mark version as locally present");
+
+    // Run enrichment — this should fail for this crate (no local file, 404
+    // from docs.rs mock) but still record the attempt.
+    let _response = context
+        .mcp
+        .call_tool(
+            "index_refresh",
+            json!({
+                "scope": "rustdoc_json",
+                "crate_name": "nonexistent-rustdoc",
+                "page": 1,
+                "per_page": 20
+            }),
+        )
+        .await
+        .expect("index_refresh rustdoc_json call failed");
+
+    let (is_enriched, has_attempt) = sqlx::query_as::<_, (bool, bool)>(
+        "SELECT
+            rustdoc_enriched_at IS NOT NULL,
+            rustdoc_last_attempt_at IS NOT NULL
+         FROM crate_versions WHERE id = $1",
+    )
+    .bind(seeded.version_id)
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to check enrichment timestamps");
+
+    // enriched_at should still be NULL since enrichment failed.
+    assert!(!is_enriched, "rustdoc_enriched_at should remain NULL after failed enrichment");
+    // last_attempt_at should be set so the cooldown is respected.
+    assert!(has_attempt, "rustdoc_last_attempt_at should be set after failed enrichment attempt");
+}
+
+/// Versions that have been enriched should be excluded from
+/// `fetch_rustdoc_sync_candidates` when `skip_enriched=true`.
+#[tokio::test]
+async fn fetch_rustdoc_sync_candidates_excludes_enriched_versions() {
+    let (rustdoc_dir, crate_name, crate_versions) =
+        write_rustdoc_fixture_files(&["1.2.3", "1.2.4"]);
+    let context = mock_index_sync_context_with_rustdoc_dir(Some(rustdoc_dir))
+        .await
+        .expect("failed to build rustdoc index context");
+
+    let mut version_ids = Vec::new();
+    for (idx, crate_version) in crate_versions
+        .iter()
+        .enumerate()
+    {
+        let seeded = seed_crate_release(
+            &context.state.db,
+            &crate_name,
+            crate_version,
+            200 + idx as i64,
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .await
+        .expect("failed to seed crate release");
+        version_ids.push(seeded.version_id);
+    }
+
+    // Mark all as locally present.
+    sqlx::query(
+        "UPDATE crate_versions SET locally_present = TRUE
+         WHERE crate_id = (SELECT id FROM crates WHERE name = $1)",
+    )
+    .bind(&crate_name)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to mark versions as locally present");
+
+    // Mark only the first version as enriched.
+    sqlx::query(
+        "UPDATE crate_versions
+         SET rustdoc_enriched_at = NOW(), rustdoc_last_attempt_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(version_ids[0])
+    .execute(&context.state.db)
+    .await
+    .expect("failed to mark first version as enriched");
+
+    // Query candidates with skip_enriched=true.
+    let candidates = rust_mcp::db::indexing::fetch_rustdoc_sync_candidates(
+        &context.state.db,
+        Some(&crate_name),
+        100,
+        0,
+        true,
+        true,
+        Some(86400),
+    )
+    .await
+    .expect("failed to fetch rustdoc sync candidates");
+
+    // Only the second version should be returned.
+    assert_eq!(
+        candidates.len(),
+        1,
+        "expected only the unenriched version, got {} candidates",
+        candidates.len()
+    );
+    assert_eq!(candidates[0].crate_version_id, version_ids[1]);
+
+    // Query candidates with skip_enriched=false — both should be returned.
+    let all_candidates = rust_mcp::db::indexing::fetch_rustdoc_sync_candidates(
+        &context.state.db,
+        Some(&crate_name),
+        100,
+        0,
+        true,
+        false,
+        None,
+    )
+    .await
+    .expect("failed to fetch all rustdoc sync candidates");
+
+    assert_eq!(
+        all_candidates.len(),
+        2,
+        "expected both versions with skip_enriched=false, got {} candidates",
+        all_candidates.len()
     );
 }

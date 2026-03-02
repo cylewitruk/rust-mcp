@@ -107,6 +107,7 @@ impl McpServer {
             i64::from(offset),
             false,
             false,
+            None,
         )
         .await
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;

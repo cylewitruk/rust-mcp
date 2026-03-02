@@ -92,7 +92,8 @@ impl IndexingCoordinator {
             json!({"trigger": "on_demand", "scope": scope}),
         )
         .await
-        .map_err(|e| format!("failed to enqueue on-demand {scope} job for '{crate_name}': {e}"))?;
+        .map_err(|e| format!("failed to enqueue on-demand {scope} job for '{crate_name}': {e}"))?
+        .job_id;
 
         // Register waiter — idempotent; coalesced jobs reuse the same ID.
         {

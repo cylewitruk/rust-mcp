@@ -681,7 +681,8 @@ impl McpServer {
     #[tool(
         name = "dependency_audit",
         description = "Audit a Cargo.toml dependency set for yanked versions, advisories, \
-                       outdated requirements, and MSRV conflicts."
+                       outdated requirements, and MSRV conflicts. Pass raw Cargo.toml manifest \
+                       text in the cargo_toml parameter."
     )]
     async fn dependency_audit(
         &self,
@@ -701,7 +702,8 @@ impl McpServer {
     #[tool(
         name = "dependency_resolve",
         description = "Run a best-effort compatibility simulation for proposed dependencies and \
-                       report resolvable versions or conflicts."
+                       report resolvable versions or conflicts. Optionally pass raw Cargo.toml \
+                       manifest text in the cargo_toml parameter to extract dependency inputs."
     )]
     async fn dependency_resolve(
         &self,

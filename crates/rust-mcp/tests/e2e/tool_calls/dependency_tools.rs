@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    SEEDED_ALT_CRATE_NAME, SEEDED_CRATE_NAME, SEEDED_CRATE_NEXT_VERSION, call_tool_payload,
-    seeded_indexed_context, seeded_indexed_manifest_context,
+    SEEDED_ALT_CRATE_NAME, SEEDED_ALT_CRATE_VERSION, SEEDED_CRATE_NAME, SEEDED_CRATE_NEXT_VERSION,
+    SEEDED_CRATE_VERSION, call_tool_payload, seeded_indexed_context,
 };
 
 #[tokio::test]
@@ -102,14 +102,17 @@ async fn tool_dependency_resolve_resolves_seeded_dependencies() {
 
 #[tokio::test]
 async fn tool_dependency_audit_reports_seeded_manifest_dependencies() {
-    let context = seeded_indexed_manifest_context().await;
+    let context = seeded_indexed_context().await;
 
-    let payload = call_tool_payload(
-        &context.rust_mcp,
-        "dependency_audit",
-        json!({ "cargo_toml_path": context.manifest_path }),
-    )
-    .await;
+    let manifest = format!(
+        "[package]\nname = \"e2e-manifest\"\nversion = \"0.1.0\"\nedition = \
+         \"2021\"\nrust-version = \"1.75\"\n\n[dependencies]\n{SEEDED_CRATE_NAME} = \
+         \"^{SEEDED_CRATE_VERSION}\"\n{SEEDED_ALT_CRATE_NAME} = \"^{SEEDED_ALT_CRATE_VERSION}\"\n"
+    );
+
+    let payload =
+        call_tool_payload(&context.rust_mcp, "dependency_audit", json!({ "cargo_toml": manifest }))
+            .await;
 
     assert_eq!(
         payload

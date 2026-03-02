@@ -1,5 +1,4 @@
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
 
 use rmcp::Json;
 pub use rust_mcp_types::types::dependency::{
@@ -14,7 +13,7 @@ use toml::Value;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{dependency_resolve_limit, normalize_required};
+use crate::mcp::utils::dependency_resolve_limit;
 
 #[derive(Debug, Clone)]
 struct NormalizedDependency {
@@ -123,30 +122,6 @@ fn collect_manifest_dependencies(
     }
 
     Ok(out)
-}
-
-fn resolve_manifest_path(raw_path: String) -> Result<PathBuf, String> {
-    let normalized = normalize_required(raw_path, "cargo_toml_path")?;
-    let candidate = PathBuf::from(&normalized);
-
-    let final_path = if candidate.is_absolute() {
-        candidate
-    } else {
-        std::env::current_dir()
-            .map_err(|e| format!("failed to resolve current directory: {e}"))?
-            .join(candidate)
-    };
-
-    if final_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.eq_ignore_ascii_case("Cargo.toml"))
-        .unwrap_or(false)
-    {
-        Ok(final_path)
-    } else {
-        Err("cargo_toml_path must point to a Cargo.toml file".to_string())
-    }
 }
 
 fn normalize_inputs(
@@ -296,12 +271,9 @@ impl McpServer {
             .check_features
             .unwrap_or(false);
 
-        let manifest_dependencies = if let Some(path) = request.cargo_toml_path {
-            let resolved = resolve_manifest_path(path)?;
-            let manifest = tokio::fs::read_to_string(&resolved)
-                .await
-                .map_err(|e| format!("failed to read {}: {e}", resolved.display()))?;
-            collect_manifest_dependencies(&manifest)?
+        let manifest_dependencies = if let Some(cargo_toml) = request.cargo_toml {
+            let trimmed = cargo_toml.trim();
+            if trimmed.is_empty() { Vec::new() } else { collect_manifest_dependencies(trimmed)? }
         } else {
             Vec::new()
         };
@@ -310,9 +282,9 @@ impl McpServer {
             normalize_inputs(request.dependencies, manifest_dependencies, request.additions);
 
         if requested.is_empty() {
-            return Err("provide dependencies, cargo_toml_path, or additions to evaluate \
-                        resolution"
-                .to_string());
+            return Err(
+                "provide dependencies, cargo_toml, or additions to evaluate resolution".to_string()
+            );
         }
 
         if requested.len() > limit as usize {

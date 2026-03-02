@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use rmcp::Json;
 pub use rust_mcp_types::types::dependency::{
@@ -12,7 +11,6 @@ use toml::Value;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::normalize_required;
 
 #[derive(Debug, Clone)]
 struct ParsedDependency {
@@ -181,30 +179,6 @@ fn parse_manifest(manifest: &str) -> Result<ParsedManifest, String> {
     })
 }
 
-fn resolve_manifest_path(raw_path: String) -> Result<PathBuf, String> {
-    let normalized = normalize_required(raw_path, "cargo_toml_path")?;
-    let candidate = PathBuf::from(&normalized);
-
-    let final_path = if candidate.is_absolute() {
-        candidate
-    } else {
-        std::env::current_dir()
-            .map_err(|e| format!("failed to resolve current directory: {e}"))?
-            .join(candidate)
-    };
-
-    if final_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n.eq_ignore_ascii_case("Cargo.toml"))
-        .unwrap_or(false)
-    {
-        Ok(final_path)
-    } else {
-        Err("cargo_toml_path must point to a Cargo.toml file".to_string())
-    }
-}
-
 fn evaluate_confidence(
     dependency_count: usize,
     unresolved_count: usize,
@@ -245,12 +219,12 @@ impl McpServer {
         &self,
         request: DependencyAuditRequest,
     ) -> Result<Json<DependencyAuditResponse>, String> {
-        let manifest_path = resolve_manifest_path(request.cargo_toml_path)?;
-        let manifest_text = tokio::fs::read_to_string(&manifest_path)
-            .await
-            .map_err(|e| format!("failed to read {}: {e}", manifest_path.display()))?;
+        let manifest_text = request.cargo_toml.trim();
+        if manifest_text.is_empty() {
+            return Err("cargo_toml must not be empty".to_string());
+        }
 
-        let parsed_manifest = parse_manifest(&manifest_text)?;
+        let parsed_manifest = parse_manifest(manifest_text)?;
         let package_rust_floor = parsed_manifest
             .package_rust_version
             .as_deref()
@@ -465,36 +439,18 @@ impl McpServer {
         let confidence_assessment =
             evaluate_confidence(dependencies.len(), unresolved_count, no_requirement_count);
 
-        let display_path = manifest_path
-            .strip_prefix(std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()))
-            .ok()
-            .map(|value| value.display().to_string())
-            .unwrap_or_else(|| {
-                manifest_path
-                    .display()
-                    .to_string()
-            });
-
         Ok(Json(DependencyAuditResponse {
-            cargo_toml_path: display_path,
             package_name: parsed_manifest.package_name,
             package_rust_version: parsed_manifest.package_rust_version,
             dependency_count: dependencies.len(),
             issue_count: issues.len(),
             dependencies,
             issues,
-            freshness: vec![
-                ResponseFreshnessSource {
-                    source: "local_manifest".to_string(),
-                    status: "read".to_string(),
-                    checked_at: None,
-                },
-                ResponseFreshnessSource {
-                    source: "local_postgres_index".to_string(),
-                    status: "queried".to_string(),
-                    checked_at: None,
-                },
-            ],
+            freshness: vec![ResponseFreshnessSource {
+                source: "local_postgres_index".to_string(),
+                status: "queried".to_string(),
+                checked_at: None,
+            }],
             confidence: confidence_assessment
                 .level
                 .as_str()
@@ -505,7 +461,7 @@ impl McpServer {
                 "crate_versions".to_string(),
                 "index_refresh".to_string(),
             ],
-            provenance: "local_manifest+local_postgres_index".to_string(),
+            provenance: "inline_manifest+local_postgres_index".to_string(),
         }))
     }
 }

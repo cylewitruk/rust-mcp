@@ -774,8 +774,8 @@ pub mod dependency {
     /// Request payload for `dependency.audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditRequest {
-        /// Path to a Cargo.toml manifest to audit.
-        pub cargo_toml_path: String,
+        /// Raw Cargo.toml manifest content to audit.
+        pub cargo_toml: String,
     }
 
     /// Issue category emitted by `dependency.audit`.
@@ -820,8 +820,6 @@ pub mod dependency {
     /// Response payload for `dependency.audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditResponse {
-        /// Normalized Cargo.toml path that was audited.
-        pub cargo_toml_path: String,
         /// Package name declared in the manifest.
         pub package_name: Option<String>,
         /// Package rust-version declared in the manifest.
@@ -889,8 +887,9 @@ pub mod dependency {
     pub struct DependencyResolveRequest {
         /// Explicit dependency inputs.
         pub dependencies: Option<Vec<DependencyResolveInputDependency>>,
-        /// Optional manifest path used to load dependency inputs.
-        pub cargo_toml_path: Option<String>,
+        /// Raw Cargo.toml manifest text to extract dependency inputs from.
+        #[serde(default)]
+        pub cargo_toml: Option<String>,
         /// Additional dependencies layered over manifest inputs.
         pub additions: Option<Vec<DependencyResolveInputDependency>>,
         /// Whether to compute feature-unification summary data.

@@ -59,6 +59,70 @@ pub async fn mark_versions_locally_present(
     Ok(result.rows_affected())
 }
 
+/// Marks a crate version as successfully enriched with rustdoc JSON.
+///
+/// Sets both `rustdoc_enriched_at` and `rustdoc_last_attempt_at` to the
+/// current time.
+pub async fn mark_version_rustdoc_enriched(
+    db: &PgPool,
+    crate_version_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE crate_versions
+         SET rustdoc_enriched_at = NOW(),
+             rustdoc_last_attempt_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(crate_version_id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Records that a rustdoc enrichment attempt was made but did not succeed.
+///
+/// Only updates `rustdoc_last_attempt_at` so that the retry cooldown is
+/// respected without marking the version as fully enriched.
+pub async fn mark_version_rustdoc_attempted(
+    db: &PgPool,
+    crate_version_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE crate_versions
+         SET rustdoc_last_attempt_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(crate_version_id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Returns distinct crate names that have locally-present versions needing
+/// rustdoc enrichment.
+///
+/// A version is considered "needing enrichment" when `rustdoc_enriched_at`
+/// is NULL and either no attempt has been made or the last attempt is older
+/// than `retry_cooldown_seconds`.
+pub async fn fetch_unenriched_crate_names(
+    db: &PgPool,
+    retry_cooldown_seconds: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT c.name
+         FROM crate_versions cv
+         JOIN crates c ON c.id = cv.crate_id
+         WHERE cv.locally_present = TRUE
+           AND cv.rustdoc_enriched_at IS NULL
+           AND (cv.rustdoc_last_attempt_at IS NULL
+                OR cv.rustdoc_last_attempt_at < NOW() - make_interval(secs => $1::FLOAT8))
+         ORDER BY c.name",
+    )
+    .bind(retry_cooldown_seconds as f64)
+    .fetch_all(db)
+    .await
+}
+
 /// Loads crate versions eligible for local source cache indexing.
 ///
 /// When `locally_present_only` is `true`, only versions flagged as present
@@ -90,9 +154,10 @@ pub async fn fetch_local_cache_version_keys(
 /// When `locally_present_only` is `true`, only versions flagged as present
 /// in the user's cargo registry are returned.
 ///
-/// When `skip_enriched` is `true`, versions that already have
-/// `index_source = 'rustdoc_json'` rows in the `symbols` table are excluded.
-/// This avoids re-processing versions on every startup.
+/// When `skip_enriched` is `true`, versions with `rustdoc_enriched_at` set
+/// are excluded. Versions whose last attempt is within
+/// `retry_cooldown_seconds` are also excluded; pass `None` to skip all
+/// previously-attempted versions regardless of age.
 pub async fn fetch_rustdoc_sync_candidates(
     db: &PgPool,
     crate_name: Option<&str>,
@@ -100,6 +165,7 @@ pub async fn fetch_rustdoc_sync_candidates(
     offset: i64,
     locally_present_only: bool,
     skip_enriched: bool,
+    retry_cooldown_seconds: Option<i64>,
 ) -> Result<Vec<RustdocSyncCandidateRow>, sqlx::Error> {
     sqlx::query_as::<_, RustdocSyncCandidateRow>(
         "SELECT
@@ -110,10 +176,12 @@ pub async fn fetch_rustdoc_sync_candidates(
          JOIN crates c ON c.id = cv.crate_id
          WHERE ($1::TEXT IS NULL OR c.name = $1)
            AND ($4::BOOL IS FALSE OR cv.locally_present = TRUE)
-           AND ($5::BOOL IS FALSE OR NOT EXISTS (
-               SELECT 1 FROM symbols s
-               WHERE s.crate_version_id = cv.id
-                 AND s.index_source = 'rustdoc_json'
+           AND ($5::BOOL IS FALSE OR (
+               cv.rustdoc_enriched_at IS NULL
+               AND (cv.rustdoc_last_attempt_at IS NULL
+                    OR ($6::BIGINT IS NOT NULL
+                        AND cv.rustdoc_last_attempt_at < NOW() - make_interval(secs => \
+         $6::BIGINT)))
            ))
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT $2 OFFSET $3",
@@ -123,6 +191,7 @@ pub async fn fetch_rustdoc_sync_candidates(
     .bind(offset)
     .bind(locally_present_only)
     .bind(skip_enriched)
+    .bind(retry_cooldown_seconds)
     .fetch_all(db)
     .await
 }
@@ -662,6 +731,19 @@ pub async fn persist_crate_sync(
 
 /// Returns an existing pending/running refresh job for this crate+scope, or
 /// inserts a new pending job and returns its id.
+/// Result of an [`enqueue_or_get_refresh_job_id`] call, indicating whether a
+/// new job was created or an existing pending/running job was returned.
+#[derive(Debug, Clone, Copy)]
+pub struct EnqueueOutcome {
+    /// The job ID (new or existing).
+    pub job_id: i64,
+    /// `true` when a fresh row was inserted; `false` when a pre-existing
+    /// pending/running job was returned.
+    pub is_new: bool,
+}
+
+/// Idempotent job enqueue: returns the existing pending/running job if one
+/// exists for the same `(crate_name, scope)`, otherwise inserts a new row.
 pub async fn enqueue_or_get_refresh_job_id(
     db: &PgPool,
     crate_name: &str,
@@ -669,7 +751,7 @@ pub async fn enqueue_or_get_refresh_job_id(
     priority: i32,
     include_dependencies: bool,
     payload: Value,
-) -> Result<i64, sqlx::Error> {
+) -> Result<EnqueueOutcome, sqlx::Error> {
     if let Some(existing_id) = sqlx::query_scalar::<_, i64>(
         "SELECT id
          FROM refresh_jobs
@@ -682,10 +764,13 @@ pub async fn enqueue_or_get_refresh_job_id(
     .fetch_optional(db)
     .await?
     {
-        return Ok(existing_id);
+        return Ok(EnqueueOutcome {
+            job_id: existing_id,
+            is_new: false,
+        });
     }
 
-    sqlx::query_scalar::<_, i64>(
+    let job_id = sqlx::query_scalar::<_, i64>(
         "INSERT INTO refresh_jobs (
             crate_name, scope, priority, status, include_dependencies, payload, requested_at
          ) VALUES (
@@ -699,7 +784,9 @@ pub async fn enqueue_or_get_refresh_job_id(
     .bind(include_dependencies)
     .bind(payload)
     .fetch_one(db)
-    .await
+    .await?;
+
+    Ok(EnqueueOutcome { job_id, is_new: true })
 }
 
 /// Loads all coverage counters for `index.status`.
