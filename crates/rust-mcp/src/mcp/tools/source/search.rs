@@ -233,6 +233,12 @@ impl McpServer {
             }
         };
 
+        let next_best_calls_for_search = if hits.is_empty() {
+            vec!["symbol_search".to_string(), "docs_search".to_string()]
+        } else {
+            vec!["source_read".to_string(), "source_context".to_string()]
+        };
+
         let response = SourceSearchResponse {
             query,
             crate_name,
@@ -251,7 +257,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec!["source_read".to_string(), "crate_intel".to_string()],
+            next_best_calls: next_best_calls_for_search,
             provenance: "local_postgres_index".to_string(),
             hits,
         };
@@ -404,7 +410,11 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec!["source_search".to_string(), "symbol_search".to_string()],
+            next_best_calls: vec![
+                "source_context".to_string(),
+                "crate_type_info".to_string(),
+                "source_search".to_string(),
+            ],
             provenance: "local_postgres_index".to_string(),
         }))
     }

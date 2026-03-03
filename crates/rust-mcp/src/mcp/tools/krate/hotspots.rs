@@ -323,6 +323,12 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let next_best_calls = if hotspots.is_empty() {
+            vec!["source_search".to_string(), "crate_api".to_string()]
+        } else {
+            vec!["source_read".to_string(), "symbol_search".to_string(), "crate_graph".to_string()]
+        };
+
         Ok(Json(CrateHotspotsResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -358,11 +364,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "source_read".to_string(),
-                "symbol_search".to_string(),
-                "crate_graph".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index".to_string(),
         }))
     }

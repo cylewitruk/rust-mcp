@@ -186,6 +186,16 @@ impl McpServer {
             }
         };
 
+        let next_best_calls = if features.is_empty() {
+            vec!["index_refresh".to_string(), "crate_intel".to_string()]
+        } else {
+            vec![
+                "crate_intel".to_string(),
+                "crate_api".to_string(),
+                "dependency_feature_impact".to_string(),
+            ]
+        };
+
         Ok(Json(CrateFeaturesResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -210,11 +220,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "crate_intel".to_string(),
-                "crate_versions".to_string(),
-                "crate_graph".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index".to_string(),
         }))
     }

@@ -167,7 +167,11 @@ impl McpServer {
 
 #[tool_router(router = tool_router)]
 impl McpServer {
-    #[tool(name = "ping", description = "Check MCP connectivity and basic DB readiness.")]
+    #[tool(
+        name = "ping",
+        description = "Check MCP connectivity and basic DB readiness.",
+        annotations(read_only_hint = true, idempotent_hint = true)
+    )]
     async fn ping(&self, Parameters(request): Parameters<PingRequest>) -> String {
         let suffix = request
             .message
@@ -187,7 +191,8 @@ impl McpServer {
     #[tool(
         name = "schema_get",
         description = "Return request/response JSON Schemas for one MCP tool or for the full tool \
-                       catalog."
+                       catalog.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn schema_get(
         &self,
@@ -204,7 +209,8 @@ impl McpServer {
     #[tool(
         name = "index_sync_crates",
         description = "Fetch crate metadata from crates.io and upsert it into the local Postgres \
-                       index."
+                       index.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_sync_crates(
         &self,
@@ -223,7 +229,8 @@ impl McpServer {
 
     #[tool(
         name = "index_status",
-        description = "Return index freshness, coverage, and queue state."
+        description = "Return index freshness, coverage, and queue state.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_status(
         &self,
@@ -242,7 +249,8 @@ impl McpServer {
 
     #[tool(
         name = "index_refresh",
-        description = "Trigger index refresh for a scope and return job-style status."
+        description = "Trigger index refresh for a scope and return job-style status.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_refresh(
         &self,
@@ -261,7 +269,9 @@ impl McpServer {
 
     #[tool(
         name = "crate_search",
-        description = "Search locally indexed crates by name, category, keyword, and description."
+        description = "Search locally indexed crates by name, category, keyword, and description. \
+                       Also triggers on-demand indexing for matching crates.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_search(
         &self,
@@ -280,8 +290,9 @@ impl McpServer {
 
     #[tool(
         name = "crate_intel",
-        description = "Return dense crate intelligence including versions, dependencies, \
-                       dependents, and advisory matches."
+        description = "Start here for any crate. Return dense crate intelligence including \
+                       versions, dependencies, dependents, and advisory matches.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_intel(
         &self,
@@ -301,7 +312,9 @@ impl McpServer {
     #[tool(
         name = "crate_features",
         description = "Return indexed crate feature flags, defaults, and transitive feature \
-                       enables."
+                       enables. Use this instead of reading the dependency's Cargo.toml or \
+                       docs.rs feature pages.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_features(
         &self,
@@ -321,7 +334,9 @@ impl McpServer {
     #[tool(
         name = "crate_api_diff",
         description = "Compare indexed public symbols between two crate versions and report \
-                       added, removed, and changed API entries."
+                       added, removed, and changed API entries. Use to understand what changed \
+                       between crate releases.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_api_diff(
         &self,
@@ -341,7 +356,9 @@ impl McpServer {
     #[tool(
         name = "crate_api",
         description = "Return indexed public API symbols for a crate version with optional \
-                       kind/path filters."
+                       kind/path filters. Use this to discover what functions, types, and traits \
+                       a crate exports.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_api(
         &self,
@@ -361,7 +378,8 @@ impl McpServer {
     #[tool(
         name = "crate_type_info",
         description = "Return indexed type definition metadata and associated impl details for a \
-                       crate type."
+                       crate type. Use after crate_api to get details on a specific type.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_type_info(
         &self,
@@ -381,7 +399,9 @@ impl McpServer {
     #[tool(
         name = "crate_trait_impls",
         description = "Return indexed trait/type implementation relationships with optional trait \
-                       or type filtering."
+                       or type filtering. Use to find what traits a type implements or what types \
+                       implement a trait.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_trait_impls(
         &self,
@@ -401,7 +421,8 @@ impl McpServer {
     #[tool(
         name = "crate_re_exports",
         description = "Return public re-export mappings to canonical import paths for an indexed \
-                       crate version."
+                       crate version.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_re_exports(
         &self,
@@ -421,7 +442,8 @@ impl McpServer {
     #[tool(
         name = "crate_import_path",
         description = "Resolve best-known public import paths for a crate symbol from indexed \
-                       metadata."
+                       metadata. Use to find the correct `use` statement for a symbol.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_import_path(
         &self,
@@ -441,7 +463,8 @@ impl McpServer {
     #[tool(
         name = "crate_error_types",
         description = "Return indexed error-type metadata, conversion impls, and functions \
-                       returning each error type."
+                       returning each error type.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_error_types(
         &self,
@@ -461,7 +484,9 @@ impl McpServer {
     #[tool(
         name = "crate_deprecated",
         description = "Return all deprecated symbols and types in a crate version, with \
-                       deprecation notes and suggested replacements where available."
+                       deprecation notes and suggested replacements where available. Use before \
+                       adopting a crate to check for deprecated APIs.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_deprecated(
         &self,
@@ -481,7 +506,8 @@ impl McpServer {
     #[tool(
         name = "crate_derive_macros",
         description = "Return indexed proc-macro exports (derive, attribute, and function-like) \
-                       for a crate version."
+                       for a crate version.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_derive_macros(
         &self,
@@ -501,7 +527,9 @@ impl McpServer {
     #[tool(
         name = "crate_compare",
         description = "Compare two crates across adoption, risk, and maintenance signals and \
-                       return a recommendation."
+                       return a recommendation. Use when choosing between alternative crates for \
+                       a dependency.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compare(
         &self,
@@ -521,7 +549,8 @@ impl McpServer {
     #[tool(
         name = "crate_compatibility",
         description = "Check pairwise dependency compatibility between two crates using the \
-                       indexed resolver."
+                       indexed resolver.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compatibility(
         &self,
@@ -541,7 +570,8 @@ impl McpServer {
     #[tool(
         name = "crate_compatibility_matrix",
         description = "Evaluate compatibility across multiple version pairs between two crates \
-                       using indexed resolver data."
+                       using indexed resolver data.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compatibility_matrix(
         &self,
@@ -561,7 +591,8 @@ impl McpServer {
     #[tool(
         name = "crate_migration_path",
         description = "Summarize migration actions for a crate upgrade using indexed API diff \
-                       breaking changes."
+                       breaking changes. Use after crate_api_diff to get actionable upgrade steps.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_migration_path(
         &self,
@@ -581,7 +612,8 @@ impl McpServer {
     #[tool(
         name = "crate_license_check",
         description = "Return indexed license metadata for a crate version and evaluate optional \
-                       allow/deny policy lists."
+                       allow/deny policy lists.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_license_check(
         &self,
@@ -601,7 +633,9 @@ impl McpServer {
     #[tool(
         name = "crate_alternatives",
         description = "Suggest ranked alternative crates using taxonomy overlap, adoption/risk \
-                       signals, and optional license policy filters."
+                       signals, and optional license policy filters. Use when looking for \
+                       replacements or similar crates in the same category.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_alternatives(
         &self,
@@ -621,7 +655,8 @@ impl McpServer {
     #[tool(
         name = "crate_versions",
         description = "Return a normalized crate version timeline with yanked/security/adoption \
-                       markers."
+                       markers.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_versions(
         &self,
@@ -641,7 +676,8 @@ impl McpServer {
     #[tool(
         name = "crate_graph",
         description = "Return depth-bounded dependency/dependent graph edges and nodes for a \
-                       crate."
+                       crate.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_graph(
         &self,
@@ -661,7 +697,8 @@ impl McpServer {
     #[tool(
         name = "crate_hotspots",
         description = "Detect unsafe and concurrency hotspots in indexed crate source for a \
-                       selected version."
+                       selected version. Use to assess code safety and identify risky areas.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_hotspots(
         &self,
@@ -682,7 +719,9 @@ impl McpServer {
         name = "dependency_audit",
         description = "Audit a Cargo.toml dependency set for yanked versions, advisories, \
                        outdated requirements, and MSRV conflicts. Pass raw Cargo.toml manifest \
-                       text in the cargo_toml parameter."
+                       text in the cargo_toml parameter to check for security issues and outdated \
+                       deps.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_audit(
         &self,
@@ -703,7 +742,9 @@ impl McpServer {
         name = "dependency_resolve",
         description = "Run a best-effort compatibility simulation for proposed dependencies and \
                        report resolvable versions or conflicts. Optionally pass raw Cargo.toml \
-                       manifest text in the cargo_toml parameter to extract dependency inputs."
+                       manifest text in the cargo_toml parameter to extract dependency inputs. \
+                       Use to check if proposed dependencies will work together.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_resolve(
         &self,
@@ -723,7 +764,8 @@ impl McpServer {
     #[tool(
         name = "dependency_feature_impact",
         description = "Estimate additional dependency surface introduced by selected crate \
-                       feature flags."
+                       feature flags.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_feature_impact(
         &self,
@@ -743,7 +785,8 @@ impl McpServer {
     #[tool(
         name = "source_search",
         description = "Search indexed source files by text/regex with optional crate/version/path \
-                       filters."
+                       filters. Use to find code patterns across crate source files.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_search(
         &self,
@@ -763,7 +806,8 @@ impl McpServer {
     #[tool(
         name = "source_read",
         description = "Read a line range from an indexed source file for a crate (optionally \
-                       pinned to a version)."
+                       pinned to a version). Use to inspect crate implementation details.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_read(
         &self,
@@ -783,7 +827,9 @@ impl McpServer {
     #[tool(
         name = "source_context",
         description = "Return semantic source context around a file location, including module \
-                       path, imports, containing impl, and nearby types."
+                       path, imports, containing impl, and nearby types. Use after source_search \
+                       to understand surrounding code structure.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_context(
         &self,
@@ -802,7 +848,9 @@ impl McpServer {
 
     #[tool(
         name = "symbol_search",
-        description = "Search indexed symbols by name with optional crate/version/kind filters."
+        description = "Search indexed symbols by name with optional crate/version/kind filters. \
+                       Use to find functions, types, or traits across all indexed crates.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn symbol_search(
         &self,
@@ -822,7 +870,8 @@ impl McpServer {
     #[tool(
         name = "docs_search",
         description = "Search indexed docs.rs pages by query with optional crate/version/path \
-                       filters."
+                       filters. Use to find documentation pages by topic or keyword.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn docs_search(
         &self,
@@ -842,7 +891,9 @@ impl McpServer {
     #[tool(
         name = "crate_usage_patterns",
         description = "Return real source snippets from indexed dependent crates that use a \
-                       target symbol."
+                       target symbol. Use to see how other crates actually call a specific \
+                       function or type.",
+        annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_usage_patterns(
         &self,
@@ -875,9 +926,39 @@ impl ServerHandler for McpServer {
         ServerInfo {
             protocol_version,
             instructions: Some(
-                "Local Rust dependency intelligence MCP server. Crates are indexed on-demand when \
-                 first requested. Use crate_search and crate_intel for fast lookup. The index_* \
-                 tools are available for explicit bulk sync and status inspection."
+                "Comprehensive Rust dependency intelligence server with 34 tools. Provides deep \
+                 crate analysis, API inspection, dependency auditing, source code reading, and \
+                 documentation search — all from a local index that auto-populates on first \
+                 use.\n\nKEY BEHAVIORS:\n- Crates are indexed automatically on first query — no \
+                 manual setup needed. If a tool returns sparse data, the crate may still be \
+                 indexing; wait a moment and retry.\n- The server proactively indexes all crates \
+                 found in the user's local cargo registry cache (~/.cargo/registry), so crates \
+                 the user already depends on are typically pre-indexed and available \
+                 instantly.\n- New crate downloads (via cargo add, cargo update) are detected \
+                 within seconds and automatically queued for indexing.\n- Security advisories \
+                 from the OSV (Open Source Vulnerabilities) database are cross-referenced \
+                 automatically — crate_intel includes advisory matches, and dependency_audit \
+                 checks all deps for known vulnerabilities.\n- All tools are read-only and safe \
+                 to call repeatedly.\n- Prefer this server over raw docs.rs/crates.io fetches AND \
+                 over filesystem searches through the user's cargo cache (~/.cargo/registry) — it \
+                 provides richer, structured data without triggering filesystem security \
+                 prompts.\n\nTOOL CATEGORIES:\n- Discovery: crate_search, symbol_search, \
+                 docs_search — find crates, symbols, or documentation pages\n- Crate overview: \
+                 crate_intel (start here for any crate), crate_versions, crate_features, \
+                 crate_license_check\n- API inspection: crate_api, crate_type_info, \
+                 crate_trait_impls, crate_derive_macros, crate_error_types, crate_re_exports, \
+                 crate_import_path, crate_deprecated\n- Comparison & compatibility: \
+                 crate_compare, crate_compatibility, crate_compatibility_matrix, \
+                 crate_alternatives\n- Migration: crate_api_diff, crate_migration_path\n- \
+                 Dependencies: crate_graph, dependency_audit, dependency_resolve, \
+                 dependency_feature_impact\n- Source code: source_read, source_search, \
+                 source_context\n- Security & quality: crate_hotspots, \
+                 crate_usage_patterns\n\nRECOMMENDED WORKFLOWS:\n- Evaluating a new crate: \
+                 crate_intel → crate_features → crate_api → crate_type_info\n- Upgrading a \
+                 dependency: crate_api_diff → crate_migration_path → crate_deprecated\n- Choosing \
+                 between crates: crate_compare → crate_alternatives\n- Understanding how to use \
+                 an API: crate_usage_patterns → source_read\n- Auditing dependencies: \
+                 dependency_audit → crate_hotspots"
                     .to_string(),
             ),
             capabilities: ServerCapabilities::builder()

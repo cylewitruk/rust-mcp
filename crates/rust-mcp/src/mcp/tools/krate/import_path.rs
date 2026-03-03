@@ -162,6 +162,16 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let next_best_calls = if paginated.items.is_empty() {
+            vec!["crate_api".to_string(), "symbol_search".to_string()]
+        } else {
+            vec![
+                "crate_re_exports".to_string(),
+                "crate_type_info".to_string(),
+                "source_search".to_string(),
+            ]
+        };
+
         Ok(Json(CrateImportPathResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -194,11 +204,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "crate_re_exports".to_string(),
-                "crate_type_info".to_string(),
-                "source_search".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index(symbols, source_files)".to_string(),
         }))
     }

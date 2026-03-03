@@ -198,6 +198,16 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let next_best_calls = if symbols.is_empty() {
+            vec!["index_refresh".to_string(), "crate_intel".to_string()]
+        } else {
+            vec![
+                "crate_type_info".to_string(),
+                "crate_trait_impls".to_string(),
+                "crate_api_diff".to_string(),
+            ]
+        };
+
         Ok(Json(CrateApiResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -231,11 +241,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "crate_api_diff".to_string(),
-                "symbol_search".to_string(),
-                "source_read".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index".to_string(),
         }))
     }

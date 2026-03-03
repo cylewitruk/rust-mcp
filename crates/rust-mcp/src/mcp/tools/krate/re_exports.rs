@@ -385,6 +385,12 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let next_best_calls = if re_exports.is_empty() {
+            vec!["crate_api".to_string(), "crate_import_path".to_string()]
+        } else {
+            vec!["crate_api".to_string(), "symbol_search".to_string(), "source_read".to_string()]
+        };
+
         Ok(Json(CrateReExportsResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -415,11 +421,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "crate_api".to_string(),
-                "symbol_search".to_string(),
-                "source_read".to_string(),
-            ],
+            next_best_calls,
             provenance,
         }))
     }

@@ -324,6 +324,16 @@ impl McpServer {
             }
         };
 
+        let next_best_calls = if containing_impl.is_none() && surrounding_types.is_empty() {
+            vec!["source_search".to_string(), "crate_api".to_string()]
+        } else {
+            vec![
+                "source_read".to_string(),
+                "symbol_search".to_string(),
+                "crate_type_info".to_string(),
+            ]
+        };
+
         Ok(Json(SourceContextResponse {
             crate_name: crate_row.name,
             selected_version: selected_version.version,
@@ -349,11 +359,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "source_read".to_string(),
-                "symbol_search".to_string(),
-                "crate_type_info".to_string(),
-            ],
+            next_best_calls,
             provenance: "source_files + symbols + crate_impls + crate_types".to_string(),
         }))
     }

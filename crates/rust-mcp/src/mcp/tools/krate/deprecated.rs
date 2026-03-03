@@ -93,6 +93,16 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
+        let next_best_calls = if items.is_empty() {
+            vec!["crate_api".to_string(), "crate_intel".to_string()]
+        } else {
+            vec![
+                "crate_api".to_string(),
+                "crate_type_info".to_string(),
+                "crate_migration_path".to_string(),
+            ]
+        };
+
         Ok(Json(CrateDeprecatedResponse {
             crate_name: ctx.crate_row.name,
             selected_version: resolution
@@ -118,11 +128,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "crate_api".to_string(),
-                "crate_type_info".to_string(),
-                "crate_migration_path".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index(symbols, crate_types)".to_string(),
         }))
     }
