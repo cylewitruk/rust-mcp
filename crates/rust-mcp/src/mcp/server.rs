@@ -4,14 +4,11 @@ use std::time::Instant;
 use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    Meta, ProgressNotificationParam, ProtocolVersion, ServerCapabilities, ServerInfo,
-};
+use rmcp::model::{Implementation, Meta, ProtocolVersion, ServerCapabilities, ServerInfo};
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use rust_mcp_types::protocol::SUPPORTED_MCP_PROTOCOL_VERSION;
 use rust_mcp_types::types::common::PingRequest;
 use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
-use tokio::time::Duration;
 use tracing::warn;
 
 use super::indexing::handlers::{
@@ -19,6 +16,7 @@ use super::indexing::handlers::{
     IndexSyncCratesRequest, IndexSyncCratesResponse,
 };
 use super::models::{SourceReadRequest, SourceReadResponse};
+use super::progress::ToolCallContext;
 use super::tools::dependency::audit::{DependencyAuditRequest, DependencyAuditResponse};
 use super::tools::dependency::feature_impact::{
     DependencyFeatureImpactRequest, DependencyFeatureImpactResponse,
@@ -100,69 +98,6 @@ impl McpServer {
         }
         result
     }
-
-    async fn instrument_tool_with_progress<T, F>(
-        &self,
-        tool_name: &str,
-        meta: &Meta,
-        client: &Peer<RoleServer>,
-        future: F,
-    ) -> Result<T, String>
-    where
-        F: Future<Output = Result<T, String>>,
-    {
-        let progress_token = meta.get_progress_token();
-
-        if let Some(token) = progress_token.clone() {
-            let _ = client
-                .notify_progress(ProgressNotificationParam {
-                    progress_token: token,
-                    progress: 0.0,
-                    total: None,
-                    message: Some(format!("{tool_name}: started")),
-                })
-                .await;
-        }
-
-        let tool_future = self.instrument_tool(tool_name, future);
-        tokio::pin!(tool_future);
-
-        let result = if let Some(token) = progress_token.clone() {
-            let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
-            heartbeat.tick().await; // consume the immediate first tick
-
-            loop {
-                tokio::select! {
-                    result = &mut tool_future => break result,
-                    _ = heartbeat.tick() => {
-                        let _ = client
-                            .notify_progress(ProgressNotificationParam {
-                                progress_token: token.clone(),
-                                progress: 0.5,
-                                total: None,
-                                message: Some(format!("{tool_name}: still running")),
-                            })
-                            .await;
-                    }
-                }
-            }
-        } else {
-            tool_future.await
-        };
-
-        if let Some(token) = progress_token {
-            let _ = client
-                .notify_progress(ProgressNotificationParam {
-                    progress_token: token,
-                    progress: 1.0,
-                    total: Some(1.0),
-                    message: Some(format!("{tool_name}: completed")),
-                })
-                .await;
-        }
-
-        result
-    }
 }
 
 #[tool_router(router = tool_router)]
@@ -196,11 +131,11 @@ impl McpServer {
     )]
     async fn schema_get(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<ToolSchemasRequest>,
     ) -> Result<Json<ToolSchemasResponse>, String> {
-        self.instrument_tool_with_progress("schema_get", &meta, &client, async move {
+        self.instrument_tool("schema_get", async move {
             crate::contracts::tool_schemas_response(request.tool_name).map(Json)
         })
         .await
@@ -218,13 +153,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexSyncCratesRequest>,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
-        self.instrument_tool_with_progress(
-            "index_sync_crates",
-            &meta,
-            &client,
-            self.handle_index_sync_crates(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("index_sync_crates", self.handle_index_sync_crates(request, tcx))
+            .await
     }
 
     #[tool(
@@ -234,17 +165,12 @@ impl McpServer {
     )]
     async fn index_status(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
-        self.instrument_tool_with_progress(
-            "index_status",
-            &meta,
-            &client,
-            self.handle_index_status(request),
-        )
-        .await
+        self.instrument_tool("index_status", self.handle_index_status(request))
+            .await
     }
 
     #[tool(
@@ -258,13 +184,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexRefreshRequest>,
     ) -> Result<Json<IndexRefreshResponse>, String> {
-        self.instrument_tool_with_progress(
-            "index_refresh",
-            &meta,
-            &client,
-            self.handle_index_refresh(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("index_refresh", self.handle_index_refresh(request, tcx))
+            .await
     }
 
     #[tool(
@@ -279,13 +201,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_search",
-            &meta,
-            &client,
-            self.handle_crate_search(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_search", self.handle_crate_search(request, tcx))
+            .await
     }
 
     #[tool(
@@ -300,13 +218,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_intel",
-            &meta,
-            &client,
-            self.handle_crate_intel(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_intel", self.handle_crate_intel(request, tcx))
+            .await
     }
 
     #[tool(
@@ -322,13 +236,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateFeaturesRequest>,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_features",
-            &meta,
-            &client,
-            self.handle_crate_features(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_features", self.handle_crate_features(request, tcx))
+            .await
     }
 
     #[tool(
@@ -344,13 +254,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiDiffRequest>,
     ) -> Result<Json<CrateApiDiffResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_api_diff",
-            &meta,
-            &client,
-            self.handle_crate_api_diff(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_api_diff", self.handle_crate_api_diff(request, tcx))
+            .await
     }
 
     #[tool(
@@ -366,13 +272,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiRequest>,
     ) -> Result<Json<CrateApiResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_api",
-            &meta,
-            &client,
-            self.handle_crate_api(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_api", self.handle_crate_api(request, tcx))
+            .await
     }
 
     #[tool(
@@ -387,13 +289,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTypeInfoRequest>,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_type_info",
-            &meta,
-            &client,
-            self.handle_crate_type_info(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_type_info", self.handle_crate_type_info(request, tcx))
+            .await
     }
 
     #[tool(
@@ -409,13 +307,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTraitImplsRequest>,
     ) -> Result<Json<CrateTraitImplsResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_trait_impls",
-            &meta,
-            &client,
-            self.handle_crate_trait_impls(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_trait_impls", self.handle_crate_trait_impls(request, tcx))
+            .await
     }
 
     #[tool(
@@ -430,13 +324,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateReExportsRequest>,
     ) -> Result<Json<CrateReExportsResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_re_exports",
-            &meta,
-            &client,
-            self.handle_crate_re_exports(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_re_exports", self.handle_crate_re_exports(request, tcx))
+            .await
     }
 
     #[tool(
@@ -451,13 +341,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateImportPathRequest>,
     ) -> Result<Json<CrateImportPathResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_import_path",
-            &meta,
-            &client,
-            self.handle_crate_import_path(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_import_path", self.handle_crate_import_path(request, tcx))
+            .await
     }
 
     #[tool(
@@ -472,13 +358,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateErrorTypesRequest>,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_error_types",
-            &meta,
-            &client,
-            self.handle_crate_error_types(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_error_types", self.handle_crate_error_types(request, tcx))
+            .await
     }
 
     #[tool(
@@ -494,13 +376,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateDeprecatedRequest>,
     ) -> Result<Json<CrateDeprecatedResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_deprecated",
-            &meta,
-            &client,
-            self.handle_crate_deprecated(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_deprecated", self.handle_crate_deprecated(request, tcx))
+            .await
     }
 
     #[tool(
@@ -515,13 +393,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateDeriveMacrosRequest>,
     ) -> Result<Json<CrateDeriveMacrosResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_derive_macros",
-            &meta,
-            &client,
-            self.handle_crate_derive_macros(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_derive_macros", self.handle_crate_derive_macros(request, tcx))
+            .await
     }
 
     #[tool(
@@ -537,13 +411,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompareRequest>,
     ) -> Result<Json<CrateCompareResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_compare",
-            &meta,
-            &client,
-            self.handle_crate_compare(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_compare", self.handle_crate_compare(request, tcx))
+            .await
     }
 
     #[tool(
@@ -554,17 +424,12 @@ impl McpServer {
     )]
     async fn crate_compatibility(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityRequest>,
     ) -> Result<Json<CrateCompatibilityResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_compatibility",
-            &meta,
-            &client,
-            self.handle_crate_compatibility(request),
-        )
-        .await
+        self.instrument_tool("crate_compatibility", self.handle_crate_compatibility(request))
+            .await
     }
 
     #[tool(
@@ -575,14 +440,12 @@ impl McpServer {
     )]
     async fn crate_compatibility_matrix(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityMatrixRequest>,
     ) -> Result<Json<CrateCompatibilityMatrixResponse>, String> {
-        self.instrument_tool_with_progress(
+        self.instrument_tool(
             "crate_compatibility_matrix",
-            &meta,
-            &client,
             self.handle_crate_compatibility_matrix(request),
         )
         .await
@@ -600,13 +463,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateMigrationPathRequest>,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_migration_path",
-            &meta,
-            &client,
-            self.handle_crate_migration_path(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_migration_path", self.handle_crate_migration_path(request, tcx))
+            .await
     }
 
     #[tool(
@@ -621,13 +480,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateLicenseCheckRequest>,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_license_check",
-            &meta,
-            &client,
-            self.handle_crate_license_check(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_license_check", self.handle_crate_license_check(request, tcx))
+            .await
     }
 
     #[tool(
@@ -643,13 +498,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateAlternativesRequest>,
     ) -> Result<Json<CrateAlternativesResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_alternatives",
-            &meta,
-            &client,
-            self.handle_crate_alternatives(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_alternatives", self.handle_crate_alternatives(request, tcx))
+            .await
     }
 
     #[tool(
@@ -664,13 +515,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateVersionsRequest>,
     ) -> Result<Json<CrateVersionsResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_versions",
-            &meta,
-            &client,
-            self.handle_crate_versions(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_versions", self.handle_crate_versions(request, tcx))
+            .await
     }
 
     #[tool(
@@ -685,13 +532,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_graph",
-            &meta,
-            &client,
-            self.handle_crate_graph(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_graph", self.handle_crate_graph(request, tcx))
+            .await
     }
 
     #[tool(
@@ -706,13 +549,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateHotspotsRequest>,
     ) -> Result<Json<CrateHotspotsResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_hotspots",
-            &meta,
-            &client,
-            self.handle_crate_hotspots(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_hotspots", self.handle_crate_hotspots(request, tcx))
+            .await
     }
 
     #[tool(
@@ -725,17 +564,12 @@ impl McpServer {
     )]
     async fn dependency_audit(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyAuditRequest>,
     ) -> Result<Json<DependencyAuditResponse>, String> {
-        self.instrument_tool_with_progress(
-            "dependency_audit",
-            &meta,
-            &client,
-            self.handle_dependency_audit(request),
-        )
-        .await
+        self.instrument_tool("dependency_audit", self.handle_dependency_audit(request))
+            .await
     }
 
     #[tool(
@@ -748,17 +582,12 @@ impl McpServer {
     )]
     async fn dependency_resolve(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyResolveRequest>,
     ) -> Result<Json<DependencyResolveResponse>, String> {
-        self.instrument_tool_with_progress(
-            "dependency_resolve",
-            &meta,
-            &client,
-            self.handle_dependency_resolve(request),
-        )
-        .await
+        self.instrument_tool("dependency_resolve", self.handle_dependency_resolve(request))
+            .await
     }
 
     #[tool(
@@ -773,11 +602,10 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyFeatureImpactRequest>,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
-        self.instrument_tool_with_progress(
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool(
             "dependency_feature_impact",
-            &meta,
-            &client,
-            self.handle_dependency_feature_impact(request),
+            self.handle_dependency_feature_impact(request, tcx),
         )
         .await
     }
@@ -794,13 +622,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceSearchRequest>,
     ) -> Result<Json<SourceSearchResponse>, String> {
-        self.instrument_tool_with_progress(
-            "source_search",
-            &meta,
-            &client,
-            self.handle_source_search(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("source_search", self.handle_source_search(request, tcx))
+            .await
     }
 
     #[tool(
@@ -815,13 +639,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceReadRequest>,
     ) -> Result<Json<SourceReadResponse>, String> {
-        self.instrument_tool_with_progress(
-            "source_read",
-            &meta,
-            &client,
-            self.handle_source_read(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("source_read", self.handle_source_read(request, tcx))
+            .await
     }
 
     #[tool(
@@ -837,13 +657,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceContextRequest>,
     ) -> Result<Json<SourceContextResponse>, String> {
-        self.instrument_tool_with_progress(
-            "source_context",
-            &meta,
-            &client,
-            self.handle_source_context(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("source_context", self.handle_source_context(request, tcx))
+            .await
     }
 
     #[tool(
@@ -854,17 +670,12 @@ impl McpServer {
     )]
     async fn symbol_search(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<SymbolSearchRequest>,
     ) -> Result<Json<SymbolSearchResponse>, String> {
-        self.instrument_tool_with_progress(
-            "symbol_search",
-            &meta,
-            &client,
-            self.handle_symbol_search(request),
-        )
-        .await
+        self.instrument_tool("symbol_search", self.handle_symbol_search(request))
+            .await
     }
 
     #[tool(
@@ -875,17 +686,12 @@ impl McpServer {
     )]
     async fn docs_search(
         &self,
-        meta: Meta,
-        client: Peer<RoleServer>,
+        _meta: Meta,
+        _client: Peer<RoleServer>,
         Parameters(request): Parameters<DocsSearchRequest>,
     ) -> Result<Json<DocsSearchResponse>, String> {
-        self.instrument_tool_with_progress(
-            "docs_search",
-            &meta,
-            &client,
-            self.handle_docs_search(request),
-        )
-        .await
+        self.instrument_tool("docs_search", self.handle_docs_search(request))
+            .await
     }
 
     #[tool(
@@ -901,13 +707,9 @@ impl McpServer {
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateUsagePatternsRequest>,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {
-        self.instrument_tool_with_progress(
-            "crate_usage_patterns",
-            &meta,
-            &client,
-            self.handle_crate_usage_patterns(request),
-        )
-        .await
+        let tcx = ToolCallContext::new(&meta, &client);
+        self.instrument_tool("crate_usage_patterns", self.handle_crate_usage_patterns(request, tcx))
+            .await
     }
 }
 
@@ -964,7 +766,11 @@ impl ServerHandler for McpServer {
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
-            ..Default::default()
+            server_info: Implementation {
+                name: "rust-mcp".to_owned(),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                ..Default::default()
+            },
         }
     }
 }

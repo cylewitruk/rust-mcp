@@ -682,15 +682,6 @@ impl McpServer {
             .config
             .cargo_registry_dir
             .join("src");
-        if !src_root.exists() {
-            return Ok(LocalCacheRefreshOutcome {
-                errors: vec![format!(
-                    "cargo registry source directory not found: {}",
-                    src_root.display()
-                )],
-                ..Default::default()
-            });
-        }
 
         let version_rows = fetch_local_cache_version_keys(
             &self.state.db,
@@ -706,28 +697,64 @@ impl McpServer {
             .collect::<HashMap<_, _>>();
 
         let mut candidates = Vec::new();
-        let registries = std::fs::read_dir(&src_root).map_err(|e| {
-            format!("failed to read cargo registry source dir {}: {e}", src_root.display())
-        })?;
-        for registry_dir in registries {
-            let registry_dir = registry_dir.map_err(|e| {
-                format!("failed to read registry directory entry under {}: {e}", src_root.display())
-            })?;
-            let registry_path = registry_dir.path();
-            if !registry_path.is_dir() {
-                continue;
-            }
 
-            let version_dirs = std::fs::read_dir(&registry_path)
-                .map_err(|e| format!("failed to read {}: {e}", registry_path.display()))?;
-            for version_dir in version_dirs {
-                let version_dir = version_dir.map_err(|e| {
-                    format!(
-                        "failed to read package directory entry under {}: {e}",
-                        registry_path.display()
-                    )
-                })?;
-                let path = version_dir.path();
+        // Scan cargo registry: {registry_dir}/src/{hash}/{name}-{version}/
+        if let Ok(registries) = std::fs::read_dir(&src_root) {
+            for registry_dir in registries {
+                let Ok(registry_dir) = registry_dir else {
+                    continue;
+                };
+                let registry_path = registry_dir.path();
+                if !registry_path.is_dir() {
+                    continue;
+                }
+
+                let Ok(version_dirs) = std::fs::read_dir(&registry_path) else {
+                    continue;
+                };
+                for version_dir in version_dirs {
+                    let Ok(version_dir) = version_dir else {
+                        continue;
+                    };
+                    let path = version_dir.path();
+                    if !path.is_dir() {
+                        continue;
+                    }
+
+                    let Some(dir_name) = path
+                        .file_name()
+                        .and_then(OsStr::to_str)
+                        .map(ToString::to_string)
+                    else {
+                        continue;
+                    };
+
+                    if let Some(mapped) = version_map.get(&dir_name) {
+                        candidates.push((
+                            dir_name,
+                            mapped.version.clone(),
+                            path,
+                            mapped.crate_version_id,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Also scan the download cache: {cache_dir}/{name}-{version}/
+        // This is where on-demand downloads from crates.io are extracted.
+        let cache_dir = &self
+            .state
+            .config
+            .crate_source_cache_dir;
+        if cache_dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(cache_dir)
+        {
+            for entry in entries {
+                let Ok(entry) = entry else {
+                    continue;
+                };
+                let path = entry.path();
                 if !path.is_dir() {
                     continue;
                 }
@@ -740,11 +767,20 @@ impl McpServer {
                     continue;
                 };
 
-                let Some(mapped) = version_map.get(&dir_name) else {
-                    continue;
-                };
-
-                candidates.push((dir_name, mapped.version.clone(), path, mapped.crate_version_id));
+                if let Some(mapped) = version_map.get(&dir_name) {
+                    // Avoid duplicates if already found in the registry.
+                    if !candidates
+                        .iter()
+                        .any(|(name, ..)| name == &dir_name)
+                    {
+                        candidates.push((
+                            dir_name,
+                            mapped.version.clone(),
+                            path,
+                            mapped.crate_version_id,
+                        ));
+                    }
+                }
             }
         }
 

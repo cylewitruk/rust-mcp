@@ -7,6 +7,7 @@ pub use rust_mcp_types::types::krate::{
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, graph_depth, normalize_optional, normalize_required,
@@ -123,6 +124,7 @@ impl McpServer {
     pub async fn handle_crate_graph(
         &self,
         request: CrateGraphRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateGraphResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -132,7 +134,7 @@ impl McpServer {
         let depth = graph_depth(request.depth);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
 
         let selected_version = if let Some(version) = requested_version {
@@ -375,7 +377,7 @@ impl McpServer {
             }
         };
 
-        let next_best_calls = if nodes.is_empty() {
+        let suggested_next_tools = if nodes.is_empty() {
             vec!["crate_intel".to_string(), "index_refresh".to_string()]
         } else {
             vec![
@@ -414,7 +416,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index".to_string(),
         }))
     }

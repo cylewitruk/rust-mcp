@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, error_types_limit,
@@ -125,6 +126,7 @@ impl McpServer {
     pub async fn handle_crate_error_types(
         &self,
         request: CrateErrorTypesRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -150,13 +152,13 @@ impl McpServer {
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
-        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id, &tcx)
             .await?;
 
         let type_rows = tools::list_error_type_rows(&self.state.db, resolution.selected_version.id)
@@ -385,7 +387,7 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let next_best_calls = if error_types.is_empty() {
+        let suggested_next_tools = if error_types.is_empty() {
             vec!["crate_api".to_string(), "crate_type_info".to_string()]
         } else {
             vec![
@@ -425,7 +427,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index(crate_types, crate_impls, symbols, source_files)"
                 .to_string(),
         }))

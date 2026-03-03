@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
@@ -169,6 +170,7 @@ impl McpServer {
     pub async fn handle_crate_re_exports(
         &self,
         request: CrateReExportsRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateReExportsResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -194,13 +196,13 @@ impl McpServer {
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
-        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id, &tcx)
             .await?;
 
         let rustdoc_re_exports = tools::list_rustdoc_re_exports(
@@ -385,7 +387,7 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let next_best_calls = if re_exports.is_empty() {
+        let suggested_next_tools = if re_exports.is_empty() {
             vec!["crate_api".to_string(), "crate_import_path".to_string()]
         } else {
             vec!["crate_api".to_string(), "symbol_search".to_string(), "source_read".to_string()]
@@ -421,7 +423,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance,
         }))
     }

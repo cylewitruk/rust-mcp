@@ -375,6 +375,7 @@ pub mod source {
     #[serde(rename_all = "lowercase")]
     pub enum SourceSearchMode {
         /// Case-insensitive substring matching.
+        #[serde(alias = "contains")]
         Text,
         /// Case-insensitive regex matching.
         Regex,
@@ -433,7 +434,7 @@ pub mod source {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
         /// Matched source hits.
@@ -494,7 +495,7 @@ pub mod source {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -552,7 +553,7 @@ pub mod source {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -649,7 +650,7 @@ pub mod symbol {
         #[serde(default)]
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
         /// Matched symbol hits.
@@ -739,7 +740,7 @@ pub mod docs {
         #[serde(default)]
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
         /// Matched docs page hits.
@@ -839,7 +840,7 @@ pub mod dependency {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -927,7 +928,7 @@ pub mod dependency {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -1025,7 +1026,7 @@ pub mod dependency {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -1118,7 +1119,7 @@ pub mod krate {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
         /// Ranked crate hits.
@@ -1229,7 +1230,7 @@ pub mod krate {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -1347,7 +1348,7 @@ pub mod krate {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Provenance string describing the data origin.
         pub provenance: String,
     }
@@ -1448,7 +1449,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1490,7 +1491,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1536,7 +1537,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1583,7 +1584,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1665,7 +1666,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1705,7 +1706,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1751,7 +1752,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1804,7 +1805,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1860,7 +1861,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1897,7 +1898,7 @@ pub mod krate {
         pub migration_actions: Vec<CrateMigrationAction>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1932,7 +1933,7 @@ pub mod krate {
         pub refresh_job_id: Option<String>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -1986,7 +1987,7 @@ pub mod krate {
         pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2000,7 +2001,7 @@ pub mod krate {
         pub incompatible_pairs: Vec<CrateCompatibilityMatrixEntry>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2033,7 +2034,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2102,7 +2103,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2159,7 +2160,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2222,7 +2223,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2275,7 +2276,7 @@ pub mod krate {
         pub freshness: Vec<ResponseFreshnessSource>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         pub provenance: String,
     }
 
@@ -2382,7 +2383,7 @@ pub mod krate {
         /// Structured confidence assessment.
         pub confidence_assessment: ConfidenceAssessment,
         /// Suggested follow-up calls.
-        pub next_best_calls: Vec<String>,
+        pub suggested_next_tools: Vec<String>,
         /// Data origin description.
         pub provenance: String,
     }

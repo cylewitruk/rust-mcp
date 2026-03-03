@@ -7,6 +7,7 @@ pub use rust_mcp_types::types::dependency::{
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     feature_impact_heavy_threshold, normalize_optional, normalize_required, value_to_string_vec,
@@ -81,6 +82,7 @@ impl McpServer {
     pub async fn handle_dependency_feature_impact(
         &self,
         request: DependencyFeatureImpactRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -100,10 +102,10 @@ impl McpServer {
         }
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
         let selected_version = resolution.selected_version;
         let refresh_enqueued = resolution.refresh_enqueued;
@@ -231,7 +233,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_features".to_string(),
                 "crate_graph".to_string(),
                 "dependency_resolve".to_string(),

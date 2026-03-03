@@ -5,6 +5,7 @@ pub use rust_mcp_types::types::source::{
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     normalize_optional, normalize_required, read_source_file_from_disk_or_cache,
@@ -92,6 +93,7 @@ impl McpServer {
     pub async fn handle_source_context(
         &self,
         request: SourceContextRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<SourceContextResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let path = normalize_required(request.path, "path")?;
@@ -120,6 +122,7 @@ impl McpServer {
                 crate_row.id,
                 &crate_row.name,
                 &latest_version.version,
+                &tcx,
             )
             .await?;
 
@@ -157,7 +160,7 @@ impl McpServer {
                 selected
             } else {
                 let queued_job_id = self
-                    .backfill_missing_requested_version(&crate_row.name)
+                    .backfill_missing_requested_version(&crate_row.name, &tcx)
                     .await?;
                 if let Some(job_id) = queued_job_id {
                     refresh_enqueued = true;
@@ -184,10 +187,13 @@ impl McpServer {
             latest_version.clone()
         };
 
-        self.ensure_source_indexed(&crate_name, selected_version.id)
-            .await?;
-        self.ensure_source_on_disk(&crate_name, &selected_version.version, selected_version.id)
-            .await?;
+        self.ensure_source_indexed(
+            &crate_name,
+            &selected_version.version,
+            selected_version.id,
+            &tcx,
+        )
+        .await?;
 
         let row = tools::fetch_source_read_for_crate_version_path(
             &self.state.db,
@@ -324,7 +330,7 @@ impl McpServer {
             }
         };
 
-        let next_best_calls = if containing_impl.is_none() && surrounding_types.is_empty() {
+        let suggested_next_tools = if containing_impl.is_none() && surrounding_types.is_empty() {
             vec!["source_search".to_string(), "crate_api".to_string()]
         } else {
             vec![
@@ -359,7 +365,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "source_files + symbols + crate_impls + crate_types".to_string(),
         }))
     }

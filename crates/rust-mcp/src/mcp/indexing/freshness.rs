@@ -7,6 +7,7 @@ use crate::db::indexing::{
 };
 use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_BACKFILL, PRIORITY_FRESHNESS};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 
 /// Outcome of an interaction-triggered freshness check.
@@ -51,6 +52,7 @@ impl McpServer {
         crate_id: i64,
         crate_name: &str,
         local_latest_version: &str,
+        tcx: &ToolCallContext,
     ) -> Result<InteractionRefreshOutcome, String> {
         let due = is_crate_refresh_due(&self.state.db, crate_id)
             .await
@@ -64,6 +66,9 @@ impl McpServer {
                 ..Default::default()
             });
         }
+
+        tcx.notify_progress(&format!("Checking for updates to '{crate_name}'"))
+            .await;
 
         info!(%crate_name, local_latest_version, "checking crate freshness against crates.io");
 
@@ -159,7 +164,11 @@ impl McpServer {
     pub async fn backfill_missing_requested_version(
         &self,
         crate_name: &str,
+        tcx: &ToolCallContext,
     ) -> Result<Option<String>, String> {
+        tcx.notify_progress(&format!("Backfilling version data for '{crate_name}'"))
+            .await;
+
         info!(%crate_name, "backfilling missing crate version on demand");
         let job_id = self
             .state

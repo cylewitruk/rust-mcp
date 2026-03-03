@@ -8,6 +8,7 @@ use crate::db::tools;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateSearchRow, ResponseFreshnessSource,
 };
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, decode_cursor, encode_cursor, match_reasons, normalize_optional,
@@ -76,6 +77,7 @@ impl McpServer {
     pub async fn handle_crate_search(
         &self,
         request: CrateSearchRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateSearchResponse>, String> {
         let query = normalize_optional(request.query);
         let category = normalize_optional(request.category);
@@ -173,7 +175,7 @@ impl McpServer {
             };
 
             let freshness = self
-                .ensure_freshness_for_interaction(row.crate_id, &row.name, latest_version)
+                .ensure_freshness_for_interaction(row.crate_id, &row.name, latest_version, &tcx)
                 .await?;
 
             if freshness.freshness_check_performed {
@@ -254,7 +256,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: if hits.is_empty() {
+            suggested_next_tools: if hits.is_empty() {
                 vec!["index_sync_crates".to_string()]
             } else {
                 vec![

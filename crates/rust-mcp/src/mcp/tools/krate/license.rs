@@ -5,6 +5,7 @@ pub use rust_mcp_types::types::krate::{CrateLicenseCheckRequest, CrateLicenseChe
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, LicensePolicyResult};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{build_crate_freshness_sources, normalize_optional, normalize_required};
 
@@ -116,6 +117,7 @@ impl McpServer {
     pub async fn handle_crate_license_check(
         &self,
         request: CrateLicenseCheckRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -123,7 +125,7 @@ impl McpServer {
         let deny_licenses = normalize_policy_list(request.deny_licenses);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
 
         let latest_version_row =
@@ -160,7 +162,7 @@ impl McpServer {
                 selected
             } else {
                 let queued_job_id = self
-                    .backfill_missing_requested_version(&ctx.crate_row.name)
+                    .backfill_missing_requested_version(&ctx.crate_row.name, &tcx)
                     .await?;
                 if let Some(job_id) = queued_job_id {
                     refresh_enqueued = true;
@@ -253,7 +255,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_intel".to_string(),
                 "crate_versions".to_string(),
                 "index_refresh".to_string(),

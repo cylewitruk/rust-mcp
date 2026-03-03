@@ -6,6 +6,7 @@ pub use rust_mcp_types::types::krate::{
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, dependents_limit, normalize_optional, normalize_required,
@@ -17,6 +18,7 @@ impl McpServer {
     pub async fn handle_crate_intel(
         &self,
         request: CrateIntelRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateIntelResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -25,10 +27,10 @@ impl McpServer {
         let readme_max_chars = readme_limit(request.readme_max_chars);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         let total_downloads = tools::fetch_crate_total_downloads(&self.state.db, ctx.crate_row.id)
@@ -153,7 +155,7 @@ impl McpServer {
                 .to_string(),
         };
 
-        let next_best_calls = if dependencies.is_empty() && dependents.is_empty() {
+        let suggested_next_tools = if dependencies.is_empty() && dependents.is_empty() {
             vec!["crate_features".to_string(), "crate_api".to_string(), "index_refresh".to_string()]
         } else {
             vec!["crate_features".to_string(), "crate_api".to_string(), "crate_graph".to_string()]
@@ -207,7 +209,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index".to_string(),
         }))
     }

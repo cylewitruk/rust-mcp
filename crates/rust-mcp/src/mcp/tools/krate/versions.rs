@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, apply_pagination_limit, build_crate_freshness_sources, decode_cursor,
@@ -50,6 +51,7 @@ impl McpServer {
     pub async fn handle_crate_versions(
         &self,
         request: CrateVersionsRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateVersionsResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let cursor = normalize_optional(request.cursor);
@@ -71,7 +73,7 @@ impl McpServer {
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
 
         let rows = tools::list_crate_version_timeline(
@@ -179,7 +181,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_intel".to_string(),
                 "crate_graph".to_string(),
                 "index_refresh".to_string(),

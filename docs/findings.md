@@ -290,13 +290,13 @@ All user-provided inputs use `QueryBuilder::push_bind()` consistently. No string
 
 **Recommendation:** Expand tool descriptions to include trigger conditions. Example: `"Search locally indexed crates by name, category, or keyword. Call this first when the user mentions a dependency by name or when exploring alternatives to a known crate."` The existing `instructions` field in `ServerInfo` provides high-level guidance; per-tool hints would complement it.
 
-### F31. `next_best_calls` Could Be Context-Sensitive (LOW)
+### F31. `suggested_next_tools` Could Be Context-Sensitive (LOW)
 
-**Current state:** Each tool returns static `next_best_calls` arrays (e.g., `crate.search` always suggests `["crate.intel", "crate.features"]`).
+**Current state:** Each tool returns static `suggested_next_tools` arrays (e.g., `crate.search` always suggests `["crate.intel", "crate.features"]`).
 
 **Impact:** The suggestions don't adapt to what the agent has already learned. After calling `crate.intel`, suggesting it again as a next step is unhelpful.
 
-**Recommendation:** Consider making `next_best_calls` context-sensitive based on the response content. For example, if a crate has advisories, include `"dependency.audit"`. If it has many features, include `"crate.features"`. This requires modest logic but significantly improves agent workflow efficiency.
+**Recommendation:** Consider making `suggested_next_tools` context-sensitive based on the response content. For example, if a crate has advisories, include `"dependency.audit"`. If it has many features, include `"crate.features"`. This requires modest logic but significantly improves agent workflow efficiency.
 
 ---
 
@@ -306,7 +306,7 @@ All user-provided inputs use `QueryBuilder::push_bind()` consistently. No string
 |----------|-------------|-------|
 | **P0** | F1, F18 | Missing item-level docs tool; 12 untested tools |
 | **P1** | F2, F9, F10, F11, F14, F25, F26, F30 | Workspace tools, cache invalidation, telemetry retention, N+1 queries, freshness consistency, graceful shutdown, worker concurrency, tool descriptions |
-| **P2** | F3, F4, F5, F6, F7, F15, F19, F20, F27, F28, F29, F31 | Changelogs, path-based context, MSRV, protocol version, cursor dedup, cache testing, benchmarks, rate limiting, types split, intel filtering, dynamic next_best_calls |
+| **P2** | F3, F4, F5, F6, F7, F15, F19, F20, F27, F28, F29, F31 | Changelogs, path-based context, MSRV, protocol version, cursor dedup, cache testing, benchmarks, rate limiting, types split, intel filtering, dynamic suggested_next_tools |
 | **P3** | F8, F12, F13, F16, F17, F21, F23, F24 | MCP resources/prompts, minor indexes, rate limiter internals, hotspot memory, context threshold, unicode tests, DNS resolution, path docs |
 
 ---
@@ -317,7 +317,7 @@ To be clear about what **doesn't need fixing:**
 
 - **SQL safety** -- universal parameterized queries, zero injection vectors found
 - **MCP protocol conformance** -- session lifecycle, error envelopes, progress notifications, version negotiation all well-tested
-- **Response envelope consistency** -- `confidence`, `confidence_assessment`, `next_best_calls`, `provenance` present on 27/27 applicable tools
+- **Response envelope consistency** -- `confidence`, `confidence_assessment`, `suggested_next_tools`, `provenance` present on 27/27 applicable tools
 - **Indexing pipeline** -- adaptive TTL freshness, SHA256-based dedup, retry with exponential backoff + jitter
 - **Docker deployment model** -- privilege separation, optional outbound firewall, health/readiness probes
 - **Test infrastructure** -- testcontainers, mock registries, deterministic fixtures, strong protocol assertion coverage

@@ -15,6 +15,7 @@ use crate::mcp::indexing::handlers::{IndexSyncCratesRequest, SyncCrateOutcome};
 use crate::mcp::indexing::local_cache::LocalCacheRefreshOutcome;
 use crate::mcp::indexing::rustdoc_json::RustdocJsonRefreshOutcome;
 use crate::mcp::indexing::security::SecuritySyncOutcome;
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::tools::docs::DocsRefreshOutcome;
 use crate::mcp::utils::{sync_page, sync_per_page};
@@ -155,14 +156,17 @@ pub async fn run_refresh_worker(state: AppState) {
                 .await
                 .map(RefreshJobOutcome::CrateSync),
             "all" => server
-                .handle_index_sync_crates(IndexSyncCratesRequest {
-                    query: payload.query,
-                    page: payload.page,
-                    per_page: payload.per_page,
-                    include_dependencies: payload
-                        .include_dependencies
-                        .or(Some(job.include_dependencies)),
-                })
+                .handle_index_sync_crates(
+                    IndexSyncCratesRequest {
+                        query: payload.query,
+                        page: payload.page,
+                        per_page: payload.per_page,
+                        include_dependencies: payload
+                            .include_dependencies
+                            .or(Some(job.include_dependencies)),
+                    },
+                    ToolCallContext::no_op(),
+                )
                 .await
                 .map(|_| RefreshJobOutcome::AllSync),
             "security" => {

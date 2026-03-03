@@ -84,7 +84,7 @@ crates/rust-mcp/
   - query/tool logic in `mcp/tools/*`
 - Preserve response envelope consistency:
   - confidence fields (`confidence`, `confidence_assessment`)
-  - `next_best_calls`
+  - `suggested_next_tools`
   - provenance/freshness fields where applicable
 - Avoid `pub(crate)`, `pub(mod)`, `pub(super)`, etc. visibility modifiers. Prefer appropriately scoped items together with appropriately scoped exports/imports.
 

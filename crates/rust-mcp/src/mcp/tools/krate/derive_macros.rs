@@ -11,6 +11,7 @@ use syn::{Attribute, Item};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, dedupe_strings, normalize_optional, normalize_required,
@@ -174,19 +175,27 @@ impl McpServer {
     pub async fn handle_crate_derive_macros(
         &self,
         request: CrateDeriveMacrosRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateDeriveMacrosResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
-        self.ensure_source_indexed(&crate_name, resolution.selected_version.id)
-            .await?;
+        self.ensure_source_indexed(
+            &crate_name,
+            &resolution
+                .selected_version
+                .version,
+            resolution.selected_version.id,
+            &tcx,
+        )
+        .await?;
 
         let source_rows = tools::list_rust_source_file_paths_for_version(
             &self.state.db,
@@ -334,7 +343,7 @@ impl McpServer {
                 level: confidence_level,
                 reason: confidence_reason,
             },
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "source_search".to_string(),
                 "source_read".to_string(),
                 "crate_re_exports".to_string(),

@@ -456,7 +456,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_intel".to_string(),
                 "crate_versions".to_string(),
                 "index_refresh".to_string(),

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, hotspots_limit,
@@ -177,6 +178,7 @@ impl McpServer {
     pub async fn handle_crate_hotspots(
         &self,
         request: CrateHotspotsRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateHotspotsResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -216,10 +218,10 @@ impl McpServer {
         }
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         let patterns = hotspot_patterns(include_unsafe, include_concurrency);
@@ -323,7 +325,7 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let next_best_calls = if hotspots.is_empty() {
+        let suggested_next_tools = if hotspots.is_empty() {
             vec!["source_search".to_string(), "crate_api".to_string()]
         } else {
             vec!["source_read".to_string(), "symbol_search".to_string(), "crate_graph".to_string()]
@@ -364,7 +366,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index".to_string(),
         }))
     }

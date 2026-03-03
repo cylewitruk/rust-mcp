@@ -16,6 +16,7 @@ use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateImplMethod, CrateTraitAssociatedType,
     CrateTraitDefinition,
 };
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{build_crate_freshness_sources, normalize_optional, normalize_required};
 
@@ -223,6 +224,7 @@ impl McpServer {
     pub async fn handle_crate_type_info(
         &self,
         request: CrateTypeInfoRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let type_name = normalize_required(request.type_name, "type_name")?;
@@ -235,13 +237,13 @@ impl McpServer {
             .unwrap_or(true);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
-        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+        self.ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id, &tcx)
             .await?;
 
         let type_row = tools::fetch_crate_type_info_row(
@@ -417,7 +419,7 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let next_best_calls = if type_definition.is_none() {
+        let suggested_next_tools = if type_definition.is_none() {
             vec!["crate_api".to_string(), "symbol_search".to_string()]
         } else {
             vec![
@@ -456,7 +458,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index(crate_types, crate_impls, source_files)".to_string(),
         }))
     }

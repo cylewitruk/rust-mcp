@@ -8,6 +8,7 @@ use tracing::warn;
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, normalize_optional, normalize_required, value_to_string_vec,
@@ -82,15 +83,16 @@ impl McpServer {
     pub async fn handle_crate_features(
         &self,
         request: CrateFeaturesRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         let mut rows =
@@ -186,7 +188,7 @@ impl McpServer {
             }
         };
 
-        let next_best_calls = if features.is_empty() {
+        let suggested_next_tools = if features.is_empty() {
             vec!["index_refresh".to_string(), "crate_intel".to_string()]
         } else {
             vec![
@@ -220,7 +222,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index".to_string(),
         }))
     }

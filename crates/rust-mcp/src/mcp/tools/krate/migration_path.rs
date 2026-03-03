@@ -4,6 +4,7 @@ pub use rust_mcp_types::types::krate::{
 };
 
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::tools::krate::api_diff::{
     CrateApiDiffChange, CrateApiDiffChangeType, CrateApiDiffRequest,
@@ -252,6 +253,7 @@ impl McpServer {
     pub async fn handle_crate_migration_path(
         &self,
         request: CrateMigrationPathRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let from_version = normalize_required(request.from_version, "from_version")?;
@@ -259,12 +261,15 @@ impl McpServer {
         let limit = api_diff_limit(request.limit);
 
         let diff_response = self
-            .handle_crate_api_diff(CrateApiDiffRequest {
-                crate_name: crate_name.clone(),
-                from_version: from_version.clone(),
-                to_version: to_version.clone(),
-                limit: Some(limit),
-            })
+            .handle_crate_api_diff(
+                CrateApiDiffRequest {
+                    crate_name: crate_name.clone(),
+                    from_version: from_version.clone(),
+                    to_version: to_version.clone(),
+                    limit: Some(limit),
+                },
+                tcx,
+            )
             .await?
             .0;
 
@@ -322,7 +327,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_api_diff".to_string(),
                 "source_search".to_string(),
                 "source_read".to_string(),

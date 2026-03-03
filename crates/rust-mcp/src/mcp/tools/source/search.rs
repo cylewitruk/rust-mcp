@@ -10,6 +10,7 @@ use crate::db::tools;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, SourceReadRequest, SourceReadResponse,
 };
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -59,6 +60,7 @@ impl McpServer {
     pub async fn handle_source_search(
         &self,
         request: SourceSearchRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<SourceSearchResponse>, String> {
         let query = normalize_required(request.query, "query")?;
         let crate_name = normalize_optional(request.crate_name);
@@ -128,7 +130,7 @@ impl McpServer {
                     .flatten(),
             };
             if let Some(ver) = ver {
-                self.ensure_source_indexed(cn, ver.id)
+                self.ensure_source_indexed(cn, &ver.version, ver.id, &tcx)
                     .await?;
             }
         }
@@ -233,7 +235,7 @@ impl McpServer {
             }
         };
 
-        let next_best_calls_for_search = if hits.is_empty() {
+        let suggested_next_tools_for_search = if hits.is_empty() {
             vec!["symbol_search".to_string(), "docs_search".to_string()]
         } else {
             vec!["source_read".to_string(), "source_context".to_string()]
@@ -257,7 +259,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: next_best_calls_for_search,
+            suggested_next_tools: suggested_next_tools_for_search,
             provenance: "local_postgres_index".to_string(),
             hits,
         };
@@ -278,6 +280,7 @@ impl McpServer {
     pub async fn handle_source_read(
         &self,
         request: SourceReadRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<SourceReadResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let path = normalize_required(request.path, "path")?;
@@ -307,9 +310,7 @@ impl McpServer {
                         )
                     })?;
 
-            self.ensure_source_indexed(&crate_name, crate_version.id)
-                .await?;
-            self.ensure_source_on_disk(&crate_name, &version, crate_version.id)
+            self.ensure_source_indexed(&crate_name, &version, crate_version.id, &tcx)
                 .await?;
 
             tools::fetch_source_read_for_crate_version_path(
@@ -333,9 +334,7 @@ impl McpServer {
             if let Ok(Some(cr)) = tools::fetch_crate_core_by_name(&self.state.db, &crate_name).await
                 && let Ok(Some(lv)) = tools::fetch_latest_crate_version(&self.state.db, cr.id).await
             {
-                self.ensure_source_indexed(&crate_name, lv.id)
-                    .await?;
-                self.ensure_source_on_disk(&crate_name, &lv.version, lv.id)
+                self.ensure_source_indexed(&crate_name, &lv.version, lv.id, &tcx)
                     .await?;
             }
 
@@ -410,7 +409,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "source_context".to_string(),
                 "crate_type_info".to_string(),
                 "source_search".to_string(),

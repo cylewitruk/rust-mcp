@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
@@ -40,6 +41,7 @@ impl McpServer {
     pub async fn handle_crate_usage_patterns(
         &self,
         request: CrateUsagePatternsRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let symbol_name = normalize_required(request.symbol_name, "symbol_name")?;
@@ -63,10 +65,10 @@ impl McpServer {
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         let dependents =
@@ -174,7 +176,7 @@ impl McpServer {
             }
         };
 
-        let next_best_calls = if patterns.is_empty() {
+        let suggested_next_tools = if patterns.is_empty() {
             vec![
                 "crate_type_info".to_string(),
                 "symbol_search".to_string(),
@@ -222,7 +224,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index(dependency_edges) + cargo_registry(ripgrep)"
                 .to_string(),
         }))

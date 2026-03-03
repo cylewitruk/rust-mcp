@@ -4,6 +4,8 @@ pub mod indexing;
 pub mod metrics;
 /// Shared response model types.
 pub mod models;
+/// Per-tool-call progress reporting and request context.
+pub mod progress;
 /// Common crate/version resolution queries.
 pub mod queries;
 /// Short-lived query result memoization.

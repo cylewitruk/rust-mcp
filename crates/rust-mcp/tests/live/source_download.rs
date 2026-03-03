@@ -4,10 +4,18 @@
 //! tarball format, and extraction pipeline work end-to-end.
 
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use rust_mcp::http;
+use rust_mcp::mcp::run_refresh_worker_for_tests;
 use rust_mcp::mcp::utils::{read_source_file_from_disk_or_cache, resolve_source_dir};
+use rust_mcp::state::AppState;
+use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
+use rust_mcp_testing::postgres::PostgresTestContainer;
+use serde_json::{Value, json};
+
+use super::common;
 
 fn make_temp_dir(label: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -154,6 +162,136 @@ async fn live_read_source_file_from_downloaded_cache() -> Result<()> {
             .contains("itoa"),
         "Cargo.toml should reference itoa"
     );
+
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Full MCP tool-call tests (download-then-index)
+// ──────────────────────────────────────────────────────────────────────────────
+
+struct LiveSourceContext {
+    mcp: LocalMcpHttpHarness,
+    #[allow(dead_code)]
+    state: AppState,
+    _postgres: PostgresTestContainer,
+    _registry_cleanup: CleanupDir,
+    _cache_cleanup: CleanupDir,
+    _worker: tokio::task::JoinHandle<()>,
+}
+
+/// Creates a live MCP context with an **empty** cargo registry and source
+/// cache, forcing `source_read` to download from crates.io on demand.
+async fn live_source_context() -> Result<LiveSourceContext> {
+    let postgres = PostgresTestContainer::start().await?;
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let registry_dir = std::env::temp_dir().join(format!("rust-mcp-live-registry-{nanos}"));
+    std::fs::create_dir_all(&registry_dir)?;
+    let cache_dir = std::env::temp_dir().join(format!("rust-mcp-live-cache-{nanos}"));
+    std::fs::create_dir_all(&cache_dir)?;
+
+    let mut config = common::test_config(
+        postgres
+            .connection_string()
+            .to_string(),
+        registry_dir.clone(),
+    );
+    config.crate_source_cache_dir = cache_dir.clone();
+
+    let state = AppState::connect(config.clone()).await?;
+    state.run_migrations().await?;
+
+    // Spawn the refresh worker so on-demand indexing jobs are picked up.
+    let worker = tokio::spawn(run_refresh_worker_for_tests(state.clone()));
+
+    let router = http::router(state.clone(), config, common::test_prometheus_handle());
+    let mcp = LocalMcpHttpHarness::spawn(router).await?;
+    mcp.wait_until_ready(Duration::from_secs(30))
+        .await?;
+    let _ = mcp
+        .initialize("live-source-download")
+        .await?;
+
+    Ok(LiveSourceContext {
+        mcp,
+        state,
+        _postgres: postgres,
+        _registry_cleanup: CleanupDir(registry_dir),
+        _cache_cleanup: CleanupDir(cache_dir),
+        _worker: worker,
+    })
+}
+
+/// Syncs `itoa` (a tiny crate) then calls `source_read` for `src/lib.rs`.
+/// The cargo registry is empty, so `ensure_source_indexed` must download from
+/// crates.io before indexing. This exercises the download-then-index ordering
+/// fix.
+#[tokio::test]
+async fn live_source_read_downloads_and_indexes_on_demand() -> Result<()> {
+    let ctx = live_source_context().await?;
+
+    // First, sync itoa so the crate + version rows exist in the DB.
+    let sync_response = ctx
+        .mcp
+        .call_tool(
+            "index_sync_crates",
+            json!({
+                "query": "itoa",
+                "page": 1,
+                "per_page": 1
+            }),
+        )
+        .await
+        .context("index_sync_crates for itoa failed")?;
+    let sync_payload = common::structured_content(&sync_response);
+    assert!(
+        sync_payload
+            .get("synced_crates")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            >= 1,
+        "itoa should be synced"
+    );
+
+    // Now call source_read. The source is NOT in the local registry, so the
+    // server must download it from crates.io, index the source files, and
+    // then serve the content.
+    let read_response = ctx
+        .mcp
+        .call_tool(
+            "source_read",
+            json!({
+                "crate_name": "itoa",
+                "path": "src/lib.rs",
+                "start_line": 1,
+                "end_line": 10
+            }),
+        )
+        .await
+        .context("source_read for itoa src/lib.rs failed")?;
+    let read_payload = common::structured_content(&read_response);
+
+    assert_eq!(
+        read_payload
+            .get("crate_name")
+            .and_then(Value::as_str),
+        Some("itoa"),
+    );
+    assert_eq!(
+        read_payload
+            .get("path")
+            .and_then(Value::as_str),
+        Some("src/lib.rs"),
+    );
+    let content = read_payload
+        .get("content")
+        .and_then(Value::as_str)
+        .expect("source_read should return content");
+    assert!(!content.is_empty(), "content should not be empty after on-demand download");
 
     Ok(())
 }

@@ -6,6 +6,7 @@ use tracing::warn;
 
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, normalize_optional, normalize_required, sync_page,
@@ -16,6 +17,7 @@ impl McpServer {
     pub async fn handle_crate_deprecated(
         &self,
         request: CrateDeprecatedRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateDeprecatedResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -26,16 +28,16 @@ impl McpServer {
             .clamp(1, 200);
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         // Deprecation data is richer when rustdoc JSON is available; trigger
         // on-demand enrichment but do not fail if it is unavailable.
         if let Err(error) = self
-            .ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id)
+            .ensure_rustdoc_indexed(&crate_name, resolution.selected_version.id, &tcx)
             .await
         {
             warn!(
@@ -93,7 +95,7 @@ impl McpServer {
             .freshness_check_result
             .clone();
 
-        let next_best_calls = if items.is_empty() {
+        let suggested_next_tools = if items.is_empty() {
             vec!["crate_api".to_string(), "crate_intel".to_string()]
         } else {
             vec![
@@ -128,7 +130,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls,
+            suggested_next_tools,
             provenance: "local_postgres_index(symbols, crate_types)".to_string(),
         }))
     }

@@ -9,6 +9,7 @@ use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, ResponseFreshnessSource,
 };
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{normalize_optional, normalize_required};
 
@@ -165,9 +166,10 @@ impl McpServer {
         &self,
         crate_name: String,
         requested_version: Option<String>,
+        tcx: &ToolCallContext,
     ) -> Result<CompareSnapshot, String> {
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, tcx)
             .await?;
 
         let latest_version = tools::fetch_compare_latest_version(&self.state.db, ctx.crate_row.id)
@@ -195,7 +197,7 @@ impl McpServer {
                 selected
             } else {
                 let _ = self
-                    .backfill_missing_requested_version(&ctx.crate_row.name)
+                    .backfill_missing_requested_version(&ctx.crate_row.name, tcx)
                     .await?;
 
                 tools::fetch_compare_version_by_name(&self.state.db, ctx.crate_row.id, &version)
@@ -241,6 +243,7 @@ impl McpServer {
     pub async fn handle_crate_compare(
         &self,
         request: CrateCompareRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateCompareResponse>, String> {
         let left_crate = normalize_required(request.left_crate, "left_crate")?;
         let right_crate = normalize_required(request.right_crate, "right_crate")?;
@@ -252,10 +255,10 @@ impl McpServer {
         }
 
         let left_snapshot = self
-            .crate_compare_snapshot(left_crate.clone(), left_version)
+            .crate_compare_snapshot(left_crate.clone(), left_version, &tcx)
             .await?;
         let right_snapshot = self
-            .crate_compare_snapshot(right_crate.clone(), right_version)
+            .crate_compare_snapshot(right_crate.clone(), right_version, &tcx)
             .await?;
 
         let mut left = CrateCompareSide {
@@ -404,7 +407,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 format!("crate_intel(crate_name='{}')", left_crate),
                 format!("crate_intel(crate_name='{}')", right_crate),
                 format!("crate_api(crate_name='{}')", left_crate),

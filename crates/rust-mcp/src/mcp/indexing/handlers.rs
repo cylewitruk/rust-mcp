@@ -18,6 +18,7 @@ use crate::integration::crates_io::{
     CratesIoClient, CratesIoCrateDetailResponse, CratesIoSearchResponse,
 };
 use crate::mcp::models::ResponseFreshnessSource;
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
@@ -203,6 +204,7 @@ impl McpServer {
     pub async fn handle_index_sync_crates(
         &self,
         request: IndexSyncCratesRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<IndexSyncCratesResponse>, String> {
         let query =
             normalize_optional(request.query).unwrap_or_else(|| DEFAULT_SYNC_QUERY.to_string());
@@ -227,6 +229,10 @@ impl McpServer {
         let mut synced_dependencies = 0_usize;
         let mut selected_versions = Vec::new();
         let mut errors = Vec::new();
+
+        let total = search_response.crates.len();
+        tcx.notify_progress(&format!("Syncing {total} crate(s) from crates.io"))
+            .await;
 
         for item in search_response.crates {
             let crate_name = if item.id.trim().is_empty() {
@@ -397,6 +403,7 @@ impl McpServer {
     pub async fn handle_index_refresh(
         &self,
         request: IndexRefreshRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<IndexRefreshResponse>, String> {
         let scope = request
             .scope
@@ -499,12 +506,15 @@ impl McpServer {
             }
             IndexRefreshScope::All => {
                 let Json(sync_response) = self
-                    .handle_index_sync_crates(IndexSyncCratesRequest {
-                        query: request.query,
-                        page: request.page,
-                        per_page: request.per_page,
-                        include_dependencies: request.include_dependencies,
-                    })
+                    .handle_index_sync_crates(
+                        IndexSyncCratesRequest {
+                            query: request.query,
+                            page: request.page,
+                            per_page: request.per_page,
+                            include_dependencies: request.include_dependencies,
+                        },
+                        tcx,
+                    )
                     .await?;
 
                 Ok(Json(IndexRefreshResponse {

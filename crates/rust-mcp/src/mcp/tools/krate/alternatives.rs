@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::models::AlternativesCandidateRow;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, LicensePolicyResult};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, alternatives_limit, apply_pagination_limit, build_crate_freshness_sources,
@@ -270,6 +271,7 @@ impl McpServer {
     pub async fn handle_crate_alternatives(
         &self,
         request: CrateAlternativesRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateAlternativesResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
@@ -295,10 +297,10 @@ impl McpServer {
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let resolution = self
-            .resolve_version_or_latest(&ctx, requested_version.as_deref())
+            .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
         let candidates = tools::list_alternatives_candidates(
@@ -471,7 +473,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_intel".to_string(),
                 "crate_license_check".to_string(),
                 "crate_graph".to_string(),

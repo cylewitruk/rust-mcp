@@ -8,6 +8,7 @@ pub use rust_mcp_types::types::krate::{
 use crate::db::models::ApiDiffSymbolRow;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{api_diff_limit, build_crate_freshness_sources, normalize_required};
 
@@ -240,6 +241,7 @@ impl McpServer {
     pub async fn handle_crate_api_diff(
         &self,
         request: CrateApiDiffRequest,
+        tcx: ToolCallContext,
     ) -> Result<Json<CrateApiDiffResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let from_version = normalize_required(request.from_version, "from_version")?;
@@ -247,7 +249,7 @@ impl McpServer {
         let limit = api_diff_limit(request.limit) as usize;
 
         let ctx = self
-            .fetch_crate_context(&crate_name)
+            .fetch_crate_context(&crate_name, &tcx)
             .await?;
         let freshness_check_result = ctx
             .freshness_outcome
@@ -286,9 +288,9 @@ impl McpServer {
                     )
                 })?;
 
-        self.ensure_rustdoc_indexed(&crate_name, from_version_row.id)
+        self.ensure_rustdoc_indexed(&crate_name, from_version_row.id, &tcx)
             .await?;
-        self.ensure_rustdoc_indexed(&crate_name, to_version_row.id)
+        self.ensure_rustdoc_indexed(&crate_name, to_version_row.id, &tcx)
             .await?;
 
         let from_symbols =
@@ -349,7 +351,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment: summary.confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "symbol_search".to_string(),
                 "source_read".to_string(),
                 "crate_features".to_string(),

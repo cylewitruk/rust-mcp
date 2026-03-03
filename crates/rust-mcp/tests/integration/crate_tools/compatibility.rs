@@ -40,7 +40,7 @@ async fn crate_compatibility_resolves_seeded_pair() {
     );
     assert!(
         payload
-            .get("next_best_calls")
+            .get("suggested_next_tools")
             .is_some()
     );
 }
@@ -123,7 +123,7 @@ async fn crate_license_check_returns_policy_for_seeded_crate() {
     );
     assert!(
         payload
-            .get("next_best_calls")
+            .get("suggested_next_tools")
             .is_some()
     );
 }

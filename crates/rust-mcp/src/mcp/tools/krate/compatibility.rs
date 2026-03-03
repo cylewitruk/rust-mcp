@@ -77,7 +77,7 @@ impl McpServer {
             feature_unification_summary: resolve_response.feature_unification_summary,
             confidence: resolve_response.confidence,
             confidence_assessment: resolve_response.confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "dependency_resolve".to_string(),
                 "crate_graph".to_string(),
                 "crate_versions".to_string(),
@@ -224,7 +224,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "crate_compatibility".to_string(),
                 "dependency_resolve".to_string(),
                 "crate_graph".to_string(),

@@ -100,7 +100,7 @@ async fn crate_type_info_returns_seeded_type_definition() {
     );
     assert!(
         payload
-            .get("next_best_calls")
+            .get("suggested_next_tools")
             .is_some()
     );
     assert!(

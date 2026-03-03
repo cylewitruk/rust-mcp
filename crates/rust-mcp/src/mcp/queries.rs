@@ -3,6 +3,7 @@ use crate::db::{indexing, tools};
 use crate::integration::crates_io::source::download_and_extract_crate_source;
 use crate::mcp::indexing::coordinator::JobOutcome;
 use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
+use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::resolve_source_dir;
 
@@ -31,7 +32,11 @@ impl McpServer {
     /// the database, enqueues a high-priority on-demand indexing job via the
     /// refresh worker and waits for completion (up to the coordinator
     /// timeout).
-    async fn ensure_crate_indexed(&self, crate_name: &str) -> Result<(), String> {
+    async fn ensure_crate_indexed(
+        &self,
+        crate_name: &str,
+        tcx: &ToolCallContext,
+    ) -> Result<(), String> {
         let exists = tools::fetch_crate_core_by_name(&self.state.db, crate_name)
             .await
             .map_err(|e| format!("crate existence check failed for {crate_name}: {e}"))?;
@@ -39,6 +44,9 @@ impl McpServer {
         if exists.is_some() {
             return Ok(());
         }
+
+        tcx.notify_progress(&format!("Indexing crate '{crate_name}' (not yet in local index)"))
+            .await;
 
         tracing::info!(crate_name, "crate not indexed locally — triggering on-demand indexing");
 
@@ -74,9 +82,13 @@ impl McpServer {
     /// This consolidates the crate-core-lookup + latest-version-lookup +
     /// ensure-freshness + conditional-re-fetch sequence used by most crate
     /// tools.
-    pub async fn fetch_crate_context(&self, crate_name: &str) -> Result<CrateContext, String> {
+    pub async fn fetch_crate_context(
+        &self,
+        crate_name: &str,
+        tcx: &ToolCallContext,
+    ) -> Result<CrateContext, String> {
         // On-demand indexing: ensure the crate is present before querying.
-        self.ensure_crate_indexed(crate_name)
+        self.ensure_crate_indexed(crate_name, tcx)
             .await?;
 
         let crate_row = tools::fetch_crate_core_by_name(&self.state.db, crate_name)
@@ -101,6 +113,7 @@ impl McpServer {
                 crate_row.id,
                 &crate_row.name,
                 &latest_version.version,
+                tcx,
             )
             .await?;
 
@@ -133,6 +146,7 @@ impl McpServer {
         &self,
         ctx: &CrateContext,
         requested_version: Option<&str>,
+        tcx: &ToolCallContext,
     ) -> Result<VersionResolution, String> {
         let mut refresh_enqueued = ctx
             .freshness_outcome
@@ -157,7 +171,7 @@ impl McpServer {
                 selected
             } else {
                 let queued_job_id = self
-                    .backfill_missing_requested_version(&ctx.crate_row.name)
+                    .backfill_missing_requested_version(&ctx.crate_row.name, tcx)
                     .await?;
                 if let Some(job_id) = queued_job_id {
                     refresh_enqueued = true;
@@ -200,7 +214,9 @@ impl McpServer {
     pub async fn ensure_source_indexed(
         &self,
         crate_name: &str,
+        version: &str,
         crate_version_id: i64,
+        tcx: &ToolCallContext,
     ) -> Result<(), String> {
         let has_source = tools::has_source_files_for_version(&self.state.db, crate_version_id)
             .await
@@ -209,6 +225,15 @@ impl McpServer {
         if has_source {
             return Ok(());
         }
+
+        // Ensure source is on disk before indexing — the crate may not be in
+        // the local cargo registry cache, so we download it from crates.io if
+        // needed.
+        self.ensure_source_on_disk(crate_name, version, crate_version_id, tcx)
+            .await?;
+
+        tcx.notify_progress(&format!("Indexing source files for {crate_name}"))
+            .await;
 
         tracing::info!(
             crate_name,
@@ -260,6 +285,7 @@ impl McpServer {
         &self,
         crate_name: &str,
         crate_version_id: i64,
+        tcx: &ToolCallContext,
     ) -> Result<(), String> {
         let has_rustdoc = tools::has_rustdoc_symbols_for_version(&self.state.db, crate_version_id)
             .await
@@ -268,6 +294,9 @@ impl McpServer {
         if has_rustdoc {
             return Ok(());
         }
+
+        tcx.notify_progress(&format!("Building symbol index for {crate_name}"))
+            .await;
 
         tracing::info!(
             crate_name,
@@ -318,6 +347,7 @@ impl McpServer {
         crate_name: &str,
         version: &str,
         crate_version_id: i64,
+        tcx: &ToolCallContext,
     ) -> Result<(), String> {
         if resolve_source_dir(
             &self
@@ -337,6 +367,9 @@ impl McpServer {
         {
             return Ok(());
         }
+
+        tcx.notify_progress(&format!("Downloading source for {crate_name}@{version}"))
+            .await;
 
         tracing::info!(
             %crate_name, %version,

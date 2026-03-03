@@ -508,7 +508,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
+            suggested_next_tools: vec![
                 "dependency_audit".to_string(),
                 "crate_graph".to_string(),
                 "crate_features".to_string(),
