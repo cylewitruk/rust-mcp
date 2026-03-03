@@ -30,6 +30,8 @@ pub const PRIORITY_ON_DEMAND: i32 = 1;
 pub const PRIORITY_BACKFILL: i32 = 5;
 /// Background freshness-triggered deep refresh.
 pub const PRIORITY_FRESHNESS: i32 = 10;
+/// Near-real-time detection of new `.crate` files in the cargo cache.
+pub const PRIORITY_CACHE_WATCH: i32 = 20;
 /// Pre-warm list crates indexed first at startup.
 pub const PRIORITY_PRE_WARM: i32 = 25;
 /// Crates discovered via the periodic registry scan.

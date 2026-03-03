@@ -69,6 +69,7 @@ fn test_config(
         pre_warm_crates: String::new(),
         enrichment_maintenance_interval_secs: 0,
         rustdoc_retry_cooldown_secs: 86400,
+        registry_cache_watch_interval_ms: 0,
     }
 }
 
@@ -564,6 +565,7 @@ async fn mock_rustdoc_json_gzip(
     StatusCode::NOT_FOUND.into_response()
 }
 
+mod cache_watcher;
 mod discovery;
 mod failure_paths;
 mod on_demand;

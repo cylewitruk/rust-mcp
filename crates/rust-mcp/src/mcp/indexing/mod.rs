@@ -1,3 +1,5 @@
+/// Near-real-time registry cache watcher for `.crate` file detection.
+pub mod cache_watcher;
 /// On-demand and background indexing coordinator.
 pub mod coordinator;
 /// Proactive registry discovery and background crate scanning.
@@ -17,6 +19,7 @@ pub mod security;
 /// Durable refresh worker loop.
 pub mod worker;
 
+pub use cache_watcher::run_cache_watcher;
 pub use discovery::{collect_local_versions_for_crate, run_registry_discovery};
 pub use maintenance::run_enrichment_maintenance;
 pub use worker::run_refresh_worker;

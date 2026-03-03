@@ -63,6 +63,8 @@ pub mod env_vars {
     pub const RUSTDOC_RETRY_COOLDOWN_SECS: &str = "RUSTDOC_RETRY_COOLDOWN_SECS";
     /// Directory for on-demand crate source downloads from crates.io.
     pub const CRATE_SOURCE_CACHE_DIR: &str = "CRATE_SOURCE_CACHE_DIR";
+    /// Polling interval in milliseconds for the registry cache watcher.
+    pub const REGISTRY_CACHE_WATCH_INTERVAL_MS: &str = "REGISTRY_CACHE_WATCH_INTERVAL_MS";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -209,6 +211,12 @@ pub struct Config {
     /// Directory for on-demand crate source downloads from crates.io.
     #[arg(long, env = env_vars::CRATE_SOURCE_CACHE_DIR, default_value = "/var/lib/rust-mcp/crate-sources")]
     pub crate_source_cache_dir: PathBuf,
+
+    /// Polling interval in milliseconds for the registry cache watcher.
+    /// Monitors `{CARGO_REGISTRY_DIR}/cache/` for new `.crate` files to
+    /// trigger near-instant indexing. 0 = disabled.
+    #[arg(long, env = env_vars::REGISTRY_CACHE_WATCH_INTERVAL_MS, default_value_t = 1000)]
+    pub registry_cache_watch_interval_ms: u64,
 }
 
 impl Config {

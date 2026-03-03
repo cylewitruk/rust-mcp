@@ -317,7 +317,7 @@ pub fn collect_local_versions_for_crate(src_root: &Path, crate_name: &str) -> Ve
 /// Parse a cargo registry directory name of the form `{name}-{semver}` into
 /// its component parts. Iterates split points from right to correctly handle
 /// crate names containing hyphens (e.g. `serde-derive-1.0.0`).
-fn parse_registry_dir_name(dir_name: &str) -> Option<(String, String)> {
+pub fn parse_registry_dir_name(dir_name: &str) -> Option<(String, String)> {
     let bytes = dir_name.as_bytes();
     for i in (1..dir_name.len()).rev() {
         if bytes[i - 1] == b'-' {

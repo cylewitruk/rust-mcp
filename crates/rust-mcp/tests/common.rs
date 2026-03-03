@@ -52,6 +52,7 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         pre_warm_crates: String::new(),
         enrichment_maintenance_interval_secs: 0,
         rustdoc_retry_cooldown_secs: 86400,
+        registry_cache_watch_interval_ms: 0,
     }
 }
 

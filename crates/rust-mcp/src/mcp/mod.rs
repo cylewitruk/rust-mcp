@@ -19,7 +19,9 @@ pub mod utils;
 
 mod transport;
 
-pub use indexing::{run_enrichment_maintenance, run_refresh_worker, run_registry_discovery};
+pub use indexing::{
+    run_cache_watcher, run_enrichment_maintenance, run_refresh_worker, run_registry_discovery,
+};
 pub use transport::streamable_http_service;
 
 #[cfg(feature = "testing")]
@@ -48,4 +50,17 @@ pub async fn run_registry_scan_with_outcome_for_tests(
     state: &crate::state::AppState,
 ) -> indexing::discovery::DiscoveryScanOutcome {
     indexing::discovery::run_registry_scan(state).await
+}
+
+#[cfg(feature = "testing")]
+/// Test-only wrapper that runs a single cache watcher poll cycle.
+pub async fn run_cache_watch_poll_for_tests(
+    state: &crate::state::AppState,
+    index: &mut indexing::cache_watcher::CacheIndex,
+) -> indexing::cache_watcher::CacheWatchPollOutcome {
+    let cache_root = state
+        .config
+        .cargo_registry_dir
+        .join("cache");
+    indexing::cache_watcher::poll_cache_changes(state, &cache_root, index).await
 }

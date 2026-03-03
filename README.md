@@ -222,6 +222,7 @@ All server environment variables with their defaults:
 | `REGISTRY_SCAN_INTERVAL_SECS` | `600` | Seconds between periodic registry discovery scans (0 = disabled) |
 | `REGISTRY_SCAN_BATCH_LIMIT` | `0` | Max new crate jobs per discovery scan (0 = unlimited) |
 | `PRE_WARM_CRATES` | _(empty)_ | Comma-separated crate names to index first at startup |
+| `REGISTRY_CACHE_WATCH_INTERVAL_MS` | `1000` | Polling interval (ms) for detecting new `.crate` files in the cargo registry cache (0 = disabled) |
 
 **Enrichment maintenance:**
 
