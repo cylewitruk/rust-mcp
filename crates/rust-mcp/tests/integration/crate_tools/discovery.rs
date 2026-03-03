@@ -406,3 +406,74 @@ async fn crate_intel_summarizes_dependencies_for_seeded_crate() {
             })
     );
 }
+
+#[tokio::test]
+async fn crate_api_path_glob_matches_symbol_names() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    // The seeded fixture includes a `from_str` symbol. Using path_glob with
+    // "*from_str*" should match it by name even though the source file path
+    // is "src/lib.rs".
+    let response = context
+        .mcp
+        .call_tool(
+            "crate_api",
+            json!({
+                "crate_name": "serde_json",
+                "path_glob": "*from_str*",
+                "limit": 20
+            }),
+        )
+        .await
+        .expect("crate_api call failed");
+    let payload = common::structured_content(&response);
+
+    let count = payload
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    assert!(count >= 1, "path_glob '*from_str*' should match symbol name 'from_str': {payload}");
+
+    let symbols = payload
+        .get("symbols")
+        .and_then(Value::as_array)
+        .expect("symbols should be an array");
+    assert!(
+        symbols.iter().any(|s| {
+            s.get("name")
+                .and_then(Value::as_str)
+                == Some("from_str")
+        }),
+        "expected 'from_str' symbol in results: {symbols:?}"
+    );
+}
+
+#[tokio::test]
+async fn crate_api_kinds_filter_accepts_method_alias() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    // The "method" kind should be treated as an alias for "function".
+    let response = context
+        .mcp
+        .call_tool(
+            "crate_api",
+            json!({
+                "crate_name": "serde_json",
+                "kinds": ["method"],
+                "limit": 20
+            }),
+        )
+        .await
+        .expect("crate_api call failed");
+    let payload = common::structured_content(&response);
+
+    let count = payload
+        .get("count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    assert!(count >= 1, "kinds=['method'] should return function symbols via alias: {payload}");
+}

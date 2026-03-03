@@ -2425,6 +2425,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "syn",
+ "tar",
  "test-log",
  "thiserror 2.0.18",
  "tokio",
@@ -3210,6 +3211,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d863878d212c87a19c1a610eb53bb01fe12951c0501cf5a0d65f724914a667a"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]

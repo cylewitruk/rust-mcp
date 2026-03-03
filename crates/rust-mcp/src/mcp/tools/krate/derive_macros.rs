@@ -14,7 +14,7 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     build_crate_freshness_sources, dedupe_strings, normalize_optional, normalize_required,
-    resolve_registry_source_dir,
+    resolve_source_dir,
 };
 
 #[derive(Debug, Clone)]
@@ -195,11 +195,17 @@ impl McpServer {
         .await
         .map_err(|e| format!("crate_derive_macros source query failed: {e}"))?;
 
-        let version_dir = resolve_registry_source_dir(
+        let version_dir = resolve_source_dir(
             &self
                 .state
                 .config
                 .cargo_registry_dir,
+            Some(
+                &self
+                    .state
+                    .config
+                    .crate_source_cache_dir,
+            ),
             &crate_name,
             &resolution
                 .selected_version

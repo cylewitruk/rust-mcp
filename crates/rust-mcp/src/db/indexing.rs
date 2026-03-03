@@ -46,11 +46,16 @@ pub async fn mark_versions_locally_present(
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
         "UPDATE crate_versions cv
-         SET locally_present = (cv.version = ANY($2::TEXT[]))
+         SET locally_present = (cv.version = ANY($2::TEXT[])),
+             source_origin = CASE
+                 WHEN cv.version = ANY($2::TEXT[]) THEN 1
+                 ELSE cv.source_origin
+             END
          FROM crates c
          WHERE c.id = cv.crate_id
            AND c.name = $1
-           AND cv.locally_present IS DISTINCT FROM (cv.version = ANY($2::TEXT[]))",
+           AND (cv.locally_present IS DISTINCT FROM (cv.version = ANY($2::TEXT[]))
+                OR (cv.version = ANY($2::TEXT[]) AND cv.source_origin <> 1))",
     )
     .bind(crate_name)
     .bind(local_versions)
@@ -93,6 +98,24 @@ pub async fn mark_version_rustdoc_attempted(
          WHERE id = $1",
     )
     .bind(crate_version_id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Sets the `source_origin` flag on a crate version.
+pub async fn set_source_origin(
+    db: &PgPool,
+    crate_version_id: i64,
+    origin: i16,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE crate_versions
+         SET source_origin = $2
+         WHERE id = $1",
+    )
+    .bind(crate_version_id)
+    .bind(origin)
     .execute(db)
     .await?;
     Ok(())

@@ -10,3 +10,4 @@ mod common;
 mod crates_io;
 mod discovery;
 mod index;
+mod source_download;

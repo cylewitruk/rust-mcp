@@ -61,6 +61,8 @@ pub mod env_vars {
     pub const ENRICHMENT_MAINTENANCE_INTERVAL_SECS: &str = "ENRICHMENT_MAINTENANCE_INTERVAL_SECS";
     /// Minimum seconds before retrying a failed rustdoc enrichment attempt.
     pub const RUSTDOC_RETRY_COOLDOWN_SECS: &str = "RUSTDOC_RETRY_COOLDOWN_SECS";
+    /// Directory for on-demand crate source downloads from crates.io.
+    pub const CRATE_SOURCE_CACHE_DIR: &str = "CRATE_SOURCE_CACHE_DIR";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -203,6 +205,10 @@ pub struct Config {
     /// Minimum seconds before retrying a failed rustdoc enrichment attempt.
     #[arg(long, env = env_vars::RUSTDOC_RETRY_COOLDOWN_SECS, default_value_t = 86400)]
     pub rustdoc_retry_cooldown_secs: u64,
+
+    /// Directory for on-demand crate source downloads from crates.io.
+    #[arg(long, env = env_vars::CRATE_SOURCE_CACHE_DIR, default_value = "/var/lib/rust-mcp/crate-sources")]
+    pub crate_source_cache_dir: PathBuf,
 }
 
 impl Config {

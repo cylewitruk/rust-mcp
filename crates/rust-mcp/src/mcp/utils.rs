@@ -464,43 +464,66 @@ pub fn build_crate_freshness_sources(
     ]
 }
 
-/// Resolves the on-disk source directory for a crate version in the cargo
-/// registry.
+/// Resolves the on-disk source directory for a crate version.
 ///
-/// Scans `{cargo_registry_dir}/src/*/` for a directory named
-/// `{crate_name}-{version}`. Returns `None` if no matching directory exists.
+/// Checks two locations in order:
+/// 1. Host cargo registry: `{cargo_registry_dir}/src/*/{crate_name}-{version}`
+/// 2. Downloaded cache: `{crate_source_cache_dir}/{crate_name}-{version}`
+///
+/// Returns `None` if no matching directory exists in either location.
 pub fn resolve_registry_source_dir(
     cargo_registry_dir: &Path,
     crate_name: &str,
     version: &str,
 ) -> Option<PathBuf> {
-    let src_root = cargo_registry_dir.join("src");
+    resolve_source_dir(cargo_registry_dir, None, crate_name, version)
+}
+
+/// Resolves the on-disk source directory for a crate version, also checking
+/// the downloaded crate source cache.
+pub fn resolve_source_dir(
+    cargo_registry_dir: &Path,
+    crate_source_cache_dir: Option<&Path>,
+    crate_name: &str,
+    version: &str,
+) -> Option<PathBuf> {
     let target_dir_name = format!("{crate_name}-{version}");
 
-    let registries = std::fs::read_dir(&src_root).ok()?;
-    for entry in registries {
-        let entry = entry.ok()?;
-        if !entry
-            .file_type()
-            .ok()
-            .is_some_and(|ft| ft.is_dir())
-        {
-            continue;
+    // 1. Host cargo registry.
+    let src_root = cargo_registry_dir.join("src");
+    if let Ok(registries) = std::fs::read_dir(&src_root) {
+        for entry in registries.flatten() {
+            if !entry
+                .file_type()
+                .ok()
+                .is_some_and(|ft| ft.is_dir())
+            {
+                continue;
+            }
+            let candidate = entry
+                .path()
+                .join(&target_dir_name);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
         }
-        let candidate = entry
-            .path()
-            .join(&target_dir_name);
+    }
+
+    // 2. Downloaded crate source cache.
+    if let Some(cache_dir) = crate_source_cache_dir {
+        let candidate = cache_dir.join(&target_dir_name);
         if candidate.is_dir() {
             return Some(candidate);
         }
     }
+
     None
 }
 
-/// Reads a single source file from the cargo registry on disk.
+/// Reads a single source file from the cargo registry or download cache.
 ///
-/// Combines [`resolve_registry_source_dir`] with a `std::fs::read_to_string`
-/// call. Returns `None` if the registry directory or file does not exist,
+/// Combines [`resolve_source_dir`] with a `std::fs::read_to_string`
+/// call. Returns `None` if the directory or file does not exist,
 /// or if the content is not valid UTF-8.
 pub fn read_source_file_from_disk(
     cargo_registry_dir: &Path,
@@ -509,6 +532,20 @@ pub fn read_source_file_from_disk(
     relative_path: &str,
 ) -> Option<String> {
     let version_dir = resolve_registry_source_dir(cargo_registry_dir, crate_name, version)?;
+    let full_path = version_dir.join(relative_path);
+    std::fs::read_to_string(full_path).ok()
+}
+
+/// Reads a single source file, also checking the download cache.
+pub fn read_source_file_from_disk_or_cache(
+    cargo_registry_dir: &Path,
+    crate_source_cache_dir: Option<&Path>,
+    crate_name: &str,
+    version: &str,
+    relative_path: &str,
+) -> Option<String> {
+    let version_dir =
+        resolve_source_dir(cargo_registry_dir, crate_source_cache_dir, crate_name, version)?;
     let full_path = version_dir.join(relative_path);
     std::fs::read_to_string(full_path).ok()
 }

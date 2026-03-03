@@ -6,7 +6,9 @@ pub use rust_mcp_types::types::source::{
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
-use crate::mcp::utils::{normalize_optional, normalize_required, read_source_file_from_disk};
+use crate::mcp::utils::{
+    normalize_optional, normalize_required, read_source_file_from_disk_or_cache,
+};
 
 fn module_path_from_source_path(crate_name: &str, path: &str) -> String {
     let normalized = path.trim_start_matches("./");
@@ -184,6 +186,8 @@ impl McpServer {
 
         self.ensure_source_indexed(&crate_name, selected_version.id)
             .await?;
+        self.ensure_source_on_disk(&crate_name, &selected_version.version, selected_version.id)
+            .await?;
 
         let row = tools::fetch_source_read_for_crate_version_path(
             &self.state.db,
@@ -200,23 +204,31 @@ impl McpServer {
         })?
         .ok_or_else(|| {
             format!(
-                "source file not found for {}@{}:{}",
+                "source file not found for {}@{}:{}. Try crate_api or symbol_search to explore \
+                 this crate's API surface.",
                 crate_row.name, selected_version.version, path
             )
         })?;
 
-        let content = read_source_file_from_disk(
+        let content = read_source_file_from_disk_or_cache(
             &self
                 .state
                 .config
                 .cargo_registry_dir,
+            Some(
+                &self
+                    .state
+                    .config
+                    .crate_source_cache_dir,
+            ),
             &crate_row.name,
             &selected_version.version,
             &row.path,
         )
         .ok_or_else(|| {
             format!(
-                "source content not available on disk for {}@{}:{} (not found in cargo registry)",
+                "source content not available on disk for {}@{}:{} (not found in cargo registry). \
+                 Try crate_type_info, crate_api, or symbol_search for rustdoc-based API data.",
                 crate_row.name, selected_version.version, path
             )
         })?;

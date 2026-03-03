@@ -1,8 +1,10 @@
-use crate::db::models::{CrateCoreRow, CrateVersionSelectionRow};
-use crate::db::tools;
+use crate::db::models::{CrateCoreRow, CrateVersionSelectionRow, SourceOrigin};
+use crate::db::{indexing, tools};
+use crate::integration::crates_io::source::download_and_extract_crate_source;
 use crate::mcp::indexing::coordinator::JobOutcome;
 use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::server::McpServer;
+use crate::mcp::utils::resolve_source_dir;
 
 /// Outcome of looking up a crate, its latest version, and checking freshness.
 pub struct CrateContext {
@@ -301,6 +303,67 @@ impl McpServer {
             }
             Err(timeout_msg) => {
                 tracing::warn!(crate_name, %timeout_msg, "on-demand rustdoc indexing timed out");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Ensures the crate version source is available on disk.
+    ///
+    /// Checks the cargo registry and download cache. If not found, downloads
+    /// from `static.crates.io` and updates `source_origin`.
+    pub async fn ensure_source_on_disk(
+        &self,
+        crate_name: &str,
+        version: &str,
+        crate_version_id: i64,
+    ) -> Result<(), String> {
+        if resolve_source_dir(
+            &self
+                .state
+                .config
+                .cargo_registry_dir,
+            Some(
+                &self
+                    .state
+                    .config
+                    .crate_source_cache_dir,
+            ),
+            crate_name,
+            version,
+        )
+        .is_some()
+        {
+            return Ok(());
+        }
+
+        tracing::info!(
+            %crate_name, %version,
+            "source not on disk — downloading from crates.io"
+        );
+
+        match download_and_extract_crate_source(&self.state, crate_name, version).await {
+            Ok(_path) => {
+                // Mark as downloaded so future pruning can find it.
+                if let Err(e) = indexing::set_source_origin(
+                    &self.state.db,
+                    crate_version_id,
+                    SourceOrigin::Downloaded as i16,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        %crate_name, %version,
+                        "failed to set source_origin after download: {e}"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    %crate_name, %version,
+                    "on-demand crate source download failed: {e}"
+                );
             }
         }
 

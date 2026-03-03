@@ -9,7 +9,7 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
-    normalize_required, re_exports_limit, read_source_file_from_disk, resolve_pagination,
+    normalize_required, re_exports_limit, read_source_file_from_disk_or_cache, resolve_pagination,
     sync_page,
 };
 
@@ -254,11 +254,17 @@ impl McpServer {
                 .saturating_add(1) as usize;
             let mut entries = Vec::<CrateReExportEntry>::new();
             for source in sources {
-                let content = read_source_file_from_disk(
+                let content = read_source_file_from_disk_or_cache(
                     &self
                         .state
                         .config
                         .cargo_registry_dir,
+                    Some(
+                        &self
+                            .state
+                            .config
+                            .crate_source_cache_dir,
+                    ),
                     &ctx.crate_row.name,
                     &resolution
                         .selected_version

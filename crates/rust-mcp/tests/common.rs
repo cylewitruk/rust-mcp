@@ -39,6 +39,7 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         max_concurrent_requests: 32,
         auto_migrate: false,
         cargo_registry_dir,
+        crate_source_cache_dir: PathBuf::from("/tmp/rust-mcp-test-crate-sources"),
         data_dir: PathBuf::from("/tmp"),
         rustsec_db_dir: None,
         rustdoc_json_dir: None,

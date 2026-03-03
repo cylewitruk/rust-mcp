@@ -588,7 +588,7 @@ pub async fn list_public_api_symbols_for_version(
                AND s.visibility = 'public'
                AND ($2::TEXT[] IS NULL OR s.kind = ANY($2))
                AND ($3::TEXT IS NULL OR s.index_source = $3)
-               AND sf.path ILIKE $4 ESCAPE '\\'
+               AND (sf.path ILIKE $4 ESCAPE '\\' OR s.name ILIKE $4 ESCAPE '\\')
              ORDER BY
                 s.kind ASC,
                 s.name ASC,
@@ -1059,6 +1059,7 @@ pub async fn list_alternatives_candidates(
             c.categories,
             c.keywords,
             lv.version AS latest_version,
+            lv.published_at::TEXT AS published_at,
             COALESCE(lv.total_downloads, 0)::BIGINT AS total_downloads,
             COALESCE(lv.yanked, false) AS yanked,
             COALESCE(lv.advisory_count, 0)::BIGINT AS advisory_count,
@@ -1069,6 +1070,7 @@ pub async fn list_alternatives_candidates(
          LEFT JOIN LATERAL (
              SELECT
                  cv.version,
+                 cv.published_at,
                  cv.total_downloads,
                  cv.yanked,
                  cv.license_expression,
@@ -1088,7 +1090,7 @@ pub async fn list_alternatives_candidates(
          ) dep ON true
          WHERE c.id <> $1
            AND (
-               similarity(c.name, $2) >= 0.10
+               similarity(c.name, $2) >= 0.25
                OR c.categories && $3::TEXT[]
                OR c.keywords && $4::TEXT[]
            )

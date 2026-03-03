@@ -12,8 +12,8 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, error_types_limit,
-    normalize_optional, normalize_required, read_source_file_from_disk, resolve_pagination,
-    sync_page,
+    normalize_optional, normalize_required, read_source_file_from_disk_or_cache,
+    resolve_pagination, sync_page,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -280,11 +280,17 @@ impl McpServer {
                     continue;
                 }
 
-                let content = read_source_file_from_disk(
+                let content = read_source_file_from_disk_or_cache(
                     &self
                         .state
                         .config
                         .cargo_registry_dir,
+                    Some(
+                        &self
+                            .state
+                            .config
+                            .crate_source_cache_dir,
+                    ),
                     &crate_name,
                     &resolution
                         .selected_version

@@ -69,6 +69,41 @@ async fn crate_usage_patterns_returns_seeded_symbol_matches() {
 }
 
 #[tokio::test]
+async fn crate_usage_patterns_reports_scanned_dependents_count() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "crate_usage_patterns",
+            json!({
+                "crate_name": "serde",
+                "symbol_name": "from_str",
+                "limit": 10
+            }),
+        )
+        .await
+        .expect("crate_usage_patterns call failed");
+    let payload = common::structured_content(&response);
+
+    // scanned_dependents should be present and reflect how many dependent
+    // crates had their source directories resolved on disk.
+    let scanned = payload
+        .get("scanned_dependents")
+        .and_then(Value::as_u64);
+    assert!(scanned.is_some(), "expected scanned_dependents field in response: {payload}");
+    // Since the fixture has serde_json as a dependent with source on disk,
+    // at least 1 should have been scanned.
+    assert!(
+        scanned.unwrap() >= 1,
+        "expected at least 1 scanned dependent, got {}: {payload}",
+        scanned.unwrap()
+    );
+}
+
+#[tokio::test]
 async fn crate_hotspots_detects_unsafe_in_seeded_source() {
     let context = common::seeded_mcp_context()
         .await

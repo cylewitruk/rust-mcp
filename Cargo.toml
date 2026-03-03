@@ -21,6 +21,7 @@ semver = "1.0.27"
 sha2 = "0.10.9"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "migrate"] }
 syn = { version = "2.0.117", features = ["full"] }
+tar = "0.4"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal"] }
 toml = "0.9.8"

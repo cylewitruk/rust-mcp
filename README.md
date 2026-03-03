@@ -210,6 +210,7 @@ All server environment variables with their defaults:
 |---|---|---|
 | `CARGO_REGISTRY_DIR` | `/cargo/registry` | Mounted cargo registry directory |
 | `MCP_DATA_DIR` | `/var/lib/rust-mcp` | Server local data directory |
+| `CRATE_SOURCE_CACHE_DIR` | `/var/lib/rust-mcp/crate-sources` | Cache directory for on-demand crate source downloads |
 | `RUSTSEC_DB_DIR` | _(unset)_ | Optional local advisory-db checkout |
 | `RUSTDOC_JSON_DIR` | _(unset)_ | Optional pre-generated rustdoc JSON files |
 | `SCHEMA_EXPORT_DIR` | _(unset)_ | Optional startup export of tool schema artifacts |

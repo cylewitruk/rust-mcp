@@ -19,7 +19,7 @@ services:
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       CARGO_REGISTRY_DIR: /cargo/registry
       MCP_DATA_DIR: /var/lib/rust-mcp
-      RUST_LOG: ${RUST_LOG:-info,rust_mcp=debug,sqlx=warn}
+      RUST_LOG: ${RUST_LOG:-info,rust_mcp=debug,sqlx=warn,bollard=warn,reqwest=warn}
       LOG_FORMAT: ${LOG_FORMAT:-pretty}
     ports:
       - "127.0.0.1:${MCP_HTTP_PORT:-43173}:43173"

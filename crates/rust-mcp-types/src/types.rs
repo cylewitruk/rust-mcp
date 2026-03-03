@@ -1408,6 +1408,10 @@ pub mod krate {
     pub struct CrateApiRequest {
         pub crate_name: String,
         pub version: Option<String>,
+        /// Optional glob pattern to filter results by source file path or
+        /// symbol name. For example, `*connection*` matches both file
+        /// paths containing "connection" and symbol names like
+        /// `MultiplexedConnection`.
         pub path_glob: Option<String>,
         pub kinds: Option<Vec<String>>,
         /// Opaque cursor token for paging.
@@ -1735,6 +1739,10 @@ pub mod krate {
         /// Whether results were truncated by pagination.
         pub truncated: bool,
         pub count: usize,
+        /// Number of dependent crate versions whose source directories were
+        /// scanned. Helps distinguish "no source available" from "symbol not
+        /// found in dependents".
+        pub scanned_dependents: usize,
         pub patterns: Vec<CrateUsagePattern>,
         pub freshness_check_performed: bool,
         pub freshness_check_result: String,

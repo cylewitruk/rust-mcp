@@ -10,8 +10,7 @@ use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
-    normalize_required, resolve_pagination, resolve_registry_source_dir, sync_page,
-    usage_patterns_limit,
+    normalize_required, resolve_pagination, resolve_source_dir, sync_page, usage_patterns_limit,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,21 +76,29 @@ impl McpServer {
 
         let target_count = (pag.offset as usize) + (pag.limit as usize) + 1;
         let mut all_patterns = Vec::<CrateUsagePattern>::new();
+        let mut scanned_dependents: usize = 0;
 
         for dep in &dependents {
             if all_patterns.len() >= target_count {
                 break;
             }
-            let Some(version_dir) = resolve_registry_source_dir(
+            let Some(version_dir) = resolve_source_dir(
                 &self
                     .state
                     .config
                     .cargo_registry_dir,
+                Some(
+                    &self
+                        .state
+                        .config
+                        .crate_source_cache_dir,
+                ),
                 &dep.dependent_crate,
                 &dep.dependent_version,
             ) else {
                 continue;
             };
+            scanned_dependents += 1;
 
             let matches = ripgrep::search(
                 &version_dir,
@@ -146,7 +153,14 @@ impl McpServer {
             None
         };
 
-        let confidence_assessment = if patterns.is_empty() {
+        let confidence_assessment = if patterns.is_empty() && scanned_dependents == 0 {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Low,
+                reason: "no dependent crate source files are locally cached; try crate_type_info \
+                         or symbol_search for rustdoc-based intelligence"
+                    .to_string(),
+            }
+        } else if patterns.is_empty() {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Low,
                 reason: "no dependent source snippets matched the requested symbol in local index"
@@ -158,6 +172,16 @@ impl McpServer {
                 reason: "usage snippets were resolved from indexed dependent crate source files"
                     .to_string(),
             }
+        };
+
+        let next_best_calls = if patterns.is_empty() {
+            vec![
+                "crate_type_info".to_string(),
+                "symbol_search".to_string(),
+                "crate_api".to_string(),
+            ]
+        } else {
+            vec!["source_read".to_string(), "crate_type_info".to_string(), "crate_api".to_string()]
         };
 
         let freshness_check_result = ctx
@@ -179,6 +203,7 @@ impl McpServer {
             has_more,
             truncated: has_more,
             count: patterns.len(),
+            scanned_dependents,
             patterns,
             freshness_check_performed: ctx
                 .freshness_outcome
@@ -197,11 +222,7 @@ impl McpServer {
                 .as_str()
                 .to_string(),
             confidence_assessment,
-            next_best_calls: vec![
-                "source_read".to_string(),
-                "crate_type_info".to_string(),
-                "crate_api".to_string(),
-            ],
+            next_best_calls,
             provenance: "local_postgres_index(dependency_edges) + cargo_registry(ripgrep)"
                 .to_string(),
         }))

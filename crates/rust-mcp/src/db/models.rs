@@ -3,6 +3,29 @@ use serde_json::Value;
 use sqlx::FromRow;
 use sqlx::types::Json;
 
+/// Tracks where a crate version's source files came from on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i16)]
+pub enum SourceOrigin {
+    /// Source not yet available.
+    None = 0,
+    /// From the mounted host cargo registry.
+    HostRegistry = 1,
+    /// Downloaded from crates.io by rust-mcp.
+    Downloaded = 2,
+}
+
+impl SourceOrigin {
+    /// Converts from the database SMALLINT representation.
+    pub fn from_i16(value: i16) -> Self {
+        match value {
+            1 => Self::HostRegistry,
+            2 => Self::Downloaded,
+            _ => Self::None,
+        }
+    }
+}
+
 /// Row returned by full-text / fuzzy crate search queries.
 #[derive(Debug, FromRow)]
 pub struct CrateSearchRow {
@@ -914,6 +937,7 @@ pub struct AlternativesCandidateRow {
     pub categories: Vec<String>,
     pub keywords: Vec<String>,
     pub latest_version: Option<String>,
+    pub published_at: Option<String>,
     pub total_downloads: i64,
     pub yanked: bool,
     pub advisory_count: i64,

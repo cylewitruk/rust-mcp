@@ -153,6 +153,42 @@ fn evaluate_policy(
     )
 }
 
+fn days_since_published(published_at: Option<&str>) -> Option<f64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let ts = published_at?;
+    // PostgreSQL `timestamptz::TEXT` format: "2024-01-15 14:30:00.123456+00"
+    // We only need year-month-day for a rough day count.
+    let date_part = ts.get(..10)?;
+    let mut parts = date_part.split('-');
+    let year: i64 = parts.next()?.parse().ok()?;
+    let month: i64 = parts.next()?.parse().ok()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+
+    // Approximate days from epoch using the same formula for both published and
+    // now.
+    fn approx_epoch_days(y: i64, m: i64, d: i64) -> i64 {
+        // Rata Die approximation (good enough for day-level delta).
+        let m_adj = if m > 2 { m - 3 } else { m + 9 };
+        let y_adj = if m > 2 { y } else { y - 1 };
+        y_adj * 365 + y_adj / 4 - y_adj / 100 + y_adj / 400 + (m_adj * 306 + 5) / 10 + d - 1
+    }
+
+    let published_days = approx_epoch_days(year, month, day);
+
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let now_days_from_epoch = (now_secs / 86_400) as i64;
+    // Unix epoch is 1970-01-01.
+    let epoch_rata_die = approx_epoch_days(1970, 1, 1);
+    let now_days = epoch_rata_die + now_days_from_epoch;
+
+    let delta = (now_days - published_days).max(0);
+    Some(delta as f64)
+}
+
 fn score_candidate(
     candidate: &AlternativesCandidateRow,
     category_overlap: usize,
@@ -184,13 +220,24 @@ fn score_candidate(
         reasons.push(format!("keyword_overlap={keyword_overlap}"));
     }
 
-    let adoption_component = ((candidate.total_downloads as f64) + 1.0).ln() * 0.35;
+    let adoption_component = ((candidate.total_downloads as f64) + 1.0).ln() * 0.15;
     score += adoption_component;
     reasons.push(format!("downloads={}", candidate.total_downloads));
 
-    let dependents_component = ((candidate.dependent_count as f64) + 1.0).ln() * 0.45;
+    let dependents_component = ((candidate.dependent_count as f64) + 1.0).ln() * 0.20;
     score += dependents_component;
     reasons.push(format!("dependents={}", candidate.dependent_count));
+
+    if let Some(days_old) = days_since_published(
+        candidate
+            .published_at
+            .as_deref(),
+    ) {
+        // Bonus decays linearly: 2.0 at day 0, 0.0 at 2+ years.
+        let recency_component = (2.0 - (days_old / 365.0)).clamp(0.0, 2.0);
+        score += recency_component;
+        reasons.push(format!("recency_days={days_old:.0}"));
+    }
 
     if candidate.advisory_count > 0 {
         let penalty = (candidate.advisory_count as f64) * 1.25;
@@ -291,6 +338,13 @@ impl McpServer {
                 let category_overlap =
                     overlap_count(&ctx.crate_row.categories, &candidate.categories);
                 let keyword_overlap = overlap_count(&ctx.crate_row.keywords, &candidate.keywords);
+
+                // Gate: require at least some relevance signal beyond raw popularity.
+                if category_overlap == 0 && keyword_overlap == 0 && candidate.name_similarity < 0.30
+                {
+                    return None;
+                }
+
                 let (score, rank_reasons) =
                     score_candidate(&candidate, category_overlap, keyword_overlap, policy_result);
 
@@ -429,7 +483,10 @@ impl McpServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{LicensePolicyResult, evaluate_policy, extract_license_identifiers, overlap_count};
+    use super::{
+        AlternativesCandidateRow, LicensePolicyResult, days_since_published, evaluate_policy,
+        extract_license_identifiers, overlap_count, score_candidate,
+    };
 
     #[test]
     fn parses_spdx_identifiers() {
@@ -455,5 +512,132 @@ mod tests {
             evaluate_policy(&["MIT".to_string()], &["Apache-2.0".to_string()], &[]);
         assert!(matches!(result, LicensePolicyResult::Denied));
         assert!(reasons[0].contains("allow_licenses"));
+    }
+
+    fn make_candidate(
+        name_similarity: f64,
+        total_downloads: i64,
+        dependent_count: i64,
+        published_at: Option<&str>,
+    ) -> AlternativesCandidateRow {
+        AlternativesCandidateRow {
+            crate_name: "test_crate".to_string(),
+            description: None,
+            categories: vec![],
+            keywords: vec![],
+            latest_version: Some("1.0.0".to_string()),
+            published_at: published_at.map(ToString::to_string),
+            total_downloads,
+            yanked: false,
+            advisory_count: 0,
+            license_expression: Some("MIT".to_string()),
+            dependent_count,
+            name_similarity,
+        }
+    }
+
+    #[test]
+    fn days_since_published_parses_postgres_timestamp() {
+        // A well-known date in the past.
+        let days = days_since_published(Some("2020-01-01 00:00:00+00"));
+        assert!(days.is_some());
+        // At minimum 5+ years (1800+ days).
+        assert!(days.unwrap() > 1800.0);
+    }
+
+    #[test]
+    fn days_since_published_returns_none_for_empty_or_bad_input() {
+        assert!(days_since_published(None).is_none());
+        assert!(days_since_published(Some("")).is_none());
+        assert!(days_since_published(Some("not-a-date")).is_none());
+        assert!(days_since_published(Some("2024")).is_none());
+    }
+
+    #[test]
+    fn score_candidate_includes_recency_component_for_recent_crate() {
+        // A crate published "today" (use a far-future date to guarantee recency).
+        let candidate = make_candidate(0.5, 1000, 10, Some("2026-01-01 00:00:00+00"));
+        let (score, reasons) = score_candidate(&candidate, 1, 1, LicensePolicyResult::Allowed);
+        assert!(score > 0.0);
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.starts_with("recency_days=")),
+            "expected recency_days reason, got: {reasons:?}"
+        );
+    }
+
+    #[test]
+    fn score_candidate_no_recency_for_very_old_crate() {
+        // A crate published 10+ years ago: recency component should be 0.
+        let candidate = make_candidate(0.5, 1000, 10, Some("2015-01-01 00:00:00+00"));
+        let (score_old, _) = score_candidate(&candidate, 1, 1, LicensePolicyResult::Allowed);
+
+        // Compare with a recently published crate (same other signals).
+        let recent = make_candidate(0.5, 1000, 10, Some("2026-01-01 00:00:00+00"));
+        let (score_recent, _) = score_candidate(&recent, 1, 1, LicensePolicyResult::Allowed);
+
+        assert!(
+            score_recent > score_old,
+            "recent crate (score={score_recent}) should score higher than old crate \
+             (score={score_old})"
+        );
+    }
+
+    #[test]
+    fn score_candidate_adoption_signals_bounded() {
+        // Even with massive downloads/dependents, adoption should not dominate.
+        let popular = make_candidate(0.0, 100_000_000, 50_000, None);
+        let (popular_score, _) = score_candidate(&popular, 0, 0, LicensePolicyResult::Allowed);
+
+        // A crate with moderate popularity but strong taxonomy overlap should win.
+        let relevant = make_candidate(0.5, 1000, 10, None);
+        let (relevant_score, _) = score_candidate(&relevant, 2, 3, LicensePolicyResult::Allowed);
+
+        assert!(
+            relevant_score > popular_score,
+            "relevant crate (score={relevant_score}) should outscore unrelated popular crate \
+             (score={popular_score})"
+        );
+    }
+
+    #[test]
+    fn score_candidate_yanked_penalty_applied() {
+        let mut candidate = make_candidate(0.5, 1000, 10, None);
+        let (score_normal, _) = score_candidate(&candidate, 1, 0, LicensePolicyResult::Allowed);
+        candidate.yanked = true;
+        let (score_yanked, reasons) =
+            score_candidate(&candidate, 1, 0, LicensePolicyResult::Allowed);
+        assert!(score_yanked < score_normal);
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.contains("yanked_penalty")),
+            "expected yanked penalty in reasons"
+        );
+    }
+
+    #[test]
+    fn score_candidate_advisory_penalty_applied() {
+        let mut candidate = make_candidate(0.5, 1000, 10, None);
+        let (score_clean, _) = score_candidate(&candidate, 1, 0, LicensePolicyResult::Allowed);
+        candidate.advisory_count = 3;
+        let (score_advisory, reasons) =
+            score_candidate(&candidate, 1, 0, LicensePolicyResult::Allowed);
+        assert!(score_advisory < score_clean);
+        assert!(
+            reasons
+                .iter()
+                .any(|r| r.contains("advisory_penalty")),
+            "expected advisory penalty in reasons"
+        );
+    }
+
+    #[test]
+    fn score_candidate_license_denied_penalty() {
+        let candidate = make_candidate(0.5, 1000, 10, None);
+        let (score_allowed, _) = score_candidate(&candidate, 1, 0, LicensePolicyResult::Allowed);
+        let (score_denied, _) = score_candidate(&candidate, 1, 0, LicensePolicyResult::Denied);
+        assert!(score_denied < score_allowed - 7.0);
     }
 }

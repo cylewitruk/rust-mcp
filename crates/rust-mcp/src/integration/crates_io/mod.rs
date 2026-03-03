@@ -1,3 +1,6 @@
+/// On-demand crate source download and extraction from `static.crates.io`.
+pub mod source;
+
 use std::collections::BTreeMap;
 
 use reqwest::StatusCode;

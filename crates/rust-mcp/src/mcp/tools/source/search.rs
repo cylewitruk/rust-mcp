@@ -14,7 +14,7 @@ use crate::mcp::ripgrep::{self, RipgrepMode};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
     CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
-    read_source_file_from_disk, resolve_pagination, resolve_registry_source_dir,
+    read_source_file_from_disk_or_cache, resolve_pagination, resolve_source_dir,
     source_read_end_line, source_search_limit, sync_page,
 };
 
@@ -154,11 +154,17 @@ impl McpServer {
             if file_hits.len() >= target_count {
                 break;
             }
-            let Some(version_dir) = resolve_registry_source_dir(
+            let Some(version_dir) = resolve_source_dir(
                 &self
                     .state
                     .config
                     .cargo_registry_dir,
+                Some(
+                    &self
+                        .state
+                        .config
+                        .crate_source_cache_dir,
+                ),
                 &cv.crate_name,
                 &cv.version,
             ) else {
@@ -297,6 +303,8 @@ impl McpServer {
 
             self.ensure_source_indexed(&crate_name, crate_version.id)
                 .await?;
+            self.ensure_source_on_disk(&crate_name, &version, crate_version.id)
+                .await?;
 
             tools::fetch_source_read_for_crate_version_path(
                 &self.state.db,
@@ -308,7 +316,12 @@ impl McpServer {
             .map_err(|e| {
                 format!("source_read lookup failed for {crate_name}@{version}:{path}: {e}")
             })?
-            .ok_or_else(|| format!("source file not found for {crate_name}@{version}:{path}"))?
+            .ok_or_else(|| {
+                format!(
+                    "source file not found for {crate_name}@{version}:{path}. Try crate_api or \
+                     symbol_search to explore this crate's API surface."
+                )
+            })?
         } else {
             // Best-effort on-demand source indexing for the latest version.
             if let Ok(Some(cr)) = tools::fetch_crate_core_by_name(&self.state.db, &crate_name).await
@@ -316,26 +329,40 @@ impl McpServer {
             {
                 self.ensure_source_indexed(&crate_name, lv.id)
                     .await?;
+                self.ensure_source_on_disk(&crate_name, &lv.version, lv.id)
+                    .await?;
             }
 
             tools::fetch_source_read_latest_for_crate_path(&self.state.db, &crate_name, &path)
                 .await
                 .map_err(|e| format!("source_read lookup failed for {crate_name}:{path}: {e}"))?
-                .ok_or_else(|| format!("source file not found for {crate_name}:{path}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "source file not found for {crate_name}:{path}. Try crate_api or \
+                         symbol_search to explore this crate's API surface."
+                    )
+                })?
         };
 
-        let content = read_source_file_from_disk(
+        let content = read_source_file_from_disk_or_cache(
             &self
                 .state
                 .config
                 .cargo_registry_dir,
+            Some(
+                &self
+                    .state
+                    .config
+                    .crate_source_cache_dir,
+            ),
             &row.crate_name,
             &row.version,
             &row.path,
         )
         .ok_or_else(|| {
             format!(
-                "source content not available on disk for {}@{}:{} (not found in cargo registry)",
+                "source content not available on disk for {}@{}:{} (not found in cargo registry). \
+                 Try crate_type_info, crate_api, or symbol_search for rustdoc-based API data.",
                 row.crate_name, row.version, row.path
             )
         })?;

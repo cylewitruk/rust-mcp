@@ -40,9 +40,11 @@ fn normalize_kind_filters(input: Option<Vec<String>>) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .map(|value| {
-            value
+            let normalized = value
                 .trim()
-                .to_ascii_lowercase()
+                .to_ascii_lowercase();
+            // "method" is an alias for "function" (rustdoc doesn't distinguish them).
+            if normalized == "method" { "function".to_string() } else { normalized }
         })
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
@@ -261,5 +263,18 @@ mod tests {
             "module".to_string(),
         ]);
         assert_eq!(values, vec!["function".to_string(), "module".to_string()]);
+    }
+
+    #[test]
+    fn normalize_maps_method_to_function() {
+        let values = normalize_kind_filters(Some(vec!["method".to_string(), "struct".to_string()]));
+        assert_eq!(values, vec!["function".to_string(), "struct".to_string()]);
+    }
+
+    #[test]
+    fn normalize_deduplicates_method_and_function() {
+        let values =
+            normalize_kind_filters(Some(vec!["method".to_string(), "function".to_string()]));
+        assert_eq!(values, vec!["function".to_string()]);
     }
 }
