@@ -4,8 +4,6 @@ use tracing::debug;
 
 use crate::state::{AppState, OutboundSource};
 
-const OSV_QUERY_URL: &str = "https://api.osv.dev/v1/query";
-
 #[derive(Debug, Deserialize)]
 pub struct OsvQueryResponse {
     #[serde(default)]
@@ -25,6 +23,8 @@ pub struct OsvVulnerability {
     pub references: Vec<OsvReference>,
     #[serde(default)]
     pub severity: Vec<OsvSeverity>,
+    #[serde(default)]
+    pub database_specific: Option<OsvDatabaseSpecific>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +33,8 @@ pub struct OsvAffected {
     pub versions: Vec<String>,
     #[serde(default)]
     pub ranges: Vec<OsvRange>,
+    #[serde(default)]
+    pub ecosystem_specific: Option<OsvEcosystemSpecific>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +65,19 @@ pub struct OsvSeverity {
     pub score: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct OsvDatabaseSpecific {
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub cwe_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OsvEcosystemSpecific {
+    #[serde(default)]
+    pub functions: Vec<String>,
+}
+
 pub struct OsvDevClient<'a> {
     state: &'a AppState,
 }
@@ -76,11 +91,18 @@ impl<'a> OsvDevClient<'a> {
         self.state
             .acquire_outbound_slot(OutboundSource::Osv)
             .await;
-        debug!(%crate_name, url = OSV_QUERY_URL, "OSV query request");
+        let query_url = format!(
+            "{}/v1/query",
+            self.state
+                .config
+                .osv_base_url
+                .trim_end_matches('/')
+        );
+        debug!(%crate_name, url = %query_url, "OSV query request");
         let response = self
             .state
             .http
-            .post(OSV_QUERY_URL)
+            .post(&query_url)
             .json(&json!({
                 "package": {
                     "name": crate_name,

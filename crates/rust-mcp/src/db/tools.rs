@@ -465,17 +465,20 @@ pub async fn fetch_crate_advisories_for_version(
     crate_version_id: i64,
 ) -> Result<Vec<CrateAdvisoryRow>, sqlx::Error> {
     sqlx::query_as::<_, CrateAdvisoryRow>(
-        "SELECT
+        "SELECT DISTINCT ON (advisory_id)
             advisory_id,
             title,
             severity,
             url,
             affected_range,
             fixed_versions,
-            source
+            source,
+            details,
+            affected_functions,
+            cwe_ids
          FROM advisory_matches
          WHERE crate_id = $1 AND (version_id = $2 OR version_id IS NULL)
-         ORDER BY advisory_id ASC",
+         ORDER BY advisory_id ASC, source ASC",
     )
     .bind(crate_id)
     .bind(crate_version_id)

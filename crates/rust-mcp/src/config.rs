@@ -35,6 +35,8 @@ pub mod env_vars {
     pub const DOCS_RS_WINDOW_MAX_REQUESTS: &str = "DOCS_RS_WINDOW_MAX_REQUESTS";
     /// Rolling window duration for docs.rs rate limiting in seconds.
     pub const DOCS_RS_WINDOW_DURATION_SECS: &str = "DOCS_RS_WINDOW_DURATION_SECS";
+    /// OSV API base URL.
+    pub const OSV_BASE_URL: &str = "OSV_BASE_URL";
     /// Minimum interval between OSV requests in milliseconds.
     pub const OSV_MIN_INTERVAL_MS: &str = "OSV_MIN_INTERVAL_MS";
     /// Max OSV requests allowed in the rolling window.
@@ -145,11 +147,11 @@ pub struct Config {
     pub crates_io_min_interval_ms: u64,
 
     /// Max crates.io requests allowed in the rolling window. 0 = disabled.
-    #[arg(long, env = env_vars::CRATES_IO_WINDOW_MAX_REQUESTS, default_value_t = 100)]
+    #[arg(long, env = env_vars::CRATES_IO_WINDOW_MAX_REQUESTS, default_value_t = 60)]
     pub crates_io_window_max_requests: u32,
 
     /// Rolling window duration for crates.io rate limiting in seconds.
-    #[arg(long, env = env_vars::CRATES_IO_WINDOW_DURATION_SECS, default_value_t = 180)]
+    #[arg(long, env = env_vars::CRATES_IO_WINDOW_DURATION_SECS, default_value_t = 120)]
     pub crates_io_window_duration_secs: u64,
 
     /// Base URL for docs.rs page fetches.
@@ -158,7 +160,7 @@ pub struct Config {
 
     /// Minimum delay between outbound docs.rs requests (per process) in
     /// milliseconds.
-    #[arg(long, env = env_vars::DOCS_RS_MIN_INTERVAL_MS, default_value_t = 500)]
+    #[arg(long, env = env_vars::DOCS_RS_MIN_INTERVAL_MS, default_value_t = 1000)]
     pub docs_rs_min_interval_ms: u64,
 
     /// Max docs.rs requests allowed in the rolling window. 0 = disabled.
@@ -166,20 +168,24 @@ pub struct Config {
     pub docs_rs_window_max_requests: u32,
 
     /// Rolling window duration for docs.rs rate limiting in seconds.
-    #[arg(long, env = env_vars::DOCS_RS_WINDOW_DURATION_SECS, default_value_t = 180)]
+    #[arg(long, env = env_vars::DOCS_RS_WINDOW_DURATION_SECS, default_value_t = 120)]
     pub docs_rs_window_duration_secs: u64,
+
+    /// Base URL for OSV API calls.
+    #[arg(long, env = env_vars::OSV_BASE_URL, default_value = "https://api.osv.dev")]
+    pub osv_base_url: String,
 
     /// Minimum delay between outbound OSV requests (per process) in
     /// milliseconds.
-    #[arg(long, env = env_vars::OSV_MIN_INTERVAL_MS, default_value_t = 250)]
+    #[arg(long, env = env_vars::OSV_MIN_INTERVAL_MS, default_value_t = 1000)]
     pub osv_min_interval_ms: u64,
 
     /// Max OSV requests allowed in the rolling window. 0 = disabled.
-    #[arg(long, env = env_vars::OSV_WINDOW_MAX_REQUESTS, default_value_t = 50)]
+    #[arg(long, env = env_vars::OSV_WINDOW_MAX_REQUESTS, default_value_t = 60)]
     pub osv_window_max_requests: u32,
 
     /// Rolling window duration for OSV rate limiting in seconds.
-    #[arg(long, env = env_vars::OSV_WINDOW_DURATION_SECS, default_value_t = 180)]
+    #[arg(long, env = env_vars::OSV_WINDOW_DURATION_SECS, default_value_t = 120)]
     pub osv_window_duration_secs: u64,
 
     /// Minimum database connection pool size.

@@ -37,6 +37,7 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         docs_rs_min_interval_ms: 1,
         docs_rs_window_max_requests: 0,
         docs_rs_window_duration_secs: 1,
+        osv_base_url: "https://api.osv.dev".to_string(),
         osv_min_interval_ms: 1,
         osv_window_max_requests: 0,
         osv_window_duration_secs: 1,

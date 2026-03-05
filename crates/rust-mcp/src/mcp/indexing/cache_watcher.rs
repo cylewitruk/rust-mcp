@@ -270,7 +270,7 @@ async fn enqueue_new_files(
             false,
             json!({
                 "trigger": "cache_watcher",
-                "detected_versions": versions,
+                "local_versions": versions,
             }),
         )
         .await

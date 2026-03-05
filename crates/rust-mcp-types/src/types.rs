@@ -1295,6 +1295,19 @@ pub mod krate {
         pub fixed_versions: Vec<String>,
         /// Advisory source label.
         pub source: String,
+        /// Full vulnerability description (markdown). Use for detailed
+        /// analysis; may be long.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub details: Option<String>,
+        /// Affected function paths from the advisory. When non-empty, the
+        /// client can check whether its codebase calls any of these
+        /// functions to determine reachability.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        pub affected_functions: Vec<String>,
+        /// CWE identifiers associated with the advisory (e.g.
+        /// `["CWE-787"]`).
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        pub cwe_ids: Vec<String>,
     }
 
     /// Request payload for `crate.versions`.

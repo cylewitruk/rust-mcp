@@ -14,7 +14,7 @@ use crate::db::indexing::{
 };
 use crate::db::models::{CrateLevelAdvisoryMatchInsert, VersionAdvisoryMatchInsert};
 use crate::integration::osv::{
-    OsvAffected, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
+    OsvAffected, OsvDatabaseSpecific, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
 };
 use crate::mcp::server::McpServer;
 
@@ -51,6 +51,8 @@ struct RustSecFrontmatter {
     advisory: RustSecAdvisory,
     #[serde(default)]
     versions: RustSecVersions,
+    #[serde(default)]
+    affected: RustSecAffected,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -74,6 +76,12 @@ struct RustSecVersions {
     patched: Vec<String>,
     #[serde(default)]
     unaffected: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RustSecAffected {
+    #[serde(default)]
+    functions: HashMap<String, Vec<String>>,
 }
 
 fn affected_range_text(affected: &[OsvAffected]) -> String {
@@ -154,7 +162,25 @@ fn extract_first_float(text: &str) -> Option<f64> {
     if token.is_empty() { None } else { token.parse::<f64>().ok() }
 }
 
-fn normalize_severity_label(severity: &[OsvSeverity]) -> Option<String> {
+fn normalize_severity_label(
+    severity: &[OsvSeverity],
+    database_specific: Option<&OsvDatabaseSpecific>,
+) -> Option<String> {
+    // Prefer database_specific.severity — OSV for crates.io typically
+    // provides a human-readable label here (CRITICAL, HIGH, etc.)
+    // while the severity[] CVSS vector is often absent.
+    if let Some(db) = database_specific
+        && let Some(label) = db.severity.as_deref()
+    {
+        let lower = label.to_ascii_lowercase();
+        if ["critical", "high", "medium", "low", "unknown"]
+            .iter()
+            .any(|k| lower == *k)
+        {
+            return Some(lower);
+        }
+    }
+
     for item in severity {
         if let Some(score_text) = item.score.as_deref()
             && let Some(score) = extract_first_float(score_text)
@@ -187,6 +213,21 @@ fn normalize_severity_label(severity: &[OsvSeverity]) -> Option<String> {
     }
 
     None
+}
+
+fn collect_affected_functions(affected: &[OsvAffected]) -> Vec<String> {
+    let mut functions = Vec::new();
+    for item in affected {
+        if let Some(ref eco) = item.ecosystem_specific {
+            for func in &eco.functions {
+                if !functions.contains(func) {
+                    functions.push(func.clone());
+                }
+            }
+        }
+    }
+    functions.sort();
+    functions
 }
 
 fn split_toml_frontmatter(markdown: &str) -> Option<(&str, &str)> {
@@ -335,16 +376,26 @@ impl McpServer {
                 let title = vuln
                     .summary
                     .clone()
-                    .or(vuln.details.clone())
                     .or_else(|| vuln.aliases.first().cloned())
                     .unwrap_or_else(|| vuln.id.clone());
-                let severity = normalize_severity_label(&vuln.severity);
+                let severity = normalize_severity_label(
+                    &vuln.severity,
+                    vuln.database_specific
+                        .as_ref(),
+                );
                 let url = vuln
                     .references
                     .first()
                     .map(|r| r.url.clone());
                 let affected_range = affected_range_text(&vuln.affected);
                 let fixed_versions_json = fixed_versions(&vuln.affected);
+                let details = vuln.details.as_deref();
+                let affected_functions = collect_affected_functions(&vuln.affected);
+                let cwe_ids = vuln
+                    .database_specific
+                    .as_ref()
+                    .map(|db| db.cwe_ids.clone())
+                    .unwrap_or_default();
 
                 let mut matched_any = false;
                 for affected in &vuln.affected {
@@ -364,6 +415,9 @@ impl McpServer {
                                 affected_range: &affected_range,
                                 fixed_versions: &fixed_versions_json,
                                 source: &advisory_source,
+                                details,
+                                affected_functions: &affected_functions,
+                                cwe_ids: &cwe_ids,
                             };
                             upsert_version_advisory_match(&self.state.db, &insert)
                                 .await
@@ -388,6 +442,9 @@ impl McpServer {
                         affected_range: &affected_range,
                         fixed_versions: &fixed_versions_json,
                         source: &advisory_source,
+                        details,
+                        affected_functions: &affected_functions,
+                        cwe_ids: &cwe_ids,
                     };
                     insert_crate_level_advisory_match(&self.state.db, &insert)
                         .await
@@ -619,6 +676,35 @@ impl McpServer {
                 let unaffected_reqs = parse_version_reqs(&parsed.versions.unaffected);
                 let fixed_versions_json = json!(parsed.versions.patched);
 
+                // Use advisory body as details; description is a short
+                // summary in RustSec, body has the full writeup.
+                let details = {
+                    let trimmed = body.trim();
+                    if trimmed.is_empty() {
+                        parsed
+                            .advisory
+                            .description
+                            .as_deref()
+                    } else {
+                        Some(trimmed)
+                    }
+                };
+
+                // RustSec affected.functions is a map of
+                // crate_path -> [version_req]. We only need the function
+                // paths for reachability analysis.
+                let mut affected_functions: Vec<String> = parsed
+                    .affected
+                    .functions
+                    .keys()
+                    .cloned()
+                    .collect();
+                affected_functions.sort();
+
+                // RustSec categories map to CWE-like classifications but
+                // aren't CWE IDs themselves, so we leave cwe_ids empty.
+                let cwe_ids: Vec<String> = Vec::new();
+
                 let mut matched_any = false;
                 for version_row in &version_rows {
                     let Some(affected) =
@@ -642,6 +728,9 @@ impl McpServer {
                         affected_range: &affected_range,
                         fixed_versions: &fixed_versions_json,
                         source: "rustsec_db",
+                        details,
+                        affected_functions: &affected_functions,
+                        cwe_ids: &cwe_ids,
                     };
                     upsert_version_advisory_match(&self.state.db, &insert)
                         .await
@@ -664,6 +753,9 @@ impl McpServer {
                         affected_range: &affected_range,
                         fixed_versions: &fixed_versions_json,
                         source: "rustsec_db",
+                        details,
+                        affected_functions: &affected_functions,
+                        cwe_ids: &cwe_ids,
                     };
                     insert_crate_level_advisory_match(&self.state.db, &insert)
                         .await
@@ -747,5 +839,99 @@ Some details.
         assert_eq!(is_version_affected("1.0.0", &patched_reqs, &unaffected_reqs), Some(true));
         assert_eq!(is_version_affected("1.2.0", &patched_reqs, &unaffected_reqs), Some(false));
         assert_eq!(is_version_affected("0.7.9", &patched_reqs, &unaffected_reqs), Some(false));
+    }
+
+    #[test]
+    fn severity_prefers_database_specific_label() {
+        let db_specific = OsvDatabaseSpecific {
+            severity: Some("CRITICAL".to_string()),
+            cwe_ids: vec!["CWE-787".to_string()],
+        };
+        // Even with a CVSS score in severity[], database_specific should win.
+        let severity_vec = vec![OsvSeverity {
+            severity_type: Some("CVSS_V3".to_string()),
+            score: Some("CVSS:3.1/AV:N/AC:L 7.5".to_string()),
+        }];
+        let result = normalize_severity_label(&severity_vec, Some(&db_specific));
+        assert_eq!(result.as_deref(), Some("critical"));
+    }
+
+    #[test]
+    fn severity_falls_back_to_cvss_score_without_database_specific() {
+        let result = normalize_severity_label(
+            &[OsvSeverity {
+                severity_type: Some("CVSS_V3".to_string()),
+                score: Some("7.5".to_string()),
+            }],
+            None,
+        );
+        assert_eq!(result.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn severity_returns_none_when_no_data() {
+        let result = normalize_severity_label(&[], None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn collect_affected_functions_from_osv_ecosystem_specific() {
+        use crate::integration::osv::{OsvAffected, OsvEcosystemSpecific};
+
+        let affected = vec![
+            OsvAffected {
+                versions: vec![],
+                ranges: vec![],
+                ecosystem_specific: Some(OsvEcosystemSpecific {
+                    functions: vec![
+                        "smallvec::SmallVec::insert_many".to_string(),
+                        "smallvec::SmallVec::grow".to_string(),
+                    ],
+                }),
+            },
+            OsvAffected {
+                versions: vec![],
+                ranges: vec![],
+                ecosystem_specific: None,
+            },
+        ];
+
+        let funcs = collect_affected_functions(&affected);
+        assert_eq!(funcs, vec!["smallvec::SmallVec::grow", "smallvec::SmallVec::insert_many",]);
+    }
+
+    #[test]
+    fn rustsec_frontmatter_with_affected_functions() {
+        let fixture = r#"+++
+[advisory]
+id = "RUSTSEC-2024-0001"
+package = "demo-crate"
+title = "Buffer overflow in insert_many"
+
+[versions]
+patched = [">=1.6.1"]
+
+[affected.functions]
+"smallvec::SmallVec::insert_many" = [">=0.6.3, <1.6.1"]
++++
+
+# Buffer overflow
+
+Details here.
+"#;
+
+        let (frontmatter, _body) =
+            split_toml_frontmatter(fixture).expect("frontmatter should be extracted");
+        let parsed: RustSecFrontmatter =
+            toml::from_str(frontmatter).expect("frontmatter should parse as TOML");
+
+        let mut funcs: Vec<String> = parsed
+            .affected
+            .functions
+            .keys()
+            .cloned()
+            .collect();
+        funcs.sort();
+        assert_eq!(funcs, vec!["smallvec::SmallVec::insert_many"]);
     }
 }

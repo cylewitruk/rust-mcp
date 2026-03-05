@@ -194,6 +194,12 @@ pub struct CrateAdvisoryRow {
     pub fixed_versions: Value,
     /// Advisory source key.
     pub source: String,
+    /// Full vulnerability description (markdown).
+    pub details: Option<String>,
+    /// Affected function paths from the advisory.
+    pub affected_functions: Vec<String>,
+    /// CWE identifiers associated with the advisory.
+    pub cwe_ids: Vec<String>,
 }
 
 /// Symbol line lookup row used by `source.context`.
@@ -596,7 +602,7 @@ pub struct SecurityVersionRow {
 }
 
 /// Insert DTO for upserting a version-specific advisory match.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct VersionAdvisoryMatchInsert<'a> {
     /// Crate primary key.
     pub crate_id: i64,
@@ -616,10 +622,16 @@ pub struct VersionAdvisoryMatchInsert<'a> {
     pub fixed_versions: &'a Value,
     /// Advisory source label.
     pub source: &'a str,
+    /// Full vulnerability description (markdown).
+    pub details: Option<&'a str>,
+    /// Affected function paths from the advisory.
+    pub affected_functions: &'a [String],
+    /// CWE identifiers associated with the advisory.
+    pub cwe_ids: &'a [String],
 }
 
 /// Insert DTO for writing a crate-level advisory match.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct CrateLevelAdvisoryMatchInsert<'a> {
     /// Crate primary key.
     pub crate_id: i64,
@@ -637,6 +649,12 @@ pub struct CrateLevelAdvisoryMatchInsert<'a> {
     pub fixed_versions: &'a Value,
     /// Advisory source label.
     pub source: &'a str,
+    /// Full vulnerability description (markdown).
+    pub details: Option<&'a str>,
+    /// Affected function paths from the advisory.
+    pub affected_functions: &'a [String],
+    /// CWE identifiers associated with the advisory.
+    pub cwe_ids: &'a [String],
 }
 
 /// Insert DTO for a symbol extracted from source or rustdoc metadata.

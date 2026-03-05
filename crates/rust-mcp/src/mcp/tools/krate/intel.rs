@@ -141,6 +141,9 @@ impl McpServer {
                 affected_range: row.affected_range,
                 fixed_versions: value_to_string_vec(&row.fixed_versions),
                 source: row.source,
+                details: row.details,
+                affected_functions: row.affected_functions,
+                cwe_ids: row.cwe_ids,
             })
             .collect::<Vec<_>>();
 

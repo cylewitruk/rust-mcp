@@ -397,9 +397,10 @@ pub async fn upsert_version_advisory_match(
     sqlx::query(
         "INSERT INTO advisory_matches (
             crate_id, version_id, advisory_id, severity, title, url,
-            affected_range, fixed_versions, source, created_at
+            affected_range, fixed_versions, source, details,
+            affected_functions, cwe_ids, created_at
          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
          )
          ON CONFLICT (crate_id, version_id, advisory_id)
          DO UPDATE SET
@@ -409,6 +410,9 @@ pub async fn upsert_version_advisory_match(
             affected_range = EXCLUDED.affected_range,
             fixed_versions = EXCLUDED.fixed_versions,
             source = EXCLUDED.source,
+            details = EXCLUDED.details,
+            affected_functions = EXCLUDED.affected_functions,
+            cwe_ids = EXCLUDED.cwe_ids,
             created_at = NOW()",
     )
     .bind(advisory.crate_id)
@@ -420,6 +424,9 @@ pub async fn upsert_version_advisory_match(
     .bind(advisory.affected_range)
     .bind(advisory.fixed_versions)
     .bind(advisory.source)
+    .bind(advisory.details)
+    .bind(advisory.affected_functions)
+    .bind(advisory.cwe_ids)
     .execute(db)
     .await?;
     Ok(())
@@ -434,9 +441,10 @@ pub async fn insert_crate_level_advisory_match(
     sqlx::query(
         "INSERT INTO advisory_matches (
             crate_id, version_id, advisory_id, severity, title, url,
-            affected_range, fixed_versions, source, created_at
+            affected_range, fixed_versions, source, details,
+            affected_functions, cwe_ids, created_at
          ) VALUES (
-             $1, NULL, $2, $3, $4, $5, $6, $7, $8, NOW()
+             $1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
          )",
     )
     .bind(advisory.crate_id)
@@ -447,6 +455,9 @@ pub async fn insert_crate_level_advisory_match(
     .bind(advisory.affected_range)
     .bind(advisory.fixed_versions)
     .bind(advisory.source)
+    .bind(advisory.details)
+    .bind(advisory.affected_functions)
+    .bind(advisory.cwe_ids)
     .execute(db)
     .await?;
     Ok(())
