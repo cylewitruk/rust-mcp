@@ -16,10 +16,13 @@ pub mod maintenance;
 pub mod rustdoc_json;
 /// OSV and RustSec advisory synchronization.
 pub mod security;
+/// Periodic background security advisory synchronization.
+pub mod security_sync;
 /// Durable refresh worker loop.
 pub mod worker;
 
 pub use cache_watcher::run_cache_watcher;
 pub use discovery::{collect_local_versions_for_crate, run_registry_discovery};
 pub use maintenance::run_enrichment_maintenance;
+pub use security_sync::run_security_sync;
 pub use worker::run_refresh_worker;

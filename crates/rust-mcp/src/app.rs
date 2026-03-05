@@ -62,6 +62,7 @@ pub async fn run() -> Result<()> {
     tokio::spawn(mcp::run_enrichment_maintenance(state.clone()));
     tokio::spawn(mcp::run_registry_discovery(state.clone()));
     tokio::spawn(mcp::run_cache_watcher(state.clone()));
+    tokio::spawn(mcp::run_security_sync(state.clone()));
 
     let shutdown = make_shutdown_signal().context("failed to install shutdown signal handlers")?;
 

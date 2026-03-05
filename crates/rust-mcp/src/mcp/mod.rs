@@ -23,6 +23,7 @@ mod transport;
 
 pub use indexing::{
     run_cache_watcher, run_enrichment_maintenance, run_refresh_worker, run_registry_discovery,
+    run_security_sync,
 };
 pub use transport::streamable_http_service;
 
@@ -52,6 +53,14 @@ pub async fn run_registry_scan_with_outcome_for_tests(
     state: &crate::state::AppState,
 ) -> indexing::discovery::DiscoveryScanOutcome {
     indexing::discovery::run_registry_scan(state).await
+}
+
+#[cfg(feature = "testing")]
+/// Test-only wrapper that runs a single security sync scan.
+pub async fn run_security_sync_scan_for_tests(
+    state: &crate::state::AppState,
+) -> indexing::security_sync::SecuritySyncRunOutcome {
+    indexing::security_sync::run_security_sync_scan(state).await
 }
 
 #[cfg(feature = "testing")]

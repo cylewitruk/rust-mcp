@@ -48,9 +48,15 @@ fn test_config(
         crates_io_user_agent: "rust-mcp-tests/0.1.0".to_string(),
         crates_io_timeout_secs: 20,
         crates_io_min_interval_ms: 1,
+        crates_io_window_max_requests: 0,
+        crates_io_window_duration_secs: 1,
         docs_rs_base_url: crates_io_base_url,
         docs_rs_min_interval_ms: 1,
+        docs_rs_window_max_requests: 0,
+        docs_rs_window_duration_secs: 1,
         osv_min_interval_ms: 1,
+        osv_window_max_requests: 0,
+        osv_window_duration_secs: 1,
         database_min_connections: 1,
         database_max_connections: 4,
         max_concurrent_requests: 32,
@@ -70,6 +76,8 @@ fn test_config(
         enrichment_maintenance_interval_secs: 0,
         rustdoc_retry_cooldown_secs: 86400,
         registry_cache_watch_interval_ms: 0,
+        security_sync_interval_secs: 0,
+        security_sync_batch_size: 50,
     }
 }
 
@@ -570,5 +578,6 @@ mod discovery;
 mod failure_paths;
 mod on_demand;
 mod rustdoc_refresh;
+mod security_sync;
 mod status_sync;
 mod workers;

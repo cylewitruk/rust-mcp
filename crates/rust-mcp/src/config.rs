@@ -23,12 +23,24 @@ pub mod env_vars {
     pub const CRATES_IO_TIMEOUT_SECS: &str = "CRATES_IO_TIMEOUT_SECS";
     /// Minimum interval between crates.io requests in milliseconds.
     pub const CRATES_IO_MIN_INTERVAL_MS: &str = "CRATES_IO_MIN_INTERVAL_MS";
+    /// Max crates.io requests allowed in the rolling window.
+    pub const CRATES_IO_WINDOW_MAX_REQUESTS: &str = "CRATES_IO_WINDOW_MAX_REQUESTS";
+    /// Rolling window duration for crates.io rate limiting in seconds.
+    pub const CRATES_IO_WINDOW_DURATION_SECS: &str = "CRATES_IO_WINDOW_DURATION_SECS";
     /// docs.rs base URL.
     pub const DOCS_RS_BASE_URL: &str = "DOCS_RS_BASE_URL";
     /// Minimum interval between docs.rs requests in milliseconds.
     pub const DOCS_RS_MIN_INTERVAL_MS: &str = "DOCS_RS_MIN_INTERVAL_MS";
+    /// Max docs.rs requests allowed in the rolling window.
+    pub const DOCS_RS_WINDOW_MAX_REQUESTS: &str = "DOCS_RS_WINDOW_MAX_REQUESTS";
+    /// Rolling window duration for docs.rs rate limiting in seconds.
+    pub const DOCS_RS_WINDOW_DURATION_SECS: &str = "DOCS_RS_WINDOW_DURATION_SECS";
     /// Minimum interval between OSV requests in milliseconds.
     pub const OSV_MIN_INTERVAL_MS: &str = "OSV_MIN_INTERVAL_MS";
+    /// Max OSV requests allowed in the rolling window.
+    pub const OSV_WINDOW_MAX_REQUESTS: &str = "OSV_WINDOW_MAX_REQUESTS";
+    /// Rolling window duration for OSV rate limiting in seconds.
+    pub const OSV_WINDOW_DURATION_SECS: &str = "OSV_WINDOW_DURATION_SECS";
     /// Minimum database pool connections.
     pub const DATABASE_MIN_CONNECTIONS: &str = "DATABASE_MIN_CONNECTIONS";
     /// Maximum database pool connections.
@@ -65,6 +77,10 @@ pub mod env_vars {
     pub const CRATE_SOURCE_CACHE_DIR: &str = "CRATE_SOURCE_CACHE_DIR";
     /// Polling interval in milliseconds for the registry cache watcher.
     pub const REGISTRY_CACHE_WATCH_INTERVAL_MS: &str = "REGISTRY_CACHE_WATCH_INTERVAL_MS";
+    /// Seconds between periodic security advisory syncs.
+    pub const SECURITY_SYNC_INTERVAL_SECS: &str = "SECURITY_SYNC_INTERVAL_SECS";
+    /// Max crates to check per security sync page.
+    pub const SECURITY_SYNC_BATCH_SIZE: &str = "SECURITY_SYNC_BATCH_SIZE";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -128,6 +144,14 @@ pub struct Config {
     #[arg(long, env = env_vars::CRATES_IO_MIN_INTERVAL_MS, default_value_t = 1000)]
     pub crates_io_min_interval_ms: u64,
 
+    /// Max crates.io requests allowed in the rolling window. 0 = disabled.
+    #[arg(long, env = env_vars::CRATES_IO_WINDOW_MAX_REQUESTS, default_value_t = 100)]
+    pub crates_io_window_max_requests: u32,
+
+    /// Rolling window duration for crates.io rate limiting in seconds.
+    #[arg(long, env = env_vars::CRATES_IO_WINDOW_DURATION_SECS, default_value_t = 180)]
+    pub crates_io_window_duration_secs: u64,
+
     /// Base URL for docs.rs page fetches.
     #[arg(long, env = env_vars::DOCS_RS_BASE_URL, default_value = "https://docs.rs")]
     pub docs_rs_base_url: String,
@@ -137,10 +161,26 @@ pub struct Config {
     #[arg(long, env = env_vars::DOCS_RS_MIN_INTERVAL_MS, default_value_t = 500)]
     pub docs_rs_min_interval_ms: u64,
 
+    /// Max docs.rs requests allowed in the rolling window. 0 = disabled.
+    #[arg(long, env = env_vars::DOCS_RS_WINDOW_MAX_REQUESTS, default_value_t = 60)]
+    pub docs_rs_window_max_requests: u32,
+
+    /// Rolling window duration for docs.rs rate limiting in seconds.
+    #[arg(long, env = env_vars::DOCS_RS_WINDOW_DURATION_SECS, default_value_t = 180)]
+    pub docs_rs_window_duration_secs: u64,
+
     /// Minimum delay between outbound OSV requests (per process) in
     /// milliseconds.
     #[arg(long, env = env_vars::OSV_MIN_INTERVAL_MS, default_value_t = 250)]
     pub osv_min_interval_ms: u64,
+
+    /// Max OSV requests allowed in the rolling window. 0 = disabled.
+    #[arg(long, env = env_vars::OSV_WINDOW_MAX_REQUESTS, default_value_t = 50)]
+    pub osv_window_max_requests: u32,
+
+    /// Rolling window duration for OSV rate limiting in seconds.
+    #[arg(long, env = env_vars::OSV_WINDOW_DURATION_SECS, default_value_t = 180)]
+    pub osv_window_duration_secs: u64,
 
     /// Minimum database connection pool size.
     #[arg(long, env = env_vars::DATABASE_MIN_CONNECTIONS, default_value_t = 1)]
@@ -217,6 +257,14 @@ pub struct Config {
     /// trigger near-instant indexing. 0 = disabled.
     #[arg(long, env = env_vars::REGISTRY_CACHE_WATCH_INTERVAL_MS, default_value_t = 1000)]
     pub registry_cache_watch_interval_ms: u64,
+
+    /// Seconds between periodic security advisory syncs. 0 = disabled.
+    #[arg(long, env = env_vars::SECURITY_SYNC_INTERVAL_SECS, default_value_t = 86400)]
+    pub security_sync_interval_secs: u64,
+
+    /// Max crates to check per security sync page.
+    #[arg(long, env = env_vars::SECURITY_SYNC_BATCH_SIZE, default_value_t = 50)]
+    pub security_sync_batch_size: u32,
 }
 
 impl Config {
