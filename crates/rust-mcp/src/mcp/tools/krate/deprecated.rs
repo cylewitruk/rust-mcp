@@ -13,7 +13,7 @@ use crate::mcp::utils::{
 };
 
 impl McpServer {
-    /// Handles the `crate.deprecated` tool call.
+    /// Handles the `crate_deprecated` tool call.
     pub async fn handle_crate_deprecated(
         &self,
         request: CrateDeprecatedRequest,
@@ -43,7 +43,7 @@ impl McpServer {
             warn!(
                 %crate_name,
                 %error,
-                "best-effort rustdoc enrichment failed for crate.deprecated"
+                "best-effort rustdoc enrichment failed for crate_deprecated"
             );
         }
 

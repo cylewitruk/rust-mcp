@@ -68,7 +68,7 @@ fn allowed_kind_filters(values: Vec<String>) -> Vec<String> {
 }
 
 impl McpServer {
-    /// Handles the `crate.api` tool call.
+    /// Handles the `crate_api` tool call.
     pub async fn handle_crate_api(
         &self,
         request: CrateApiRequest,
@@ -93,7 +93,7 @@ impl McpServer {
                 || token.path_glob != path_glob
                 || token.kinds != kinds)
         {
-            return Err("cursor does not match current crate.api filters".to_string());
+            return Err("cursor does not match current crate_api filters".to_string());
         }
 
         let pag =

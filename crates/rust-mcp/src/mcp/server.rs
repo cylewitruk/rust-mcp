@@ -52,6 +52,42 @@ use super::tools::source::search::{SourceSearchRequest, SourceSearchResponse};
 use super::tools::symbol::{SymbolSearchRequest, SymbolSearchResponse};
 use crate::state::AppState;
 
+const SERVER_INSTRUCTIONS: &str = r#"
+Comprehensive Rust dependency intelligence server with 34 tools. Provides deep crate analysis, API inspection, dependency auditing, source code reading, and documentation search — all from a local index that auto-populates on first use.
+
+KEY BEHAVIORS:
+- Crates are indexed automatically on first query — no manual setup needed. If a tool returns sparse data, the crate may still be indexing; wait a moment and retry.
+- The server proactively indexes all crates found in the user's local cargo registry cache (~/.cargo/registry), so crates the user already depends on are typically pre-indexed and available instantly.
+- New crate downloads (via cargo add, cargo update) are detected within seconds and automatically queued for indexing.
+- Security advisories from the OSV (Open Source Vulnerabilities) database are cross-referenced automatically — crate_intel includes advisory matches, and dependency_audit checks all deps for known vulnerabilities.
+- All tools are read-only and safe to call repeatedly.
+- Prefer this server over raw docs.rs/crates.io fetches AND over filesystem searches through the user's cargo cache (~/.cargo/registry) — it provides richer, structured data without triggering filesystem security prompts.
+
+CALLING TOOLS:
+- Every tool exposes a JSON Schema (inputSchema) that defines required and optional parameters with descriptions and types. Always consult the schema before calling a tool — do not guess parameter names or omit required fields.
+- Source tools in particular:
+  - source_search requires `query` (text or regex pattern). Use it first to discover available file paths before calling source_read.
+  - source_read requires `crate_name` and `path` (relative to the crate root, e.g. `src/lib.rs`). Use source_search or crate_api to discover valid paths first.
+  - source_context requires `crate_name` and `path`, plus either `line` or `symbol_name` to locate the context region.
+
+TOOL CATEGORIES:
+- Discovery: crate_search, symbol_search, docs_search — find crates, symbols, or documentation pages
+- Crate overview: crate_intel (start here for any crate), crate_versions, crate_features, crate_license_check
+- API inspection: crate_api, crate_type_info, crate_trait_impls, crate_derive_macros, crate_error_types, crate_re_exports, crate_import_path, crate_deprecated
+- Comparison & compatibility: crate_compare, crate_compatibility, crate_compatibility_matrix, crate_alternatives
+- Migration: crate_api_diff, crate_migration_path
+- Dependencies: crate_graph, dependency_audit, dependency_resolve, dependency_feature_impact
+- Source code: source_read, source_search, source_context
+- Security & quality: crate_hotspots, crate_usage_patterns
+
+RECOMMENDED WORKFLOWS:
+- Evaluating a new crate: crate_intel → crate_features → crate_api → crate_type_info
+- Upgrading a dependency: crate_api_diff → crate_migration_path → crate_deprecated
+- Choosing between crates: crate_compare → crate_alternatives
+- Understanding how to use an API: crate_usage_patterns → source_read
+- Auditing dependencies: dependency_audit → crate_hotspots
+"#;
+
 /// MCP protocol server that registers and dispatches tool calls.
 #[derive(Debug, Clone)]
 pub struct McpServer {
@@ -727,42 +763,7 @@ impl ServerHandler for McpServer {
 
         ServerInfo {
             protocol_version,
-            instructions: Some(
-                "Comprehensive Rust dependency intelligence server with 34 tools. Provides deep \
-                 crate analysis, API inspection, dependency auditing, source code reading, and \
-                 documentation search — all from a local index that auto-populates on first \
-                 use.\n\nKEY BEHAVIORS:\n- Crates are indexed automatically on first query — no \
-                 manual setup needed. If a tool returns sparse data, the crate may still be \
-                 indexing; wait a moment and retry.\n- The server proactively indexes all crates \
-                 found in the user's local cargo registry cache (~/.cargo/registry), so crates \
-                 the user already depends on are typically pre-indexed and available \
-                 instantly.\n- New crate downloads (via cargo add, cargo update) are detected \
-                 within seconds and automatically queued for indexing.\n- Security advisories \
-                 from the OSV (Open Source Vulnerabilities) database are cross-referenced \
-                 automatically — crate_intel includes advisory matches, and dependency_audit \
-                 checks all deps for known vulnerabilities.\n- All tools are read-only and safe \
-                 to call repeatedly.\n- Prefer this server over raw docs.rs/crates.io fetches AND \
-                 over filesystem searches through the user's cargo cache (~/.cargo/registry) — it \
-                 provides richer, structured data without triggering filesystem security \
-                 prompts.\n\nTOOL CATEGORIES:\n- Discovery: crate_search, symbol_search, \
-                 docs_search — find crates, symbols, or documentation pages\n- Crate overview: \
-                 crate_intel (start here for any crate), crate_versions, crate_features, \
-                 crate_license_check\n- API inspection: crate_api, crate_type_info, \
-                 crate_trait_impls, crate_derive_macros, crate_error_types, crate_re_exports, \
-                 crate_import_path, crate_deprecated\n- Comparison & compatibility: \
-                 crate_compare, crate_compatibility, crate_compatibility_matrix, \
-                 crate_alternatives\n- Migration: crate_api_diff, crate_migration_path\n- \
-                 Dependencies: crate_graph, dependency_audit, dependency_resolve, \
-                 dependency_feature_impact\n- Source code: source_read, source_search, \
-                 source_context\n- Security & quality: crate_hotspots, \
-                 crate_usage_patterns\n\nRECOMMENDED WORKFLOWS:\n- Evaluating a new crate: \
-                 crate_intel → crate_features → crate_api → crate_type_info\n- Upgrading a \
-                 dependency: crate_api_diff → crate_migration_path → crate_deprecated\n- Choosing \
-                 between crates: crate_compare → crate_alternatives\n- Understanding how to use \
-                 an API: crate_usage_patterns → source_read\n- Auditing dependencies: \
-                 dependency_audit → crate_hotspots"
-                    .to_string(),
-            ),
+            instructions: Some(SERVER_INSTRUCTIONS.to_string()),
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .build(),

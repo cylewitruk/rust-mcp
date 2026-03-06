@@ -122,7 +122,7 @@ fn matches_error_heuristic(name: &str) -> bool {
 }
 
 impl McpServer {
-    /// Handles the `crate.error_types` tool call.
+    /// Handles the `crate_error_types` tool call.
     pub async fn handle_crate_error_types(
         &self,
         request: CrateErrorTypesRequest,
@@ -145,7 +145,7 @@ impl McpServer {
                 || token.version != requested_version
                 || token.type_name != type_name_filter)
         {
-            return Err("cursor does not match current crate.error_types filters".to_string());
+            return Err("cursor does not match current crate_error_types filters".to_string());
         }
 
         let pag =

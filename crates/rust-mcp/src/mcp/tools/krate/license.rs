@@ -113,7 +113,7 @@ fn evaluate_policy(
 }
 
 impl McpServer {
-    /// Handles the `crate.license_check` tool call.
+    /// Handles the `crate_license_check` tool call.
     pub async fn handle_crate_license_check(
         &self,
         request: CrateLicenseCheckRequest,
@@ -134,7 +134,7 @@ impl McpServer {
                 .map_err(|e| format!("latest license version lookup failed for {crate_name}: {e}"))?
                 .ok_or_else(|| {
                     format!(
-                        "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                        "crate '{}' has no indexed versions yet; run index_sync_crates first",
                         ctx.crate_row.name
                     )
                 })?;

@@ -28,7 +28,6 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         mcp_sse_retry_ms: 3000,
         database_url,
         crates_io_base_url: "https://crates.io".to_string(),
-        crates_io_user_agent: "rust-mcp-tests/0.1.0".to_string(),
         crates_io_timeout_secs: 20,
         crates_io_min_interval_ms: 1,
         crates_io_window_max_requests: 0,
@@ -62,6 +61,7 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         registry_cache_watch_interval_ms: 0,
         security_sync_interval_secs: 0,
         security_sync_batch_size: 50,
+        session_idle_timeout_secs: 0,
     }
 }
 

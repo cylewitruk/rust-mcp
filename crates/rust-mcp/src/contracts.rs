@@ -22,7 +22,7 @@ fn to_contract_schema(schema: schemas::ToolSchema) -> ToolSchemaContract {
     }
 }
 
-/// Builds the `schema.get` response for one tool or all tools.
+/// Builds the `schema_get` response for one tool or all tools.
 pub fn tool_schemas_response(tool_name: Option<String>) -> Result<ToolSchemasResponse, String> {
     let schemas = match tool_name.as_deref() {
         Some(name) => {

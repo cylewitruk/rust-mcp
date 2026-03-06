@@ -181,7 +181,7 @@ pub async fn upsert_docs_page_if_changed(
     Ok(result.rows_affected())
 }
 
-/// Queries docs pages for `docs.search` with optional crate/version/path
+/// Queries docs pages for `docs_search` with optional crate/version/path
 /// filters.
 #[derive(Debug, Clone, Copy)]
 pub struct DocsSearchParams<'a> {
@@ -199,7 +199,7 @@ pub struct DocsSearchParams<'a> {
     pub offset: i64,
 }
 
-/// Queries docs pages for `docs.search` with optional crate/version/path
+/// Queries docs pages for `docs_search` with optional crate/version/path
 /// filters.
 pub async fn search_docs_pages(
     db: &PgPool,
@@ -357,7 +357,7 @@ pub async fn fetch_crate_last_published_at(
     .await
 }
 
-/// Loads a limited newest-first version timeline for `crate.intel`.
+/// Loads a limited newest-first version timeline for `crate_intel`.
 pub async fn fetch_crate_version_history(
     db: &PgPool,
     crate_id: i64,
@@ -1385,7 +1385,7 @@ pub async fn list_dependency_resolve_edges_for_versions(
     .await
 }
 
-/// Loads the first matching symbol start line for `source.context`.
+/// Loads the first matching symbol start line for `source_context`.
 pub async fn fetch_symbol_start_line_for_context(
     db: &PgPool,
     crate_version_id: i64,
@@ -1409,7 +1409,7 @@ pub async fn fetch_symbol_start_line_for_context(
     .await
 }
 
-/// Loads the nearest containing impl block for `source.context`.
+/// Loads the nearest containing impl block for `source_context`.
 pub async fn fetch_containing_impl_for_context(
     db: &PgPool,
     crate_version_id: i64,
@@ -1439,7 +1439,7 @@ pub async fn fetch_containing_impl_for_context(
     .await
 }
 
-/// Loads nearby type definitions for `source.context`.
+/// Loads nearby type definitions for `source_context`.
 pub async fn fetch_surrounding_types_for_context(
     db: &PgPool,
     crate_version_id: i64,
@@ -1805,7 +1805,7 @@ pub async fn search_crates(
         .await
 }
 
-/// Symbol search filters used by `symbol.search` DB helpers.
+/// Symbol search filters used by `symbol_search` DB helpers.
 #[derive(Debug, Clone, Copy)]
 pub struct SymbolSearchFilters<'a> {
     /// Search term matched against symbol names.
@@ -1871,7 +1871,7 @@ fn push_symbol_search_where_clause<'a>(
     }
 }
 
-/// Counts matching symbol rows for `symbol.search`.
+/// Counts matching symbol rows for `symbol_search`.
 pub async fn count_symbol_search_hits(
     db: &PgPool,
     filters: &SymbolSearchFilters<'_>,

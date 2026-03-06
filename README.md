@@ -200,7 +200,6 @@ All server environment variables with their defaults:
 | Variable | Default | Description |
 |---|---|---|
 | `CRATES_IO_BASE_URL` | `https://crates.io` | crates.io API base URL |
-| `CRATES_IO_USER_AGENT` | `rust-mcp/0.1.0 (local dev machine)` | User-Agent for outbound crates.io requests |
 | `CRATES_IO_TIMEOUT_SECS` | `20` | HTTP timeout for crates.io/OSV requests (seconds) |
 | `DOCS_RS_BASE_URL` | `https://docs.rs` | docs.rs base URL |
 

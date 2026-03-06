@@ -5,7 +5,7 @@
 
 use super::{Value, common, json, mock_index_sync_context, run_refresh_worker_for_tests};
 
-/// A `crate.intel` call for an unindexed crate should trigger on-demand
+/// A `crate_intel` call for an unindexed crate should trigger on-demand
 /// indexing and return a valid response once the worker completes.
 #[tokio::test]
 async fn crate_intel_triggers_on_demand_indexing_for_unindexed_crate() {
@@ -57,7 +57,7 @@ async fn crate_intel_triggers_on_demand_indexing_for_unindexed_crate() {
     assert!(post_check > 0, "demo_crate should be indexed after on-demand tool call");
 }
 
-/// A `crate.intel` call for a crate that does not exist on crates.io should
+/// A `crate_intel` call for a crate that does not exist on crates.io should
 /// return a descriptive error rather than hanging or panicking.
 #[tokio::test]
 async fn crate_intel_returns_error_for_nonexistent_crate() {
@@ -88,7 +88,7 @@ async fn crate_intel_returns_error_for_nonexistent_crate() {
     );
 }
 
-/// Two concurrent `crate.intel` calls for the same unindexed crate should
+/// Two concurrent `crate_intel` calls for the same unindexed crate should
 /// both succeed, with the second one coalescing on the first's indexing job.
 #[tokio::test]
 async fn concurrent_on_demand_calls_coalesce() {

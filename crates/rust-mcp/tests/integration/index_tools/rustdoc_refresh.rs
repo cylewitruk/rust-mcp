@@ -460,7 +460,7 @@ async fn index_refresh_rustdoc_json_scope_ingests_real_tokio_fixture_and_surface
 
 /// Exercises the full rustdoc indexing pipeline with two real tokio versions
 /// from the workspace `rustdoc-json/` fixtures, including compat patching for
-/// older format_versions, and verifies `crate.api_diff` across the pair.
+/// older format_versions, and verifies `crate_api_diff` across the pair.
 #[tokio::test]
 async fn index_refresh_rustdoc_json_multi_version_with_api_diff() {
     let fixture_dir = materialize_workspace_rustdoc_fixtures_zst(&[

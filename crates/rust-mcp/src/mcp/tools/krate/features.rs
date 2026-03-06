@@ -79,7 +79,7 @@ fn transitive_feature_enables(
 }
 
 impl McpServer {
-    /// Handles the `crate.features` tool call.
+    /// Handles the `crate_features` tool call.
     pub async fn handle_crate_features(
         &self,
         request: CrateFeaturesRequest,

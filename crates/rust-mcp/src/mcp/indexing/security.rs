@@ -29,6 +29,9 @@ pub struct SecuritySyncOutcome {
     pub errors: Vec<String>,
     /// Names of crates that had advisory data updated.
     pub touched_crates: Vec<String>,
+    /// Crate IDs that were successfully processed (for post-sync stamping).
+    #[serde(skip)]
+    pub checked_crate_ids: Vec<i64>,
 }
 
 impl SecuritySyncOutcome {
@@ -42,6 +45,10 @@ impl SecuritySyncOutcome {
             .append(&mut other.touched_crates);
         self.touched_crates.sort();
         self.touched_crates.dedup();
+        self.checked_crate_ids
+            .append(&mut other.checked_crate_ids);
+        self.checked_crate_ids.sort();
+        self.checked_crate_ids.dedup();
     }
 }
 
@@ -319,15 +326,23 @@ fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
 
 impl McpServer {
     /// Synchronizes OSV vulnerability data for indexed crates.
+    ///
+    /// `max_age_secs` controls staleness filtering — crates checked more
+    /// recently than this are skipped. Pass `None` to check all.
     pub async fn sync_osv_security(
         &self,
         limit: u32,
         offset: u32,
+        max_age_secs: Option<i64>,
     ) -> Result<SecuritySyncOutcome, String> {
-        let crate_rows =
-            fetch_security_crates_page(&self.state.db, i64::from(limit), i64::from(offset))
-                .await
-                .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
+        let crate_rows = fetch_security_crates_page(
+            &self.state.db,
+            i64::from(limit),
+            i64::from(offset),
+            max_age_secs,
+        )
+        .await
+        .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
 
         let mut outcome = SecuritySyncOutcome::default();
         let osv_client = OsvDevClient::new(&self.state);
@@ -457,16 +472,24 @@ impl McpServer {
                     outcome.advisories_written += 1;
                 }
             }
+
+            outcome
+                .checked_crate_ids
+                .push(krate.id);
         }
 
         Ok(outcome)
     }
 
     /// Synchronizes RustSec advisory-db data for indexed crates.
+    ///
+    /// `max_age_secs` controls staleness filtering — crates checked more
+    /// recently than this are skipped. Pass `None` to check all.
     pub async fn sync_rustsec_db_security(
         &self,
         limit: u32,
         offset: u32,
+        max_age_secs: Option<i64>,
     ) -> Result<SecuritySyncOutcome, String> {
         let Some(db_dir) = self
             .state
@@ -477,10 +500,14 @@ impl McpServer {
             return Ok(SecuritySyncOutcome::default());
         };
 
-        let crate_rows =
-            fetch_security_crates_page(&self.state.db, i64::from(limit), i64::from(offset))
-                .await
-                .map_err(|e| format!("failed to fetch crates for RustSec DB sync: {e}"))?;
+        let crate_rows = fetch_security_crates_page(
+            &self.state.db,
+            i64::from(limit),
+            i64::from(offset),
+            max_age_secs,
+        )
+        .await
+        .map_err(|e| format!("failed to fetch crates for RustSec DB sync: {e}"))?;
 
         let mut outcome = SecuritySyncOutcome::default();
 
@@ -514,6 +541,9 @@ impl McpServer {
             );
 
             outcome.crates_processed += 1;
+            outcome
+                .checked_crate_ids
+                .push(krate.id);
             outcome
                 .touched_crates
                 .push(krate.name.clone());

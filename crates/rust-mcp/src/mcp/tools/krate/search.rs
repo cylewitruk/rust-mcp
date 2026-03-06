@@ -73,7 +73,7 @@ impl McpServer {
         .await
     }
 
-    /// Handles the `crate.search` tool call.
+    /// Handles the `crate_search` tool call.
     pub async fn handle_crate_search(
         &self,
         request: CrateSearchRequest,
@@ -105,13 +105,13 @@ impl McpServer {
             page,
             limit: requested_limit,
         })
-        .map_err(|e| format!("failed to build crate.search cache key: {e}"))?;
+        .map_err(|e| format!("failed to build crate_search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("crate_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<CrateSearchResponse>(cached)
-                .map_err(|e| format!("failed to decode crate.search cache entry: {e}"))?;
+                .map_err(|e| format!("failed to decode crate_search cache entry: {e}"))?;
             return Ok(Json(cached_response));
         }
 
@@ -125,7 +125,7 @@ impl McpServer {
                 || decoded.keyword != keyword
                 || decoded.sort != sort)
         {
-            return Err("cursor does not match current crate.search filters".to_string());
+            return Err("cursor does not match current crate_search filters".to_string());
         }
         let pagination = resolve_pagination(
             decoded_cursor.as_ref(),
@@ -273,7 +273,7 @@ impl McpServer {
             "crate_search",
             &cache_key,
             &serde_json::to_value(&response)
-                .map_err(|e| format!("failed to encode crate.search cache value: {e}"))?,
+                .map_err(|e| format!("failed to encode crate_search cache value: {e}"))?,
             300,
         )
         .await?;

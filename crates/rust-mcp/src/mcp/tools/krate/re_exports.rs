@@ -166,7 +166,7 @@ fn normalize_target_path(crate_name: &str, target_path: &str) -> String {
 }
 
 impl McpServer {
-    /// Handles the `crate.re_exports` tool call.
+    /// Handles the `crate_re_exports` tool call.
     pub async fn handle_crate_re_exports(
         &self,
         request: CrateReExportsRequest,
@@ -189,7 +189,7 @@ impl McpServer {
                 || token.version != requested_version
                 || token.path_prefix != path_prefix)
         {
-            return Err("cursor does not match current crate.re_exports filters".to_string());
+            return Err("cursor does not match current crate_re_exports filters".to_string());
         }
 
         let pag =

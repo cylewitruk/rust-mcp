@@ -330,21 +330,41 @@ pub async fn count_source_file_index_rows(
 }
 
 /// Loads a page of crates for advisory sync processing.
+///
+/// When `max_age_secs` is `Some(n)`, crates whose `security_checked_at` is
+/// less than `n` seconds ago are skipped — they were already checked recently.
+/// Pass `None` to check all crates unconditionally.
 pub async fn fetch_security_crates_page(
     db: &PgPool,
     limit: i64,
     offset: i64,
+    max_age_secs: Option<i64>,
 ) -> Result<Vec<SecurityCrateRow>, sqlx::Error> {
     sqlx::query_as::<_, SecurityCrateRow>(
         "SELECT id, name
          FROM crates
-         ORDER BY updated_at DESC NULLS LAST, id DESC
+         WHERE ($3::BIGINT IS NULL
+                OR security_checked_at IS NULL
+                OR security_checked_at < NOW() - make_interval(secs => $3::BIGINT::DOUBLE \
+         PRECISION))
+         ORDER BY security_checked_at ASC NULLS FIRST, id DESC
          LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
+    .bind(max_age_secs)
     .fetch_all(db)
     .await
+}
+
+/// Stamps `security_checked_at = NOW()` on a crate after a successful
+/// advisory sync.
+pub async fn stamp_security_checked_at(db: &PgPool, crate_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE crates SET security_checked_at = NOW() WHERE id = $1")
+        .bind(crate_id)
+        .execute(db)
+        .await?;
+    Ok(())
 }
 
 /// Loads all versions for a crate, used by advisory matching.
@@ -823,7 +843,7 @@ pub async fn enqueue_or_get_refresh_job_id(
     Ok(EnqueueOutcome { job_id, is_new: true })
 }
 
-/// Loads all coverage counters for `index.status`.
+/// Loads all coverage counters for `index_status`.
 pub async fn fetch_index_coverage_counts(
     db: &PgPool,
 ) -> Result<IndexCoverageCountsRow, sqlx::Error> {
@@ -841,7 +861,7 @@ pub async fn fetch_index_coverage_counts(
     .await
 }
 
-/// Loads queue counters for `index.status`.
+/// Loads queue counters for `index_status`.
 pub async fn fetch_index_queue_counts(db: &PgPool) -> Result<IndexQueueCountsRow, sqlx::Error> {
     sqlx::query_as::<_, IndexQueueCountsRow>(
         "SELECT
@@ -865,7 +885,7 @@ pub async fn fetch_index_queue_counts(db: &PgPool) -> Result<IndexQueueCountsRow
     .await
 }
 
-/// Loads refresh retry-attempt distribution for `index.status`.
+/// Loads refresh retry-attempt distribution for `index_status`.
 pub async fn fetch_refresh_job_retry_distribution(
     db: &PgPool,
 ) -> Result<RefreshJobRetryDistributionRow, sqlx::Error> {
@@ -923,7 +943,7 @@ pub async fn fetch_recent_refresh_job_errors(
     .await
 }
 
-/// Loads freshness timestamps for `index.status`.
+/// Loads freshness timestamps for `index_status`.
 pub async fn fetch_index_freshness(db: &PgPool) -> Result<IndexFreshnessRow, sqlx::Error> {
     sqlx::query_as::<_, IndexFreshnessRow>(
         "SELECT

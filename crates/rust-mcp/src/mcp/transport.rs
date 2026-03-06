@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use rmcp::transport::streamable_http_server::session::local::SessionConfig;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 
 use super::server::McpServer;
+use super::session::DbSessionManager;
 use crate::config::Config;
 use crate::state::AppState;
 
@@ -11,7 +13,7 @@ use crate::state::AppState;
 pub fn streamable_http_service(
     state: AppState,
     config: &Config,
-) -> StreamableHttpService<McpServer, LocalSessionManager> {
+) -> StreamableHttpService<McpServer, DbSessionManager> {
     let service_state = state.clone();
     let mut http_config = StreamableHttpServerConfig {
         stateful_mode: true,
@@ -30,9 +32,12 @@ pub fn streamable_http_service(
         http_config.sse_retry = Some(Duration::from_millis(config.mcp_sse_retry_ms));
     }
 
+    let session_manager =
+        Arc::new(DbSessionManager::new(state.db.clone(), SessionConfig::default()));
+
     StreamableHttpService::new(
         move || Ok(McpServer::new(service_state.clone())),
-        Default::default(),
+        session_manager,
         http_config,
     )
 }

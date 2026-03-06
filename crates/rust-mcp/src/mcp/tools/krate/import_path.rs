@@ -45,7 +45,7 @@ fn normalized_import_path(crate_name: &str, row: &ImportPathRow) -> String {
 }
 
 impl McpServer {
-    /// Handles the `crate.import_path` tool call.
+    /// Handles the `crate_import_path` tool call.
     pub async fn handle_crate_import_path(
         &self,
         request: CrateImportPathRequest,
@@ -72,7 +72,7 @@ impl McpServer {
                 || token.version != requested_version
                 || token.kind != kind)
         {
-            return Err("cursor does not match current crate.import_path filters".to_string());
+            return Err("cursor does not match current crate_import_path filters".to_string());
         }
 
         let pag =

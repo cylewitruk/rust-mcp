@@ -174,7 +174,7 @@ fn detect_hotspots_in_file(
 }
 
 impl McpServer {
-    /// Handles the `crate.hotspots` tool call.
+    /// Handles the `crate_hotspots` tool call.
     pub async fn handle_crate_hotspots(
         &self,
         request: CrateHotspotsRequest,
@@ -205,7 +205,7 @@ impl McpServer {
                 || token.include_unsafe != include_unsafe
                 || token.include_concurrency != include_concurrency)
         {
-            return Err("cursor does not match current crate.hotspots filters".to_string());
+            return Err("cursor does not match current crate_hotspots filters".to_string());
         }
 
         let pag =

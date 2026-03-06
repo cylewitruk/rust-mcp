@@ -19,12 +19,15 @@ pub mod tools;
 /// Parameter validation and pagination utilities.
 pub mod utils;
 
+/// Database-backed MCP session manager.
+pub mod session;
 mod transport;
 
 pub use indexing::{
     run_cache_watcher, run_enrichment_maintenance, run_refresh_worker, run_registry_discovery,
     run_security_sync,
 };
+pub use session::run_session_reaper;
 pub use transport::streamable_http_service;
 
 #[cfg(feature = "testing")]
@@ -60,7 +63,7 @@ pub async fn run_registry_scan_with_outcome_for_tests(
 pub async fn run_security_sync_scan_for_tests(
     state: &crate::state::AppState,
 ) -> indexing::security_sync::SecuritySyncRunOutcome {
-    indexing::security_sync::run_security_sync_scan(state).await
+    indexing::security_sync::run_security_sync_scan(state, None).await
 }
 
 #[cfg(feature = "testing")]

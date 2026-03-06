@@ -267,7 +267,7 @@ fn score_candidate(
 }
 
 impl McpServer {
-    /// Handles the `crate.alternatives` tool call.
+    /// Handles the `crate_alternatives` tool call.
     pub async fn handle_crate_alternatives(
         &self,
         request: CrateAlternativesRequest,
@@ -291,7 +291,7 @@ impl McpServer {
                 || token.allow_licenses != allow_licenses
                 || token.deny_licenses != deny_licenses)
         {
-            return Err("cursor does not match current crate.alternatives filters".to_string());
+            return Err("cursor does not match current crate_alternatives filters".to_string());
         }
         let pag =
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;

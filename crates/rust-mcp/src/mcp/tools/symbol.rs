@@ -51,7 +51,7 @@ impl CursorToken for SymbolCursorToken {
 }
 
 impl McpServer {
-    /// Handles the `symbol.search` tool call.
+    /// Handles the `symbol_search` tool call.
     pub async fn handle_symbol_search(
         &self,
         request: SymbolSearchRequest,
@@ -81,13 +81,13 @@ impl McpServer {
             page,
             limit: requested_limit,
         })
-        .map_err(|e| format!("failed to build symbol.search cache key: {e}"))?;
+        .map_err(|e| format!("failed to build symbol_search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("symbol_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<SymbolSearchResponse>(cached)
-                .map_err(|e| format!("failed to decode symbol.search cache entry: {e}"))?;
+                .map_err(|e| format!("failed to decode symbol_search cache entry: {e}"))?;
             return Ok(Json(cached_response));
         }
 
@@ -103,7 +103,7 @@ impl McpServer {
                 || decoded.include_all_versions != include_all_versions
                 || decoded.collapse_by_canonical != collapse_by_canonical)
         {
-            return Err("cursor does not match current symbol.search filters".to_string());
+            return Err("cursor does not match current symbol_search filters".to_string());
         }
         let pagination = resolve_pagination(
             decoded_cursor.as_ref(),
@@ -179,7 +179,7 @@ impl McpServer {
         } else {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Medium,
-                reason: "symbol hits resolved by indexed name matching; verify with source.read"
+                reason: "symbol hits resolved by indexed name matching; verify with source_read"
                     .to_string(),
             }
         };
@@ -216,7 +216,7 @@ impl McpServer {
             "symbol_search",
             &cache_key,
             &serde_json::to_value(&response)
-                .map_err(|e| format!("failed to encode symbol.search cache value: {e}"))?,
+                .map_err(|e| format!("failed to encode symbol_search cache value: {e}"))?,
             300,
         )
         .await?;

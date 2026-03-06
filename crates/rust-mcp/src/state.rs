@@ -11,6 +11,35 @@ use crate::config::Config;
 use crate::db::tools;
 use crate::mcp::indexing::coordinator::IndexingCoordinator;
 
+/// Builds a User-Agent string following SEP-1329 conventions.
+///
+/// Format: `rust-mcp/<version> os/<os>[#<release>] lang/rust`
+///
+/// Examples:
+/// - `rust-mcp/0.1.0 os/linux#6.1.0 lang/rust`
+/// - `rust-mcp/0.1.0 os/darwin#24.5.0 lang/rust`
+fn user_agent() -> String {
+    let os = std::env::consts::OS;
+    let version = env!("CARGO_PKG_VERSION");
+
+    match os_release() {
+        Some(release) => format!("rust-mcp/{version} os/{os}#{release} lang/rust"),
+        None => format!("rust-mcp/{version} os/{os} lang/rust"),
+    }
+}
+
+/// Returns the OS kernel release string via `uname -r`, or `None` if
+/// unavailable.
+fn os_release() -> Option<String> {
+    std::process::Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+}
+
 /// Shared application state used by HTTP and MCP handlers.
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -199,11 +228,7 @@ impl AppState {
             .await?;
 
         let http = reqwest::Client::builder()
-            .user_agent(
-                config
-                    .crates_io_user_agent
-                    .clone(),
-            )
+            .user_agent(user_agent())
             .timeout(Duration::from_secs(config.crates_io_timeout_secs))
             .build()?;
 

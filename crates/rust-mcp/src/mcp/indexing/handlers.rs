@@ -200,7 +200,7 @@ impl McpServer {
         Ok(format!("refresh-job-{}", outcome.job_id))
     }
 
-    /// Handles the `index.sync_crates` tool call.
+    /// Handles the `index_sync_crates` tool call.
     pub async fn handle_index_sync_crates(
         &self,
         request: IndexSyncCratesRequest,
@@ -289,7 +289,7 @@ impl McpServer {
         }))
     }
 
-    /// Handles the `index.status` tool call.
+    /// Handles the `index_status` tool call.
     pub async fn handle_index_status(
         &self,
         _request: IndexStatusRequest,
@@ -399,7 +399,7 @@ impl McpServer {
         Ok(Some(clamped as u32))
     }
 
-    /// Handles the `index.refresh` tool call.
+    /// Handles the `index_refresh` tool call.
     pub async fn handle_index_refresh(
         &self,
         request: IndexRefreshRequest,
@@ -546,10 +546,10 @@ impl McpServer {
                 let per_page = sync_per_page(request.per_page);
                 let offset = page.saturating_sub(1) * per_page;
                 let mut outcome = self
-                    .sync_osv_security(per_page, offset)
+                    .sync_osv_security(per_page, offset, None)
                     .await?;
                 let rustsec_outcome = self
-                    .sync_rustsec_db_security(per_page, offset)
+                    .sync_rustsec_db_security(per_page, offset, None)
                     .await?;
                 let rustsec_enabled = self
                     .state

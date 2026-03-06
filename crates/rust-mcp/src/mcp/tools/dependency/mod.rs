@@ -1,6 +1,6 @@
-/// `dependency.audit` handler.
+/// `dependency_audit` handler.
 pub mod audit;
-/// `dependency.feature_impact` handler.
+/// `dependency_feature_impact` handler.
 pub mod feature_impact;
-/// `dependency.resolve` handler.
+/// `dependency_resolve` handler.
 pub mod resolve;

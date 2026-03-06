@@ -14,7 +14,7 @@ use crate::mcp::utils::{
 };
 
 impl McpServer {
-    /// Handles the `crate.intel` tool call.
+    /// Handles the `crate_intel` tool call.
     pub async fn handle_crate_intel(
         &self,
         request: CrateIntelRequest,

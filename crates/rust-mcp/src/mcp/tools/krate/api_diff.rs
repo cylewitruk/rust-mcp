@@ -237,7 +237,7 @@ fn build_diff_summary(
 }
 
 impl McpServer {
-    /// Handles the `crate.api_diff` tool call.
+    /// Handles the `crate_api_diff` tool call.
     pub async fn handle_crate_api_diff(
         &self,
         request: CrateApiDiffRequest,

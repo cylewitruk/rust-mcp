@@ -77,7 +77,7 @@ pub struct SearchableCrateVersionRow {
     pub version: String,
 }
 
-/// Row for reading indexed docs pages for `docs.search`.
+/// Row for reading indexed docs pages for `docs_search`.
 #[derive(Debug, Clone, FromRow)]
 pub struct DocsSearchRow {
     /// Canonical crate name owning the docs page.
@@ -134,7 +134,7 @@ pub struct CrateVersionSelectionRow {
     pub readme: Option<String>,
 }
 
-/// Version timeline row used by `crate.intel`.
+/// Version timeline row used by `crate_intel`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateVersionHistoryRow {
     /// Semver version string.
@@ -151,7 +151,7 @@ pub struct CrateVersionHistoryRow {
     pub has_advisory: bool,
 }
 
-/// Dependency edge row used by `crate.intel`.
+/// Dependency edge row used by `crate_intel`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateDependencyRow {
     /// Canonical dependency crate name.
@@ -166,7 +166,7 @@ pub struct CrateDependencyRow {
     pub features: Value,
 }
 
-/// Dependent crate row used by `crate.intel`.
+/// Dependent crate row used by `crate_intel`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateDependentRow {
     /// Canonical dependent crate name.
@@ -177,7 +177,7 @@ pub struct CrateDependentRow {
     pub total_downloads: i64,
 }
 
-/// Advisory row used by `crate.intel`.
+/// Advisory row used by `crate_intel`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateAdvisoryRow {
     /// Advisory identifier.
@@ -202,14 +202,14 @@ pub struct CrateAdvisoryRow {
     pub cwe_ids: Vec<String>,
 }
 
-/// Symbol line lookup row used by `source.context`.
+/// Symbol line lookup row used by `source_context`.
 #[derive(Debug, Clone, FromRow)]
 pub struct SourceContextLineLookupRow {
     /// 1-based start line of the matched symbol.
     pub start_line: i32,
 }
 
-/// Impl context lookup row used by `source.context`.
+/// Impl context lookup row used by `source_context`.
 #[derive(Debug, Clone, FromRow)]
 pub struct SourceContextImplLookupRow {
     /// Implemented type name.
@@ -226,7 +226,7 @@ pub struct SourceContextImplLookupRow {
     pub start_line: i32,
 }
 
-/// Type context lookup row used by `source.context`.
+/// Type context lookup row used by `source_context`.
 #[derive(Debug, Clone, FromRow)]
 pub struct SourceContextTypeLookupRow {
     /// Type name.
@@ -237,7 +237,7 @@ pub struct SourceContextTypeLookupRow {
     pub start_line: i32,
 }
 
-/// Symbol search row used by `symbol.search`.
+/// Symbol search row used by `symbol_search`.
 #[derive(Debug, Clone, FromRow)]
 pub struct SymbolSearchRow {
     /// Symbol row primary key.
@@ -336,7 +336,7 @@ pub struct TypeVariantEntry {
     pub fields: Vec<TypeFieldEntry>,
 }
 
-/// Type-definition lookup row used by `crate.type_info`.
+/// Type-definition lookup row used by `crate_type_info`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateTypeInfoRow {
     /// Type name as indexed.
@@ -375,7 +375,7 @@ pub struct CrateTypeInfoRow {
     pub index_source: String,
 }
 
-/// Impl-block lookup row used by `crate.type_info` and `crate.trait_impls`.
+/// Impl-block lookup row used by `crate_type_info` and `crate_trait_impls`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateImplLookupRow {
     /// Implemented type name.
@@ -412,8 +412,8 @@ pub struct CrateImplLookupRow {
     pub index_source: String,
 }
 
-/// Trait-definition lookup row used by `crate.type_info` and
-/// `crate.trait_impls`.
+/// Trait-definition lookup row used by `crate_type_info` and
+/// `crate_trait_impls`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateTraitLookupRow {
     /// Trait name.
@@ -462,7 +462,7 @@ pub struct RustdocSyncCandidateRow {
     pub crate_version_id: i64,
 }
 
-/// Aggregated coverage counters for `index.status`.
+/// Aggregated coverage counters for `index_status`.
 #[derive(Debug, Clone, FromRow)]
 pub struct IndexCoverageCountsRow {
     /// Total crates stored in the index.
@@ -481,7 +481,7 @@ pub struct IndexCoverageCountsRow {
     pub docs_pages: i64,
 }
 
-/// Aggregated refresh queue counters for `index.status`.
+/// Aggregated refresh queue counters for `index_status`.
 #[derive(Debug, Clone, FromRow)]
 pub struct IndexQueueCountsRow {
     /// Pending jobs ready to run now.
@@ -522,7 +522,7 @@ pub struct IndexFailureByScopeRow {
     pub failed_jobs: i64,
 }
 
-/// Freshness timestamps used by `index.status`.
+/// Freshness timestamps used by `index_status`.
 #[derive(Debug, Clone, FromRow)]
 pub struct IndexFreshnessRow {
     /// Last crate metadata update time.
@@ -537,7 +537,7 @@ pub struct IndexFreshnessRow {
     pub advisories_updated_at: Option<String>,
 }
 
-/// Operational telemetry window aggregates for `index.status`.
+/// Operational telemetry window aggregates for `index_status`.
 #[derive(Debug, Clone, FromRow)]
 pub struct IndexOperationalMetricsRow {
     /// Number of tool invocations in the metrics window.
@@ -806,7 +806,7 @@ pub struct IndexedExtractionBatch {
     pub traits: Vec<IndexedTraitInsert>,
 }
 
-/// Public symbol row used by `crate.api`.
+/// Public symbol row used by `crate_api`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ApiSurfaceRow {
@@ -820,7 +820,7 @@ pub struct ApiSurfaceRow {
     pub index_source: String,
 }
 
-/// Import path lookup row used by `crate.import_path`.
+/// Import path lookup row used by `crate_import_path`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ImportPathRow {
@@ -834,7 +834,7 @@ pub struct ImportPathRow {
     pub index_source: String,
 }
 
-/// Error-type candidate row used by `crate.error_types`.
+/// Error-type candidate row used by `crate_error_types`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ErrorTypeTypeRow {
@@ -846,7 +846,7 @@ pub struct ErrorTypeTypeRow {
     pub start_line: i32,
 }
 
-/// Error impl row used by `crate.error_types`.
+/// Error impl row used by `crate_error_types`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ErrorTypeImplRow {
@@ -856,7 +856,7 @@ pub struct ErrorTypeImplRow {
     pub source_path: String,
 }
 
-/// Function signature row used by `crate.error_types`.
+/// Function signature row used by `crate_error_types`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ErrorTypeReturnRow {
@@ -864,7 +864,7 @@ pub struct ErrorTypeReturnRow {
     pub signature: Option<String>,
 }
 
-/// Rustdoc re-export row used by `crate.re_exports`.
+/// Rustdoc re-export row used by `crate_re_exports`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct RustdocReExportRow {
@@ -876,14 +876,14 @@ pub struct RustdocReExportRow {
     pub source_line: i32,
 }
 
-/// Source path row used by `crate.re_exports` fallback parser.
+/// Source path row used by `crate_re_exports` fallback parser.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ReExportSourceRow {
     pub path: String,
 }
 
-/// Symbol metadata row used by `crate.re_exports` fallback parser.
+/// Symbol metadata row used by `crate_re_exports` fallback parser.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ReExportSymbolKindRow {
@@ -891,7 +891,7 @@ pub struct ReExportSymbolKindRow {
     pub visibility: Option<String>,
 }
 
-/// Dependent crate version row used by `crate.usage_patterns` for graph
+/// Dependent crate version row used by `crate_usage_patterns` for graph
 /// traversal (content search is done via ripgrep on disk).
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
@@ -901,7 +901,7 @@ pub struct DependentCrateVersionRow {
     pub dependent_downloads: i64,
 }
 
-/// License metadata row used by `crate.license_check`.
+/// License metadata row used by `crate_license_check`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateVersionLicenseRow {
@@ -909,7 +909,7 @@ pub struct CrateVersionLicenseRow {
     pub license_expression: Option<String>,
 }
 
-/// Source file path row used by `crate.hotspots` and `crate.derive_macros`
+/// Source file path row used by `crate_hotspots` and `crate_derive_macros`
 /// (content is read from disk).
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
@@ -917,7 +917,7 @@ pub struct SourceFilePathRow {
     pub path: String,
 }
 
-/// Feature row used by `dependency.feature_impact` and `crate.features`.
+/// Feature row used by `dependency_feature_impact` and `crate_features`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct FeatureImpactFeatureRow {
@@ -925,7 +925,7 @@ pub struct FeatureImpactFeatureRow {
     pub enables: Value,
 }
 
-/// Dependency row used by `dependency.feature_impact`.
+/// Dependency row used by `dependency_feature_impact`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct FeatureImpactDependencyRow {
@@ -933,7 +933,7 @@ pub struct FeatureImpactDependencyRow {
     pub optional: bool,
 }
 
-/// Version timeline row used by `crate.versions`.
+/// Version timeline row used by `crate_versions`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateVersionTimelineRow {
@@ -946,7 +946,7 @@ pub struct CrateVersionTimelineRow {
     pub release_age_days: Option<i64>,
 }
 
-/// Candidate alternative row used by `crate.alternatives`.
+/// Candidate alternative row used by `crate_alternatives`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct AlternativesCandidateRow {
@@ -964,7 +964,7 @@ pub struct AlternativesCandidateRow {
     pub name_similarity: f64,
 }
 
-/// API diff symbol row used by `crate.api_diff`.
+/// API diff symbol row used by `crate_api_diff`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ApiDiffSymbolRow {
@@ -975,7 +975,7 @@ pub struct ApiDiffSymbolRow {
     pub index_source: String,
 }
 
-/// Compare snapshot version row used by `crate.compare`.
+/// Compare snapshot version row used by `crate_compare`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateCompareVersionRow {
@@ -988,7 +988,7 @@ pub struct CrateCompareVersionRow {
     pub license_expression: Option<String>,
 }
 
-/// Compare aggregate counts row used by `crate.compare`.
+/// Compare aggregate counts row used by `crate_compare`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateCompareCountsRow {
@@ -998,7 +998,7 @@ pub struct CrateCompareCountsRow {
     pub dependent_count: i64,
 }
 
-/// Latest-version row used by `crate.graph` traversal.
+/// Latest-version row used by `crate_graph` traversal.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct GraphLatestVersionRow {
@@ -1007,7 +1007,7 @@ pub struct GraphLatestVersionRow {
     pub version: String,
 }
 
-/// Dependency traversal row used by `crate.graph`.
+/// Dependency traversal row used by `crate_graph`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct GraphDependencyTraversalRow {
@@ -1020,7 +1020,7 @@ pub struct GraphDependencyTraversalRow {
     pub optional: bool,
 }
 
-/// Dependent traversal row used by `crate.graph`.
+/// Dependent traversal row used by `crate_graph`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct GraphDependentTraversalRow {
@@ -1051,7 +1051,7 @@ pub struct DependencyVersionRow {
     pub yanked: bool,
 }
 
-/// Dependency edge row used by `dependency.resolve`.
+/// Dependency edge row used by `dependency_resolve`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct DependencyResolveEdgeRow {
@@ -1061,7 +1061,7 @@ pub struct DependencyResolveEdgeRow {
     pub features: Value,
 }
 
-/// One deprecated item row used by `crate.deprecated`.
+/// One deprecated item row used by `crate_deprecated`.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct DeprecatedItemRow {

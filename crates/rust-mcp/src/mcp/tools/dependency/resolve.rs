@@ -261,7 +261,7 @@ fn evaluate_confidence(
 }
 
 impl McpServer {
-    /// Handles the `dependency.resolve` tool call.
+    /// Handles the `dependency_resolve` tool call.
     pub async fn handle_dependency_resolve(
         &self,
         request: DependencyResolveRequest,
@@ -305,7 +305,7 @@ impl McpServer {
                 conflicts.push(DependencyResolveConflict {
                     dependency_name: dependency.name.clone(),
                     requirement: dependency.version_req.clone(),
-                    message: "dependency is not present in local index; run index.sync_crates \
+                    message: "dependency is not present in local index; run index_sync_crates \
                               first"
                         .to_string(),
                 });

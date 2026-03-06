@@ -249,7 +249,7 @@ fn action_for_change(change: &CrateApiDiffChange) -> (String, String) {
 }
 
 impl McpServer {
-    /// Handles the `crate.migration_path` tool call.
+    /// Handles the `crate_migration_path` tool call.
     pub async fn handle_crate_migration_path(
         &self,
         request: CrateMigrationPathRequest,

@@ -47,7 +47,7 @@ fn adoption_signal(downloads: i64, yanked: bool) -> String {
 }
 
 impl McpServer {
-    /// Handles the `crate.versions` tool call.
+    /// Handles the `crate_versions` tool call.
     pub async fn handle_crate_versions(
         &self,
         request: CrateVersionsRequest,
@@ -66,7 +66,7 @@ impl McpServer {
         if let Some(ref token) = decoded
             && token.crate_name != crate_name
         {
-            return Err("cursor does not match current crate.versions filters".to_string());
+            return Err("cursor does not match current crate_versions filters".to_string());
         }
 
         let pag =

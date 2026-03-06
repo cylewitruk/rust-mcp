@@ -203,7 +203,7 @@ impl McpServer {
         Ok(outcome)
     }
 
-    /// Handles the `docs.search` tool call.
+    /// Handles the `docs_search` tool call.
     pub async fn handle_docs_search(
         &self,
         request: DocsSearchRequest,
@@ -226,7 +226,7 @@ impl McpServer {
                 || decoded.version != version
                 || decoded.path_prefix != path_prefix)
         {
-            return Err("cursor does not match current docs.search filters".to_string());
+            return Err("cursor does not match current docs_search filters".to_string());
         }
         let pagination = resolve_pagination(
             decoded_cursor.as_ref(),
@@ -246,13 +246,13 @@ impl McpServer {
             page,
             limit,
         })
-        .map_err(|e| format!("failed to build docs.search cache key: {e}"))?;
+        .map_err(|e| format!("failed to build docs_search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("docs_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<DocsSearchResponse>(cached)
-                .map_err(|e| format!("failed to decode docs.search cache entry: {e}"))?;
+                .map_err(|e| format!("failed to decode docs_search cache entry: {e}"))?;
             return Ok(Json(cached_response));
         }
 
@@ -343,7 +343,7 @@ impl McpServer {
             "docs_search",
             &cache_key,
             &serde_json::to_value(&response)
-                .map_err(|e| format!("failed to encode docs.search cache value: {e}"))?,
+                .map_err(|e| format!("failed to encode docs_search cache value: {e}"))?,
             300,
         )
         .await?;

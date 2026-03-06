@@ -56,7 +56,7 @@ impl CursorToken for SourceCursorToken {
 }
 
 impl McpServer {
-    /// Handles the `source.search` tool call.
+    /// Handles the `source_search` tool call.
     pub async fn handle_source_search(
         &self,
         request: SourceSearchRequest,
@@ -83,13 +83,13 @@ impl McpServer {
             page,
             limit: requested_limit,
         })
-        .map_err(|e| format!("failed to build source.search cache key: {e}"))?;
+        .map_err(|e| format!("failed to build source_search cache key: {e}"))?;
         if let Some(cached) = self
             .query_cache_get("source_search", &cache_key)
             .await?
         {
             let cached_response = serde_json::from_value::<SourceSearchResponse>(cached)
-                .map_err(|e| format!("failed to decode source.search cache entry: {e}"))?;
+                .map_err(|e| format!("failed to decode source_search cache entry: {e}"))?;
             return Ok(Json(cached_response));
         }
 
@@ -104,7 +104,7 @@ impl McpServer {
                 || decoded.path_glob != path_glob
                 || decoded.mode != mode)
         {
-            return Err("cursor does not match current source.search filters".to_string());
+            return Err("cursor does not match current source_search filters".to_string());
         }
         let pagination = resolve_pagination(
             decoded_cursor.as_ref(),
@@ -231,7 +231,7 @@ impl McpServer {
         } else {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Medium,
-                reason: "matches are lexical and may require source.read confirmation".to_string(),
+                reason: "matches are lexical and may require source_read confirmation".to_string(),
             }
         };
 
@@ -268,7 +268,7 @@ impl McpServer {
             "source_search",
             &cache_key,
             &serde_json::to_value(&response)
-                .map_err(|e| format!("failed to encode source.search cache value: {e}"))?,
+                .map_err(|e| format!("failed to encode source_search cache value: {e}"))?,
             300,
         )
         .await?;
@@ -276,7 +276,7 @@ impl McpServer {
         Ok(Json(response))
     }
 
-    /// Handles the `source.read` tool call.
+    /// Handles the `source_read` tool call.
     pub async fn handle_source_read(
         &self,
         request: SourceReadRequest,

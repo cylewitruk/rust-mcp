@@ -171,7 +171,7 @@ fn collect_macro_exports(
 }
 
 impl McpServer {
-    /// Handles the `crate.derive_macros` tool call.
+    /// Handles the `crate_derive_macros` tool call.
     pub async fn handle_crate_derive_macros(
         &self,
         request: CrateDeriveMacrosRequest,

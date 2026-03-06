@@ -37,7 +37,7 @@ impl CursorToken for CrateUsagePatternsCursorToken {
 }
 
 impl McpServer {
-    /// Handles the `crate.usage_patterns` tool call.
+    /// Handles the `crate_usage_patterns` tool call.
     pub async fn handle_crate_usage_patterns(
         &self,
         request: CrateUsagePatternsRequest,
@@ -59,7 +59,7 @@ impl McpServer {
                 || token.symbol_name != symbol_name
                 || token.version != requested_version)
         {
-            return Err("cursor does not match current crate.usage_patterns filters".to_string());
+            return Err("cursor does not match current crate_usage_patterns filters".to_string());
         }
         let pag =
             resolve_pagination(decoded.as_ref(), request.limit.is_some(), requested_limit, page)?;

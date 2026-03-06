@@ -82,7 +82,7 @@ pub mod common {
 pub mod schema {
     use super::*;
 
-    /// Request payload for `schema.get`.
+    /// Request payload for `schema_get`.
     #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct ToolSchemasRequest {
         /// Optional MCP tool name filter.
@@ -94,7 +94,7 @@ pub mod schema {
     /// Request/response JSON Schemas for one MCP tool.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct ToolSchemaContract {
-        /// MCP tool name (for example `crate.search`).
+        /// MCP tool name (for example `crate_search`).
         pub tool_name: String,
         /// JSON Schema for the tool request payload.
         pub request: schemars::Schema,
@@ -102,7 +102,7 @@ pub mod schema {
         pub response: schemars::Schema,
     }
 
-    /// Response payload for `schema.get`.
+    /// Response payload for `schema_get`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct ToolSchemasResponse {
         /// Echoed filter for tool selection, if provided.
@@ -119,7 +119,7 @@ pub mod index {
     use super::common::ResponseFreshnessSource;
     use super::*;
 
-    /// Request payload for `index.sync_crates`.
+    /// Request payload for `index_sync_crates`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexSyncCratesRequest {
         /// Optional search query sent to crates.io.
@@ -132,7 +132,7 @@ pub mod index {
         pub include_dependencies: Option<bool>,
     }
 
-    /// Response payload for `index.sync_crates`.
+    /// Response payload for `index_sync_crates`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexSyncCratesResponse {
         /// Effective crates.io query used for the sync.
@@ -159,7 +159,7 @@ pub mod index {
         pub provenance: String,
     }
 
-    /// Refresh scope for `index.refresh`.
+    /// Refresh scope for `index_refresh`.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum IndexRefreshScope {
@@ -177,7 +177,7 @@ pub mod index {
         RustdocJson,
     }
 
-    /// Request payload for `index.refresh`.
+    /// Request payload for `index_refresh`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexRefreshRequest {
         /// Requested refresh scope.
@@ -194,7 +194,7 @@ pub mod index {
         pub include_dependencies: Option<bool>,
     }
 
-    /// Response payload for `index.refresh`.
+    /// Response payload for `index_refresh`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexRefreshResponse {
         /// Durable job identifier for the refresh request.
@@ -223,7 +223,7 @@ pub mod index {
         pub provenance: String,
     }
 
-    /// Result payload for completed `index.refresh` jobs.
+    /// Result payload for completed `index_refresh` jobs.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexRefreshResult {
         /// Number of crates synchronized by the job.
@@ -247,11 +247,11 @@ pub mod index {
         pub synced_traits: Option<usize>,
     }
 
-    /// Request payload for `index.status`.
+    /// Request payload for `index_status`.
     #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexStatusRequest {}
 
-    /// Response payload for `index.status`.
+    /// Response payload for `index_status`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexStatusResponse {
         /// Snapshot of source freshness timestamps.
@@ -381,7 +381,7 @@ pub mod source {
         Regex,
     }
 
-    /// Request payload for `source.search`.
+    /// Request payload for `source_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceSearchRequest {
         /// Query text or regex pattern.
@@ -402,7 +402,7 @@ pub mod source {
         pub limit: Option<u32>,
     }
 
-    /// Response payload for `source.search`.
+    /// Response payload for `source_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceSearchResponse {
         /// Effective query value.
@@ -441,7 +441,7 @@ pub mod source {
         pub hits: Vec<SourceSearchHit>,
     }
 
-    /// One `source.search` result.
+    /// One `source_search` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceSearchHit {
         /// Crate name containing the match.
@@ -458,7 +458,7 @@ pub mod source {
         pub snippet: String,
     }
 
-    /// Request payload for `source.read`.
+    /// Request payload for `source_read`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceReadRequest {
         /// Crate name to read from.
@@ -473,7 +473,7 @@ pub mod source {
         pub end_line: Option<u32>,
     }
 
-    /// Response payload for `source.read`.
+    /// Response payload for `source_read`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceReadResponse {
         /// Crate name resolved for the read.
@@ -500,7 +500,7 @@ pub mod source {
         pub provenance: String,
     }
 
-    /// Request payload for `source.context`.
+    /// Request payload for `source_context`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceContextRequest {
         /// Crate name containing the target source file.
@@ -515,7 +515,7 @@ pub mod source {
         pub symbol_name: Option<String>,
     }
 
-    /// Response payload for `source.context`.
+    /// Response payload for `source_context`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceContextResponse {
         /// Crate name resolved for context extraction.
@@ -587,12 +587,12 @@ pub mod source {
     }
 }
 
-/// Contracts for `symbol.search`.
+/// Contracts for `symbol_search`.
 pub mod symbol {
     use super::common::ConfidenceAssessment;
     use super::*;
 
-    /// Request payload for `symbol.search`.
+    /// Request payload for `symbol_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SymbolSearchRequest {
         /// Symbol query string.
@@ -615,7 +615,7 @@ pub mod symbol {
         pub limit: Option<u32>,
     }
 
-    /// Response payload for `symbol.search`.
+    /// Response payload for `symbol_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SymbolSearchResponse {
         /// Effective query string.
@@ -657,7 +657,7 @@ pub mod symbol {
         pub hits: Vec<SymbolSearchHit>,
     }
 
-    /// One `symbol.search` result.
+    /// One `symbol_search` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SymbolSearchHit {
         /// Crate name containing the symbol.
@@ -685,12 +685,12 @@ pub mod symbol {
     }
 }
 
-/// Contracts for `docs.search`.
+/// Contracts for `docs_search`.
 pub mod docs {
     use super::common::ConfidenceAssessment;
     use super::*;
 
-    /// Request payload for `docs.search`.
+    /// Request payload for `docs_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DocsSearchRequest {
         /// Search query string.
@@ -709,7 +709,7 @@ pub mod docs {
         pub limit: Option<u32>,
     }
 
-    /// Response payload for `docs.search`.
+    /// Response payload for `docs_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DocsSearchResponse {
         /// Effective query string.
@@ -747,7 +747,7 @@ pub mod docs {
         pub hits: Vec<DocsSearchHit>,
     }
 
-    /// One `docs.search` result.
+    /// One `docs_search` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DocsSearchHit {
         /// Crate name containing the docs page.
@@ -772,14 +772,14 @@ pub mod dependency {
     use super::common::{ConfidenceAssessment, ResponseFreshnessSource};
     use super::*;
 
-    /// Request payload for `dependency.audit`.
+    /// Request payload for `dependency_audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditRequest {
         /// Raw Cargo.toml manifest content to audit.
         pub cargo_toml: String,
     }
 
-    /// Issue category emitted by `dependency.audit`.
+    /// Issue category emitted by `dependency_audit`.
     #[derive(
         Debug,
         Clone,
@@ -806,7 +806,7 @@ pub mod dependency {
         Unresolved,
     }
 
-    /// Severity emitted by `dependency.audit`.
+    /// Severity emitted by `dependency_audit`.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum DependencyAuditSeverity {
@@ -818,7 +818,7 @@ pub mod dependency {
         High,
     }
 
-    /// Response payload for `dependency.audit`.
+    /// Response payload for `dependency_audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditResponse {
         /// Package name declared in the manifest.
@@ -866,7 +866,7 @@ pub mod dependency {
         pub status_markers: Vec<String>,
     }
 
-    /// One `dependency.audit` issue.
+    /// One `dependency_audit` issue.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditIssue {
         /// Dependency crate name.
@@ -883,7 +883,7 @@ pub mod dependency {
         pub latest_version: Option<String>,
     }
 
-    /// Request payload for `dependency.resolve`.
+    /// Request payload for `dependency_resolve`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveRequest {
         /// Explicit dependency inputs.
@@ -908,7 +908,7 @@ pub mod dependency {
         pub version_req: Option<String>,
     }
 
-    /// Response payload for `dependency.resolve`.
+    /// Response payload for `dependency_resolve`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveResponse {
         /// Normalized dependency inputs used by resolution.
@@ -966,7 +966,7 @@ pub mod dependency {
         pub message: String,
     }
 
-    /// Optional feature-unification summary for `dependency.resolve`.
+    /// Optional feature-unification summary for `dependency_resolve`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveFeatureSummary {
         /// Number of dependency edges inspected.
@@ -977,7 +977,7 @@ pub mod dependency {
         pub unique_feature_flags_referenced: usize,
     }
 
-    /// Request payload for `dependency.feature_impact`.
+    /// Request payload for `dependency_feature_impact`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyFeatureImpactRequest {
         /// Target crate name.
@@ -990,7 +990,7 @@ pub mod dependency {
         pub heavy_threshold: Option<u32>,
     }
 
-    /// Response payload for `dependency.feature_impact`.
+    /// Response payload for `dependency_feature_impact`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyFeatureImpactResponse {
         /// Target crate name.
@@ -1052,7 +1052,7 @@ pub mod krate {
     };
     use super::*;
 
-    /// Sort mode for `crate.search`.
+    /// Sort mode for `crate_search`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "lowercase")]
     pub enum CrateSearchSort {
@@ -1064,7 +1064,7 @@ pub mod krate {
         Recent,
     }
 
-    /// Request payload for `crate.search`.
+    /// Request payload for `crate_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateSearchRequest {
         /// Optional free-text query.
@@ -1083,7 +1083,7 @@ pub mod krate {
         pub limit: Option<u32>,
     }
 
-    /// Response payload for `crate.search`.
+    /// Response payload for `crate_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateSearchResponse {
         /// Effective free-text query.
@@ -1126,7 +1126,7 @@ pub mod krate {
         pub hits: Vec<CrateSearchHit>,
     }
 
-    /// One `crate.search` result.
+    /// One `crate_search` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateSearchHit {
         /// Crate name.
@@ -1155,7 +1155,7 @@ pub mod krate {
         pub match_reasons: Vec<String>,
     }
 
-    /// Request payload for `crate.intel`.
+    /// Request payload for `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelRequest {
         /// Target crate name.
@@ -1170,7 +1170,7 @@ pub mod krate {
         pub readme_max_chars: Option<u32>,
     }
 
-    /// Response payload for `crate.intel`.
+    /// Response payload for `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelResponse {
         /// Target crate name.
@@ -1235,7 +1235,7 @@ pub mod krate {
         pub provenance: String,
     }
 
-    /// Version entry in `crate.intel`.
+    /// Version entry in `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelVersion {
         /// Version string.
@@ -1252,7 +1252,7 @@ pub mod krate {
         pub has_advisory: bool,
     }
 
-    /// Dependency entry in `crate.intel`.
+    /// Dependency entry in `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelDependency {
         /// Dependency crate name.
@@ -1267,7 +1267,7 @@ pub mod krate {
         pub features: Vec<String>,
     }
 
-    /// Dependent crate entry in `crate.intel`.
+    /// Dependent crate entry in `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelDependent {
         /// Dependent crate name.
@@ -1278,7 +1278,7 @@ pub mod krate {
         pub total_downloads: i64,
     }
 
-    /// Advisory entry in `crate.intel`.
+    /// Advisory entry in `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelAdvisory {
         /// Advisory identifier.
@@ -1310,7 +1310,7 @@ pub mod krate {
         pub cwe_ids: Vec<String>,
     }
 
-    /// Request payload for `crate.versions`.
+    /// Request payload for `crate_versions`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateVersionsRequest {
         /// Target crate name.
@@ -1323,7 +1323,7 @@ pub mod krate {
         pub limit: Option<u32>,
     }
 
-    /// Response payload for `crate.versions`.
+    /// Response payload for `crate_versions`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateVersionsResponse {
         /// Target crate name.
@@ -2351,7 +2351,7 @@ pub mod krate {
         pub target_type: Option<String>,
     }
 
-    /// Request payload for `crate.deprecated`.
+    /// Request payload for `crate_deprecated`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeprecatedRequest {
         /// Target crate name.
@@ -2364,7 +2364,7 @@ pub mod krate {
         pub page: Option<u32>,
     }
 
-    /// Response payload for `crate.deprecated`.
+    /// Response payload for `crate_deprecated`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeprecatedResponse {
         /// Resolved crate name.
@@ -2401,7 +2401,7 @@ pub mod krate {
         pub provenance: String,
     }
 
-    /// One deprecated API item returned by `crate.deprecated`.
+    /// One deprecated API item returned by `crate_deprecated`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DeprecatedItem {
         /// Symbol or type name.

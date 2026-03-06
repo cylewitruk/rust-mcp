@@ -128,7 +128,7 @@ async fn live_fetch_readme_returns_none_for_nonexistent_version() -> Result<()> 
 // Full crate sync flow through MCP
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Sync `serde` through the full MCP `index.sync_crates` flow and verify that
+/// Sync `serde` through the full MCP `index_sync_crates` flow and verify that
 /// the crate metadata, versions, and README are persisted correctly.
 #[tokio::test]
 async fn live_sync_serde_stores_metadata_and_readme() -> Result<()> {

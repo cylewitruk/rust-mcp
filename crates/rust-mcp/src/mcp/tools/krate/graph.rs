@@ -120,7 +120,7 @@ impl McpServer {
             .collect::<HashMap<_, _>>())
     }
 
-    /// Handles the `crate.graph` tool call.
+    /// Handles the `crate_graph` tool call.
     pub async fn handle_crate_graph(
         &self,
         request: CrateGraphRequest,

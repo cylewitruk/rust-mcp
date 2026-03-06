@@ -2411,6 +2411,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "flate2",
+ "futures",
  "metrics",
  "metrics-exporter-prometheus",
  "quote",

@@ -17,8 +17,6 @@ pub mod env_vars {
     pub const DATABASE_URL: &str = "DATABASE_URL";
     /// crates.io API base URL.
     pub const CRATES_IO_BASE_URL: &str = "CRATES_IO_BASE_URL";
-    /// User-Agent header for outbound crates.io requests.
-    pub const CRATES_IO_USER_AGENT: &str = "CRATES_IO_USER_AGENT";
     /// HTTP timeout for crates.io requests in seconds.
     pub const CRATES_IO_TIMEOUT_SECS: &str = "CRATES_IO_TIMEOUT_SECS";
     /// Minimum interval between crates.io requests in milliseconds.
@@ -83,6 +81,8 @@ pub mod env_vars {
     pub const SECURITY_SYNC_INTERVAL_SECS: &str = "SECURITY_SYNC_INTERVAL_SECS";
     /// Max crates to check per security sync page.
     pub const SECURITY_SYNC_BATCH_SIZE: &str = "SECURITY_SYNC_BATCH_SIZE";
+    /// Idle timeout in seconds for MCP sessions before pruning.
+    pub const SESSION_IDLE_TIMEOUT_SECS: &str = "SESSION_IDLE_TIMEOUT_SECS";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -128,14 +128,6 @@ pub struct Config {
     /// Base URL for crates.io API calls.
     #[arg(long, env = env_vars::CRATES_IO_BASE_URL, default_value = "https://crates.io")]
     pub crates_io_base_url: String,
-
-    /// User-Agent sent to crates.io and other remote APIs.
-    #[arg(
-        long,
-        env = env_vars::CRATES_IO_USER_AGENT,
-        default_value = "rust-mcp/0.1.0 (local dev machine)"
-    )]
-    pub crates_io_user_agent: String,
 
     /// HTTP timeout for crates.io/OSV requests.
     #[arg(long, env = env_vars::CRATES_IO_TIMEOUT_SECS, default_value_t = 20)]
@@ -271,6 +263,11 @@ pub struct Config {
     /// Max crates to check per security sync page.
     #[arg(long, env = env_vars::SECURITY_SYNC_BATCH_SIZE, default_value_t = 50)]
     pub security_sync_batch_size: u32,
+
+    /// Idle timeout in seconds for MCP sessions. Sessions with no activity
+    /// for longer than this are pruned from the database. 0 = no pruning.
+    #[arg(long, env = env_vars::SESSION_IDLE_TIMEOUT_SECS, default_value_t = 259200)]
+    pub session_idle_timeout_secs: u64,
 }
 
 impl Config {

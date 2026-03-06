@@ -206,7 +206,7 @@ fn prioritize_impl_rows(rows: Vec<CrateImplLookupRow>) -> Vec<CrateImplLookupRow
 }
 
 impl McpServer {
-    /// Handles the `crate.trait_impls` tool call.
+    /// Handles the `crate_trait_impls` tool call.
     pub async fn handle_crate_trait_impls(
         &self,
         request: CrateTraitImplsRequest,
@@ -231,7 +231,7 @@ impl McpServer {
                 || token.trait_name != trait_name
                 || token.type_name != type_name)
         {
-            return Err("cursor does not match current crate.trait_impls filters".to_string());
+            return Err("cursor does not match current crate_trait_impls filters".to_string());
         }
 
         let pag =

@@ -29,7 +29,7 @@ enum RefreshJobOutcome {
     LocalCache(LocalCacheRefreshOutcome),
     Docs(DocsRefreshOutcome),
     Security(SecuritySyncOutcome),
-    /// `index.sync_crates` ("all") — outcome is already handled internally.
+    /// `index_sync_crates` ("all") — outcome is already handled internally.
     AllSync,
 }
 
@@ -174,11 +174,11 @@ pub async fn run_refresh_worker(state: AppState) {
                 let per_page = sync_per_page(payload.per_page);
                 let offset = page.saturating_sub(1) * per_page;
                 match server
-                    .sync_osv_security(per_page, offset)
+                    .sync_osv_security(per_page, offset, None)
                     .await
                 {
                     Ok(mut osv) => match server
-                        .sync_rustsec_db_security(per_page, offset)
+                        .sync_rustsec_db_security(per_page, offset, None)
                         .await
                     {
                         Ok(rustsec) => {

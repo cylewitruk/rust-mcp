@@ -23,7 +23,7 @@ fn exact_req(version: Option<String>) -> Option<String> {
 }
 
 impl McpServer {
-    /// Handles the `crate.compatibility` tool call.
+    /// Handles the `crate_compatibility` tool call.
     pub async fn handle_crate_compatibility(
         &self,
         request: CrateCompatibilityRequest,
@@ -86,7 +86,7 @@ impl McpServer {
         }))
     }
 
-    /// Handles the `crate.compatibility_matrix` tool call.
+    /// Handles the `crate_compatibility_matrix` tool call.
     pub async fn handle_crate_compatibility_matrix(
         &self,
         request: CrateCompatibilityMatrixRequest,

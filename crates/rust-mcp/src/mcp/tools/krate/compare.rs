@@ -177,7 +177,7 @@ impl McpServer {
             .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
                 format!(
-                    "crate '{}' has no indexed versions yet; run index.sync_crates first",
+                    "crate '{}' has no indexed versions yet; run index_sync_crates first",
                     ctx.crate_row.name
                 )
             })?;
@@ -239,7 +239,7 @@ impl McpServer {
         })
     }
 
-    /// Handles the `crate.compare` tool call.
+    /// Handles the `crate_compare` tool call.
     pub async fn handle_crate_compare(
         &self,
         request: CrateCompareRequest,

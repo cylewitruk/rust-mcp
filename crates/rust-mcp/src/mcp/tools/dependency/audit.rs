@@ -214,7 +214,7 @@ fn evaluate_confidence(
 }
 
 impl McpServer {
-    /// Handles the `dependency.audit` tool call.
+    /// Handles the `dependency_audit` tool call.
     pub async fn handle_dependency_audit(
         &self,
         request: DependencyAuditRequest,
@@ -256,8 +256,8 @@ impl McpServer {
                     dependency_name: dep.name,
                     category: DependencyAuditIssueCategory::Unresolved,
                     severity: DependencyAuditSeverity::Medium,
-                    message: "dependency not found in local index; run index.sync_crates or \
-                              index.refresh"
+                    message: "dependency not found in local index; run index_sync_crates or \
+                              index_refresh"
                         .to_string(),
                     selected_version: None,
                     latest_version: None,

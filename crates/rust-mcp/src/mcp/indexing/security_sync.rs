@@ -10,11 +10,17 @@
 //! `SECURITY_SYNC_BATCH_SIZE`, querying the OSV API and local RustSec
 //! advisory-db for each crate. The task uses its own rate limiter
 //! configuration and runs independently of all other background tasks.
+//!
+//! Crates that were successfully checked are stamped with
+//! `security_checked_at = NOW()`. The staleness threshold
+//! (`SECURITY_SYNC_INTERVAL_SECS`) is used to skip recently-checked crates
+//! so that restarts don't re-query every crate from scratch.
 
 use metrics::{counter, histogram};
 use tokio::time::{Duration, sleep};
 use tracing::{info, warn};
 
+use crate::db::indexing::stamp_security_checked_at;
 use crate::mcp::indexing::security::SecuritySyncOutcome;
 use crate::mcp::server::McpServer;
 use crate::state::AppState;
@@ -43,7 +49,8 @@ impl SecuritySyncRunOutcome {
 
 /// Runs the periodic security advisory sync loop.
 pub async fn run_security_sync(state: AppState) {
-    let outcome = run_security_sync_scan(&state).await;
+    let max_age_secs = staleness_threshold(&state);
+    let outcome = run_security_sync_scan(&state, max_age_secs).await;
     info!(
         crates_processed = outcome.crates_processed,
         advisories_written = outcome.advisories_written,
@@ -62,7 +69,7 @@ pub async fn run_security_sync(state: AppState) {
 
     loop {
         sleep(Duration::from_secs(interval_secs)).await;
-        let outcome = run_security_sync_scan(&state).await;
+        let outcome = run_security_sync_scan(&state, max_age_secs).await;
         info!(
             crates_processed = outcome.crates_processed,
             advisories_written = outcome.advisories_written,
@@ -74,7 +81,10 @@ pub async fn run_security_sync(state: AppState) {
 }
 
 /// Performs a single full security sync, paging through all indexed crates.
-pub async fn run_security_sync_scan(state: &AppState) -> SecuritySyncRunOutcome {
+pub async fn run_security_sync_scan(
+    state: &AppState,
+    max_age_secs: Option<i64>,
+) -> SecuritySyncRunOutcome {
     let scan_started = std::time::Instant::now();
     let batch_size = state
         .config
@@ -86,10 +96,10 @@ pub async fn run_security_sync_scan(state: &AppState) -> SecuritySyncRunOutcome 
 
     loop {
         let osv_result = server
-            .sync_osv_security(batch_size, offset)
+            .sync_osv_security(batch_size, offset, max_age_secs)
             .await;
         let rustsec_result = server
-            .sync_rustsec_db_security(batch_size, offset)
+            .sync_rustsec_db_security(batch_size, offset, max_age_secs)
             .await;
 
         let page_outcome = match (osv_result, rustsec_result) {
@@ -120,6 +130,13 @@ pub async fn run_security_sync_scan(state: &AppState) -> SecuritySyncRunOutcome 
             }
         };
 
+        // Stamp successfully checked crates so they're skipped until stale.
+        for crate_id in &page_outcome.checked_crate_ids {
+            if let Err(error) = stamp_security_checked_at(&state.db, *crate_id).await {
+                warn!(crate_id, %error, "failed to stamp security_checked_at");
+            }
+        }
+
         let page_crates = page_outcome.crates_processed;
         run_outcome.accumulate(&page_outcome);
 
@@ -140,4 +157,16 @@ pub async fn run_security_sync_scan(state: &AppState) -> SecuritySyncRunOutcome 
         .increment(run_outcome.advisories_written as u64);
 
     run_outcome
+}
+
+/// Derives the staleness threshold from config.
+///
+/// Uses `SECURITY_SYNC_INTERVAL_SECS` as the max age — crates checked
+/// within that window are considered fresh and skipped. Returns `None`
+/// (check all) when the interval is 0 (one-shot mode).
+fn staleness_threshold(state: &AppState) -> Option<i64> {
+    let secs = state
+        .config
+        .security_sync_interval_secs;
+    if secs == 0 { None } else { Some(secs as i64) }
 }
