@@ -83,6 +83,20 @@ pub mod env_vars {
     pub const SECURITY_SYNC_BATCH_SIZE: &str = "SECURITY_SYNC_BATCH_SIZE";
     /// Idle timeout in seconds for MCP sessions before pruning.
     pub const SESSION_IDLE_TIMEOUT_SECS: &str = "SESSION_IDLE_TIMEOUT_SECS";
+    /// GitHub API base URL.
+    pub const GITHUB_BASE_URL: &str = "GITHUB_BASE_URL";
+    /// Minimum interval between GitHub API requests in milliseconds.
+    pub const GITHUB_MIN_INTERVAL_MS: &str = "GITHUB_MIN_INTERVAL_MS";
+    /// Max GitHub API requests allowed in the rolling window.
+    pub const GITHUB_WINDOW_MAX_REQUESTS: &str = "GITHUB_WINDOW_MAX_REQUESTS";
+    /// Rolling window duration for GitHub API rate limiting in seconds.
+    pub const GITHUB_WINDOW_DURATION_SECS: &str = "GITHUB_WINDOW_DURATION_SECS";
+    /// Git clone depth for the git probe (commit liveness extraction).
+    pub const GIT_PROBE_CLONE_DEPTH: &str = "GIT_PROBE_CLONE_DEPTH";
+    /// Timeout in seconds for a single git probe clone operation.
+    pub const GIT_PROBE_TIMEOUT_SECS: &str = "GIT_PROBE_TIMEOUT_SECS";
+    /// Set to false to disable git probe entirely. Default: true.
+    pub const GIT_PROBE_ENABLED: &str = "GIT_PROBE_ENABLED";
 }
 
 /// Reads an environment variable and returns `None` for unset/empty values.
@@ -268,6 +282,39 @@ pub struct Config {
     /// for longer than this are pruned from the database. 0 = no pruning.
     #[arg(long, env = env_vars::SESSION_IDLE_TIMEOUT_SECS, default_value_t = 259200)]
     pub session_idle_timeout_secs: u64,
+
+    /// Base URL for GitHub API calls.
+    #[arg(long, env = env_vars::GITHUB_BASE_URL, default_value = "https://api.github.com")]
+    pub github_base_url: String,
+
+    /// Minimum delay between outbound GitHub API requests in milliseconds.
+    /// GitHub unauthenticated rate limit is 60 req/hour; default 5000ms
+    /// keeps a conservative 1 req/5s burst cadence.
+    #[arg(long, env = env_vars::GITHUB_MIN_INTERVAL_MS, default_value_t = 5000)]
+    pub github_min_interval_ms: u64,
+
+    /// Max GitHub API requests allowed in the rolling window. 0 = disabled.
+    /// Default 59 per hour leaves headroom under the 60/hour unauthenticated
+    /// limit.
+    #[arg(long, env = env_vars::GITHUB_WINDOW_MAX_REQUESTS, default_value_t = 59)]
+    pub github_window_max_requests: u32,
+
+    /// Rolling window duration for GitHub API rate limiting in seconds.
+    #[arg(long, env = env_vars::GITHUB_WINDOW_DURATION_SECS, default_value_t = 3600)]
+    pub github_window_duration_secs: u64,
+
+    /// Git clone depth for the git probe. Controls how many commits of
+    /// history are fetched for commit liveness extraction. 0 = disabled.
+    #[arg(long, env = env_vars::GIT_PROBE_CLONE_DEPTH, default_value_t = 500)]
+    pub git_probe_clone_depth: u32,
+
+    /// Timeout in seconds for a single git probe clone + extraction.
+    #[arg(long, env = env_vars::GIT_PROBE_TIMEOUT_SECS, default_value_t = 60)]
+    pub git_probe_timeout_secs: u64,
+
+    /// Enable or disable git probe for commit liveness data.
+    #[arg(long, env = env_vars::GIT_PROBE_ENABLED, default_value_t = true)]
+    pub git_probe_enabled: bool,
 }
 
 impl Config {

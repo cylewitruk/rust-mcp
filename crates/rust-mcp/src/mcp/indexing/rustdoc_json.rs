@@ -616,27 +616,88 @@ fn build_canonical_path_map(krate: &RustdocCrate) -> HashMap<Id, String> {
         .map(|(id, summary)| (*id, summary.path.join("::")))
         .collect::<HashMap<Id, String>>();
 
+    // Build a reverse map: item ID → containing module's path.
+    // Needed for glob re-exports where we must derive the parent path.
+    let parent_path_of: HashMap<Id, String> = krate
+        .index
+        .iter()
+        .filter_map(|(mod_id, item)| {
+            if let ItemEnum::Module(module) = &item.inner {
+                let mod_path = canonical.get(mod_id)?.clone();
+                Some(
+                    module
+                        .items
+                        .iter()
+                        .map(move |child_id| (*child_id, mod_path.clone())),
+                )
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+
     for (use_id, item) in &krate.index {
         let ItemEnum::Use(use_item) = &item.inner else {
             continue;
         };
-        if !matches!(item.visibility, RustdocVisibility::Public) || use_item.is_glob {
+        if !matches!(item.visibility, RustdocVisibility::Public) {
             continue;
         }
 
-        let Some(target_id) = use_item.id else {
-            continue;
-        };
-        let Some(alias_path) = canonical.get(use_id).cloned() else {
-            continue;
-        };
+        if use_item.is_glob {
+            // Glob re-export: `pub use submodule::*`
+            // Walk the target module's public items and register each one
+            // under the parent path where this glob lives.
+            let Some(target_id) = use_item.id else {
+                continue;
+            };
+            let Some(parent_path) = parent_path_of.get(use_id) else {
+                continue;
+            };
+            let Some(target_item) = krate.index.get(&target_id) else {
+                continue;
+            };
+            let ItemEnum::Module(target_module) = &target_item.inner else {
+                continue;
+            };
 
-        let resolved_target = resolve_use_target_id(target_id, krate);
-        let entry = canonical
-            .entry(resolved_target)
-            .or_insert_with(|| alias_path.clone());
-        if path_rank(&alias_path) < path_rank(entry.as_str()) {
-            *entry = alias_path;
+            for &child_id in &target_module.items {
+                let Some(child_item) = krate.index.get(&child_id) else {
+                    continue;
+                };
+                if !matches!(child_item.visibility, RustdocVisibility::Public) {
+                    continue;
+                }
+                let Some(child_name) = child_item.name.as_ref() else {
+                    continue;
+                };
+
+                let resolved_child = resolve_use_target_id(child_id, krate);
+                let candidate = format!("{}::{}", parent_path, child_name);
+                let entry = canonical
+                    .entry(resolved_child)
+                    .or_insert_with(|| candidate.clone());
+                if path_rank(&candidate) < path_rank(entry.as_str()) {
+                    *entry = candidate;
+                }
+            }
+        } else {
+            // Named re-export: `pub use submodule::Foo` or `pub use submodule::Foo as Bar`
+            let Some(target_id) = use_item.id else {
+                continue;
+            };
+            let Some(alias_path) = canonical.get(use_id).cloned() else {
+                continue;
+            };
+
+            let resolved_target = resolve_use_target_id(target_id, krate);
+            let entry = canonical
+                .entry(resolved_target)
+                .or_insert_with(|| alias_path.clone());
+            if path_rank(&alias_path) < path_rank(entry.as_str()) {
+                *entry = alias_path;
+            }
         }
     }
 
@@ -2363,6 +2424,370 @@ mod tests {
                 .canonical_path
                 .as_deref(),
             Some("my_crate::Error")
+        );
+    }
+
+    #[test]
+    fn extract_all_resolves_glob_reexport_canonical_paths() {
+        // Simulates: pub mod internal { pub struct Widget; pub struct Gadget; }
+        //            pub use internal::*;
+        // Expected: Widget and Gadget get canonical path "my_crate::Widget" /
+        // "my_crate::Gadget" instead of "my_crate::internal::Widget" /
+        // "my_crate::internal::Gadget".
+        let mut index = HashMap::new();
+        let mut paths = HashMap::new();
+
+        // Root module (id=0): contains the "internal" submodule and the glob re-export.
+        index.insert(
+            Id(0),
+            item(
+                0,
+                "my_crate",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: true,
+                    items: vec![Id(10), Id(20)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(0),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Submodule "internal" (id=10): contains Widget and Gadget.
+        index.insert(
+            Id(10),
+            item(
+                10,
+                "internal",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: false,
+                    items: vec![Id(1), Id(2)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(10),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "internal".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Widget (id=1)
+        index.insert(
+            Id(1),
+            item(
+                1,
+                "Widget",
+                RustdocVisibility::Public,
+                ItemEnum::Struct(Struct {
+                    kind: StructKind::Unit,
+                    generics: empty_generics(),
+                    impls: vec![],
+                }),
+            ),
+        );
+        paths.insert(
+            Id(1),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "internal".into(), "Widget".into()],
+                kind: ItemKind::Struct,
+            },
+        );
+
+        // Gadget (id=2)
+        index.insert(
+            Id(2),
+            item(
+                2,
+                "Gadget",
+                RustdocVisibility::Public,
+                ItemEnum::Struct(Struct {
+                    kind: StructKind::Unit,
+                    generics: empty_generics(),
+                    impls: vec![],
+                }),
+            ),
+        );
+        paths.insert(
+            Id(2),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "internal".into(), "Gadget".into()],
+                kind: ItemKind::Struct,
+            },
+        );
+
+        // Glob re-export: `pub use internal::*;` (id=20)
+        index.insert(
+            Id(20),
+            item(
+                20,
+                "",
+                RustdocVisibility::Public,
+                ItemEnum::Use(Use {
+                    source: "crate::internal::*".into(),
+                    name: String::new(),
+                    id: Some(Id(10)),
+                    is_glob: true,
+                }),
+            ),
+        );
+
+        let krate = RustdocCrate {
+            root: Id(0),
+            crate_version: Some("1.0.0".into()),
+            includes_private: false,
+            index,
+            paths,
+            external_crates: HashMap::new(),
+            target: Target {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                target_features: vec![],
+            },
+            format_version: 57,
+        };
+
+        let result = extract_all(&krate);
+
+        let widget = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "Widget")
+            .expect("expected Widget symbol");
+        assert_eq!(
+            widget
+                .definition_path
+                .as_deref(),
+            Some("my_crate::internal::Widget"),
+            "definition_path should be the original module path"
+        );
+        assert_eq!(
+            widget
+                .canonical_path
+                .as_deref(),
+            Some("my_crate::Widget"),
+            "canonical_path should be the shorter glob-reexported path"
+        );
+
+        let gadget = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "Gadget")
+            .expect("expected Gadget symbol");
+        assert_eq!(
+            gadget
+                .canonical_path
+                .as_deref(),
+            Some("my_crate::Gadget"),
+            "canonical_path should be the shorter glob-reexported path"
+        );
+    }
+
+    #[test]
+    fn glob_reexport_does_not_override_shorter_named_reexport() {
+        // Simulates: pub mod a { pub mod b { pub struct Thing; } }
+        //            pub use a::b::Thing;       // named re-export → my_crate::Thing
+        //            pub mod prelude { pub use crate::a::b::*; }  // glob →
+        // my_crate::prelude::Thing The named re-export path is shorter and
+        // should win.
+        let mut index = HashMap::new();
+        let mut paths = HashMap::new();
+
+        // Root (id=0)
+        index.insert(
+            Id(0),
+            item(
+                0,
+                "my_crate",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: true,
+                    items: vec![Id(10), Id(30), Id(40)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(0),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Module a (id=10)
+        index.insert(
+            Id(10),
+            item(
+                10,
+                "a",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: false,
+                    items: vec![Id(11)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(10),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "a".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Module a::b (id=11)
+        index.insert(
+            Id(11),
+            item(
+                11,
+                "b",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: false,
+                    items: vec![Id(1)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(11),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "a".into(), "b".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Thing (id=1)
+        index.insert(
+            Id(1),
+            item(
+                1,
+                "Thing",
+                RustdocVisibility::Public,
+                ItemEnum::Struct(Struct {
+                    kind: StructKind::Unit,
+                    generics: empty_generics(),
+                    impls: vec![],
+                }),
+            ),
+        );
+        paths.insert(
+            Id(1),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "a".into(), "b".into(), "Thing".into()],
+                kind: ItemKind::Struct,
+            },
+        );
+
+        // Named re-export: `pub use a::b::Thing;` (id=30) → my_crate::Thing
+        index.insert(
+            Id(30),
+            item(
+                30,
+                "Thing",
+                RustdocVisibility::Public,
+                ItemEnum::Use(Use {
+                    source: "crate::a::b::Thing".into(),
+                    name: "Thing".into(),
+                    id: Some(Id(1)),
+                    is_glob: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(30),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "Thing".into()],
+                kind: ItemKind::Use,
+            },
+        );
+
+        // Prelude module (id=40) with glob re-export
+        index.insert(
+            Id(40),
+            item(
+                40,
+                "prelude",
+                RustdocVisibility::Public,
+                ItemEnum::Module(Module {
+                    is_crate: false,
+                    items: vec![Id(41)],
+                    is_stripped: false,
+                }),
+            ),
+        );
+        paths.insert(
+            Id(40),
+            ItemSummary {
+                crate_id: 0,
+                path: vec!["my_crate".into(), "prelude".into()],
+                kind: ItemKind::Module,
+            },
+        );
+
+        // Glob re-export in prelude: `pub use crate::a::b::*;` (id=41)
+        index.insert(
+            Id(41),
+            item(
+                41,
+                "",
+                RustdocVisibility::Public,
+                ItemEnum::Use(Use {
+                    source: "crate::a::b::*".into(),
+                    name: String::new(),
+                    id: Some(Id(11)),
+                    is_glob: true,
+                }),
+            ),
+        );
+
+        let krate = RustdocCrate {
+            root: Id(0),
+            crate_version: Some("1.0.0".into()),
+            includes_private: false,
+            index,
+            paths,
+            external_crates: HashMap::new(),
+            target: Target {
+                triple: "x86_64-unknown-linux-gnu".into(),
+                target_features: vec![],
+            },
+            format_version: 57,
+        };
+
+        let result = extract_all(&krate);
+        let thing = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "Thing")
+            .expect("expected Thing symbol");
+        // Named re-export (my_crate::Thing, 2 segments) should beat
+        // glob re-export (my_crate::prelude::Thing, 3 segments).
+        assert_eq!(
+            thing
+                .canonical_path
+                .as_deref(),
+            Some("my_crate::Thing"),
+            "named re-export should win over longer glob re-export path"
         );
     }
 

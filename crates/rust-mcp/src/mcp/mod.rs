@@ -24,8 +24,8 @@ pub mod session;
 mod transport;
 
 pub use indexing::{
-    run_cache_watcher, run_enrichment_maintenance, run_refresh_worker, run_registry_discovery,
-    run_security_sync,
+    run_cache_watcher, run_enrichment_maintenance, run_github_metadata_sync, run_refresh_worker,
+    run_registry_discovery, run_security_sync,
 };
 pub use session::run_session_reaper;
 pub use transport::streamable_http_service;

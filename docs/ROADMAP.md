@@ -1,145 +1,67 @@
 # ROADMAP
 
 Status: Active
-Last updated: 2026-02-27
+Last updated: 2026-03-06
 
 This file tracks only open work and future direction.
 
-## Baseline Completed
-
-The previously planned milestone set through M13 is complete, including:
-
-- core indexing and refresh pipeline
-- expanded crate/dependency/source intelligence tools
-- confidence contract and progress notifications
-- modular integration/e2e test layout and broad tool-call coverage
-
-## P0: Correctness and Protocol Completeness
-
-- [x] Remove `stdio` from core runtime config until a dedicated adapter exists.
-  - `rust-mcp` is now explicitly HTTP-only (Streamable HTTP).
-  - `MCP_TRANSPORT` and `TransportMode` were removed from runtime config.
-- [x] Add stricter MCP protocol conformance checks around session lifecycle edge cases (invalid ordering, missing/expired session headers, malformed request behavior).
-  - Added e2e checks for missing session headers after successful initialize/initialized flow (`tools/list`, `tools/call`).
-  - Added e2e checks for malformed JSON request bodies and invalid JSON-RPC request shapes.
-- [x] Expand e2e protocol assertions for non-happy-path JSON-RPC/MCP error envelopes and status mappings.
-  - Added e2e matrix assertions for JSON-RPC error envelope shape (`jsonrpc`, `id`, `error.code`, `error.message`) on successful transport responses.
-  - Added stricter 400/401/422 status assertions for malformed and unauthorized protocol paths.
-- [x] Add clear compatibility policy for supported MCP protocol versions.
-  - Policy is now documented in `README.md` (`MCP Protocol Version Policy`).
-  - Latest published version and currently negotiated server version are both explicitly documented.
-  - Default initialize examples/test harness constants now use a shared protocol constant to avoid drift.
-
 ## P1: Rustdoc Intelligence Quality
 
-- [ ] Complete rustdoc JSON enrichment for type/impl/trait fidelity (including better canonical path handling for re-exports).
-  - [x] Canonical-path mapping now prefers shortest public re-export path from rustdoc `Use` graph.
-  - [x] `crate.re_exports` now prefers rustdoc canonical/definition-path pairs when available.
-  - [x] `crate.type_info` and `crate.trait_impls` now expose richer rustdoc impl metadata (`is_blanket`, `is_synthetic`, `is_negative`, `blanket_type`, generics, where-clauses).
-  - [x] `crate_traits` metadata is now surfaced in `crate.type_info` and `crate.trait_impls` responses as `trait_definitions`.
-  - [ ] Remaining: improve canonicalization coverage for complex glob/re-export edge cases and external-path remapping nuances.
-- [x] Improve `crate.api_diff`, `crate.type_info`, and `crate.trait_impls` prioritization logic when both syn and rustdoc-derived data exist.
-  - [x] `crate.type_info` and `crate.trait_impls` now collapse duplicate dual-source impl rows and prioritize richer rustdoc-backed metadata over sparse duplicates.
-  - [x] `crate.api_diff` now prefers rustdoc-backed symbol rows when dual-source duplicates exist.
-- [x] Add richer diagnostics for rustdoc ingestion failures (bad files, version mismatches, parse failures) with actionable error messages.
-  - Rustdoc ingestion now reports unsupported `format_version` mismatches explicitly and appends targeted hints for fallback/configuration/decode failures.
-- [x] Define and document data freshness/confidence behavior specifically for rustdoc-backed responses.
-  - Documented in `README.md` (`Rustdoc Freshness and Confidence`) with tool-level behavior notes for `crate.re_exports`, `crate.import_path`, `crate.type_info`, `crate.trait_impls`, and `crate.api_diff`.
+Canonical path resolution determines the shortest public import path for each symbol/type (e.g. `tokio::io::AsyncRead` instead of `tokio::io::async_read::AsyncRead`). This affects `crate_import_path`, `crate_api`, `crate_type_info`, and any tool that surfaces import paths.
 
-## P1: Tooling and UX Improvements
+- [x] Resolve glob re-exports in canonical path computation.
+  - `pub use submodule::*` re-exports now contribute shorter canonical paths. Previously `build_canonical_path_map` skipped `is_glob: true` items entirely.
+- [ ] Hardcode well-known standard library path remappings.
+  - External types from `std`/`core`/`alloc` sometimes appear with internal module paths (e.g. `std::collections::hash_map::HashMap` instead of `std::collections::HashMap`). A static lookup table for common std re-exports would fix these without loading external rustdoc JSON.
+- [ ] Cross-crate canonical path resolution for non-std dependencies.
+  - When a crate's API surfaces types from its dependencies (e.g. `serde::Serialize` in trait bounds), the path comes from `krate.external_crates` and may be an internal path of the external crate. Resolving this requires looking up the external crate's already-indexed canonical paths from the database. Adds complexity and a dependency-ordering constraint (external crate must be indexed first).
 
-- [x] Add `crate.import_path` tool (best-known public import path resolution).
-  - `crate.import_path` now resolves best-known public import paths and alternative matches from indexed symbol metadata.
-- [x] Improve `crate.migration_path` heuristics beyond simple rename candidates.
-  - `crate.migration_path` now scores replacement candidates using kind matching, token overlap, and signature compatibility (including normalized function-shape matching).
-  - Migration rationales now include richer guidance for signature and visibility changes, plus likely replacement suggestions for removed symbols.
-  - Added focused unit coverage for replacement-candidate scoring and rationale enrichment behavior.
-- [x] Strengthen response contracts for pagination/cursors and truncation indicators across all search-style tools.
-  - [x] Standardized `page`/`cursor`/`next_cursor` plus `has_more`/`truncated` metadata for `crate.search`, `source.search`, and `docs.search` (matching existing `symbol.search` behavior).
-  - [x] Extended the same metadata contract to `crate.versions`, `crate.alternatives`, `crate.hotspots`, and `crate.usage_patterns`.
-  - [x] Extended the same metadata contract to remaining limit-based crate intelligence tools: `crate.api`, `crate.re_exports`, `crate.import_path`, `crate.error_types`, and `crate.trait_impls`.
-- [x] Publish a machine-readable tool contract snapshot for client generation/testing.
-  - `schema.get` now exposes per-tool request/response JSON Schemas over MCP.
-  - HTTP endpoints now expose the same schema catalog at `/schemas` and `/schemas/{tool_name}`.
-  - `SCHEMA_EXPORT_DIR` now writes `tool-schemas.json` plus per-tool artifacts at startup.
-- [x] Publish a separate `rust-mcp-stdio` adapter binary that bridges stdio MCP clients to a running rust-mcp HTTP instance.
-  - Added `rust-mcp-stdio` crate with MCP stdio framing, Streamable HTTP forwarding, session header propagation, and JSON/SSE response passthrough.
-  - Adapter behavior is tool-agnostic pass-through, so all tools exposed by the upstream `rust-mcp` HTTP server are supported.
+## P2: First-Touch Latency
 
-## P1: On-Demand Indexing
+- [ ] Evaluate whether first-touch latency needs further optimization.
+  - On-demand indexing typically completes in 1-3s for most crates. The coordinator timeout ceiling is 45s, which could theoretically be hit for very large crates or slow docs.rs downloads, but this is uncommon in practice.
+  - If latency becomes a problem for specific crates, options include: returning syn-only data immediately with a "rustdoc enrichment in progress" indicator, or adding `_meta.estimated_wait` to progress notifications based on stored indexing statistics.
 
-- [x] Transparent on-demand crate indexing so MCP clients never need to call `index.*` tools explicitly.
-  - [x] Added `IndexingCoordinator` (`mcp/indexing/coordinator.rs`) with `tokio::sync::Notify` for worker wake-up and `tokio::sync::watch` channels for per-job completion signaling.
-  - [x] `fetch_crate_context()` now calls `ensure_crate_indexed()` before the DB lookup — all crate tools gain on-demand indexing transparently with no signature changes.
-  - [x] Refresh worker idle loop replaced with `select!{notified, sleep(2s)}` so on-demand jobs are picked up immediately.
-  - [x] Concurrent requests for the same unindexed crate coalesce via `enqueue_or_get_refresh_job_id` deduplication and shared `watch` channels.
-  - [x] Fixed pre-existing bug in `enqueue_or_get_refresh_job_id` (`fetch_one` → `fetch_optional` for the existence check).
-  - [x] Integration tests: happy-path on-demand indexing, nonexistent-crate error, concurrent coalescing.
-  - [x] Follow-up: add MCP progress notifications (`notifications/progress` SSE) during on-demand waits by upgrading tool handler signatures to accept `meta: Meta, client: Peer<RoleServer>`.
-    - All 33 instrumented tools now use `instrument_tool_with_progress` with `meta: Meta` and `client: Peer<RoleServer>` parameters.
-    - Heartbeat improved from single-shot 5s pulse to periodic 5s interval for sustained client feedback during long on-demand waits.
-  - [x] Follow-up: extend on-demand indexing to version-level (`backfill_missing_requested_version`) and source/rustdoc scopes.
-    - `enqueue_on_demand` now accepts a `scope` parameter (crate, local_cache, rustdoc_json) instead of hardcoding `"crate"`.
-    - `backfill_missing_requested_version` reworked from inline `sync_single_crate` to coordinator enqueue+wait for consistency and observability.
-    - Added `ensure_source_indexed` and `ensure_rustdoc_indexed` best-effort helpers in `queries.rs` — failures are logged as warnings but do not error out tool calls.
-    - Source tools (`source.search`, `source.read`, `source.context`) now trigger on-demand `local_cache` indexing when source files are missing for a version.
-    - Rustdoc-backed tools (`crate.type_info`, `crate.trait_impls`, `crate.re_exports`, `crate.import_path`, `crate.api_diff`, `crate.api`, `crate.error_types`) now trigger on-demand `rustdoc_json` indexing when rustdoc symbols are missing.
-    - `crate.derive_macros` triggers on-demand source indexing (uses syn parsing, not rustdoc).
+## P1: GitHub Integration (No Auth Required)
 
-## P1: Proactive Registry Discovery and Background Indexing
+GitHub REST API endpoints below are publicly accessible at 60 req/hour without authentication. This is sufficient for on-demand lookups but not bulk indexing.
 
-- [x] Startup registry scan: on boot, walk the mounted cargo registry (`$CARGO_REGISTRY_DIR/src/`) and enqueue indexing jobs for any crate/version directories not yet present in the DB.
-  - `mcp/indexing/discovery.rs` added with `run_registry_scan` and `run_registry_discovery`.
-  - Bounded by `REGISTRY_SCAN_BATCH_LIMIT` (default: 0 = unlimited); feeds directly into the `IndexingCoordinator` job queue.
-- [x] Periodic background discovery: configurable-interval scan via `REGISTRY_SCAN_INTERVAL_SECS` (default: 600s; 0 = disabled after startup scan).
-  - Stat-level directory listing (`std::fs::read_dir`) — no file parsing, minimal I/O pressure.
-  - `run_registry_discovery` spawned as a third background task from `app.rs` alongside the existing refresh worker and rustdoc startup sync.
-- [x] Proactive source and rustdoc enrichment: after any successful `crate`/`crate_deep_refresh` job, the worker automatically enqueues `local_cache` and `rustdoc_json` follow-up jobs at `PRIORITY_PROACTIVE_ENRICH` (75).
-  - `enqueue_or_get_refresh_job_id` is idempotent — safe to call unconditionally on every crate job completion.
-  - Interactive on-demand requests (`PRIORITY_ON_DEMAND` = 1) are never starved.
-- [x] Configurable pre-warm list: `PRE_WARM_CRATES` env var (comma-separated) enqueues named crates at `PRIORITY_PRE_WARM` (25) before the general registry scan begins.
-- [x] Named priority constants (`PRIORITY_ON_DEMAND` through `PRIORITY_DEFAULT`) added to `coordinator.rs`; magic literals in `freshness.rs` and `coordinator.rs` migrated to use them.
-- [x] Observability: expose discovery/enrichment queue depth, scan duration, and jobs-ahead-of-demand ratio via existing Prometheus metrics.
-  - `rust_mcp_refresh_jobs_scope_pending{scope=…}` — per-scope pending queue depth (labeled gauge, worker loop).
-  - `rust_mcp_refresh_jobs_background_ratio` — fraction of pending jobs that are background priority (≥ `PRIORITY_DISCOVERY`); 0.0 when idle.
-  - `rust_mcp_discovery_scan_duration_ms` — histogram of per-scan wall-clock time.
-  - `rust_mcp_discovery_scans_total` — cumulative count of completed scans.
-  - `rust_mcp_discovery_jobs_enqueued_total` — cumulative jobs enqueued by discovery.
-  - `rust_mcp_discovery_scan_errors_total` — incremented when a scan aborts early (registry unreadable or DB unavailable).
+- [x] Add GitHub repo metadata sync for indexed crates.
+  - Parses `owner/repo` from `repository` URL, fetches `GET /repos/{owner}/{repo}` for: star count, fork count, open issue/PR count, `archived` flag, `pushed_at` (last commit), license from repo metadata.
+  - Stored in `github_repo_metadata` table and refreshed periodically (staleness-gated, using security sync interval).
+  - Surfaced in `crate_intel` as a `github` section (maintenance health signal).
+- [x] Add GHSA advisory cross-referencing.
+  - `GET /advisories?ecosystem=rust&package={name}` returns GitHub Security Advisories for a crate.
+  - Integrated into the existing security sync pipeline alongside OSV and RustSec.
+  - Advisory matches are surfaced in `dependency_audit` and `crate_intel` security sections via the shared `advisory_matches` table.
+- [x] Rate limiting for GitHub API.
+  - Added `GITHUB_BASE_URL`, `GITHUB_MIN_INTERVAL_MS`, `GITHUB_WINDOW_*` config (following existing crates.io/docs.rs/OSV pattern).
+  - Added `OutboundSource::GitHub` to the two-tier rate limiter.
 
-## P1: Protocol and Reliability
+## P2: GitHub Integration (Unauthenticated Enrichment)
 
-- [x] Audit and close MCP protocol version gap (negotiated: `2025-03-26`, latest published: `2025-11-25`).
-  - `SUPPORTED_MCP_PROTOCOL_VERSION` updated to `"2025-11-25"`.
-  - `get_info()` now explicitly sets `protocol_version` from the canonical constant via serde (rmcp 0.16.0's `ProtocolVersion` inner field is private; `Deserialize` accepts unknown version strings as `Cow::Owned`).
-  - rmcp's built-in negotiation downgrades to the client's version when the client requests an older revision (e.g. `2025-03-26`), so no custom negotiation code is needed.
-  - `MCP-Protocol-Version` request header validation is intentionally omitted: rmcp 0.16.0 does not validate it server-side, and the spec marks it SHOULD (not MUST); revisit when rmcp exposes server-side header validation hooks.
-  - Conformance test matrix extended with `"2025-11-25"` as an explicit test case.
-- [x] Replace `.expect()` calls in signal handler setup (`app.rs`) with proper error propagation.
-  - `shutdown_signal()` replaced with `make_shutdown_signal()` which returns `std::io::Result`.
-  - SIGTERM stream is now installed eagerly so failure propagates as a startup `Err` (via `.context()`) rather than a panic.
-  - Ctrl+C errors are logged as warnings (the error can only be observed after the future is polled, so full propagation is not possible synchronously).
+These endpoints work without authentication at the default rate limits (1 req/5s burst, 59/hr window). A future `GITHUB_TOKEN` option would raise limits to 5,000 req/hour for bulk indexing.
 
-## P1: First-Touch Latency
-
-- [ ] Reduce first-interaction latency for on-demand rustdoc indexing.
-  - On-demand `rustdoc_json` jobs currently block tool responses for up to 45s (coordinator timeout). Tools that trigger both crate + rustdoc on-demand can see 130–180s wall time on first touch.
-  - Options to evaluate: configurable pre-warm list at startup, returning syn-only data immediately with a "rustdoc enrichment in progress" indicator, adding `_meta.estimated_wait` to progress notifications.
-    - `_meta.estimated_wait` should be based on statistics stored by the indexing process to give accurate results.
-
-## P1: Test Coverage
-
-- [x] Add standalone integration tests for untested crate tools.
-  - [x] Added standalone tests for `crate.type_info`, `crate.trait_impls`, `crate.error_types`, `crate.versions`, `crate.usage_patterns`, `crate.hotspots`, `crate.migration_path`, `crate.derive_macros`, `crate.compatibility`, `crate.compatibility_matrix`, `crate.license_check`, `crate.alternatives`, and `schema.get`.
-  - [x] All 13 previously combo-only tools now have isolated test functions; combo tests retained for cross-tool workflow coverage.
-  - Updated coverage: ~35/35 tools have direct standalone or focused-pair test cases.
+- [x] Contributor count.
+  - `GET /repos/{owner}/{repo}/contributors?per_page=1&anon=true` — uses `Link` header pagination to extract total contributor count in a single request. Stored in `github_repo_metadata.contributor_count`, surfaced in `crate_intel` `github.contributors`.
+- [x] GitHub release notes.
+  - `GET /repos/{owner}/{repo}/releases?per_page=10` — fetches latest releases (excluding drafts). Stored in `github_releases` table, surfaced in `crate_api_diff` and `crate_migration_path` as `release_notes` for human-readable upgrade context.
+- [x] Background bulk GitHub metadata sync.
+  - Runs at startup and on `SECURITY_SYNC_INTERVAL_SECS` cadence (default 24h). Processes up to 50 crates per pass with staleness gating. Works at unauthenticated rate limits (~19 crates/hr at 3 requests each).
+  - A future `GITHUB_TOKEN` option would raise limits to 5,000 req/hour for larger registries.
+- [x] Commit liveness via git probe.
+  - Shallow bare `git clone --depth=N` (configurable via `GIT_PROBE_CLONE_DEPTH`, default 500) extracts `last_commit_at`, `last_commit_message`, and `recent_commit_count` (commits in last 90 days) without consuming API rate limits.
+  - Stored in `github_repo_metadata`, surfaced in `crate_intel` `github` section.
+  - Configurable: `GIT_PROBE_ENABLED` (default true), `GIT_PROBE_CLONE_DEPTH` (default 500), `GIT_PROBE_TIMEOUT_SECS` (default 60).
+- [ ] Community health metrics.
+  - `GET /repos/{owner}/{repo}/community/profile` (authenticated) — community health percentage (has README, contributing guide, code of conduct, etc.).
 
 ## P2: Indexing and Operations
 
 - [ ] Optional container-side rustdoc JSON generation workflow (nightly, bounded/isolated execution).
-  - _**Background:** docs.rs does not have rustdoc-json built for all versions of all crates yet. Many crate [versions] published prior to May, 2025-ish are not available for download._
-  - Depends on P1: Proactive Registry Discovery — local rustdoc builds should be triggered automatically for discovered versions that lack docs.rs artifacts, not only on-demand.
-- [ ] Background refresh fairness/backpressure tuning for large local registries (builds on P1: Proactive Registry Discovery).
+  - _**Background:** docs.rs does not have rustdoc-json built for all versions of all crates yet. Many crate versions published prior to May 2025 are not available for download._
+  - Local rustdoc builds should be triggered automatically for discovered versions that lack docs.rs artifacts.
+- [ ] Background refresh fairness/backpressure tuning for large local registries.
 - [ ] More granular per-source/per-tool SLO metrics and alertable counters.
 - [ ] CI split for faster feedback: lint, integration, and e2e lanes with artifact reuse.
 
@@ -151,8 +73,6 @@ The previously planned milestone set through M13 is complete, including:
 ## P2: Optional Advanced Intelligence
 
 - [ ] Evaluate optional rust-analyzer-assisted enrichment for workspace-local, position-aware context where rustdoc/syn are insufficient.
-- [x] Add `crate.deprecated` tool (deprecated symbols and types with notes and replacement hints).
-  - `crate.deprecated` queries `symbols` and `crate_types` for rows with `deprecated_since`/`deprecated_note` set, triggers on-demand rustdoc enrichment, and returns paginated `DeprecatedItem` entries.
 - [ ] Consider feature-gated API surfacing tools once rustdoc JSON exposes structured feature-gate data (currently only raw `Attribute::Other(String)` strings — not actionable).
 
 ## Out of Scope (For Now)

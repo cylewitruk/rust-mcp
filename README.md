@@ -194,6 +194,9 @@ All server environment variables with their defaults:
 | `CRATES_IO_MIN_INTERVAL_MS` | `1000` | Minimum delay between crates.io requests (ms) |
 | `DOCS_RS_MIN_INTERVAL_MS` | `500` | Minimum delay between docs.rs requests (ms) |
 | `OSV_MIN_INTERVAL_MS` | `250` | Minimum delay between OSV requests (ms) |
+| `GITHUB_MIN_INTERVAL_MS` | `5000` | Minimum delay between GitHub API requests (ms) |
+| `GITHUB_WINDOW_MAX_REQUESTS` | `59` | Max GitHub API requests in the rolling window (0 = disabled) |
+| `GITHUB_WINDOW_DURATION_SECS` | `3600` | Rolling window duration for GitHub rate limiting (seconds) |
 
 **External integrations:**
 
@@ -202,6 +205,23 @@ All server environment variables with their defaults:
 | `CRATES_IO_BASE_URL` | `https://crates.io` | crates.io API base URL |
 | `CRATES_IO_TIMEOUT_SECS` | `20` | HTTP timeout for crates.io/OSV requests (seconds) |
 | `DOCS_RS_BASE_URL` | `https://docs.rs` | docs.rs base URL |
+| `GITHUB_BASE_URL` | `https://api.github.com` | GitHub API base URL |
+
+**GitHub commit liveness (git probe):**
+
+| Variable | Default | Description |
+|---|---|---|
+| `GIT_PROBE_ENABLED` | `true` | Enable git probe for commit liveness data |
+| `GIT_PROBE_CLONE_DEPTH` | `500` | Shallow clone depth for commit history extraction (0 = disabled) |
+| `GIT_PROBE_TIMEOUT_SECS` | `60` | Timeout for a single git probe clone + extraction (seconds) |
+
+**Security & session maintenance:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `SECURITY_SYNC_INTERVAL_SECS` | `86400` | Seconds between periodic security advisory syncs (0 = disabled) |
+| `SECURITY_SYNC_BATCH_SIZE` | `50` | Max crates to check per security sync pass |
+| `SESSION_IDLE_TIMEOUT_SECS` | `259200` | Idle timeout for MCP sessions before pruning (seconds, 0 = no pruning) |
 
 **Paths:**
 
@@ -250,7 +270,7 @@ All server environment variables with their defaults:
 | `MCP_HTTP_PORT` | `43173` | Host-side port mapping in docker-compose |
 | `PROMETHEUS_PORT` | `9090` | Host-side Prometheus port mapping in docker-compose |
 | `OUTBOUND_FIREWALL` | `true` | Enable tinyproxy-based domain allowlist |
-| `OUTBOUND_ALLOWLIST` | `crates.io,static.crates.io,docs.rs,api.osv.dev,api.github.com` | Comma-separated allowed outbound domains |
+| `OUTBOUND_ALLOWLIST` | `crates.io,static.crates.io,docs.rs,api.osv.dev,api.github.com,github.com` | Comma-separated allowed outbound domains |
 
 `rust-mcp-stdio` adapter variables:
 

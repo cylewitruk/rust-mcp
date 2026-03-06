@@ -10,7 +10,7 @@ services:
       # Entrypoint only (not read by the server binary)
       # ------------------------------------------------------------------------
       OUTBOUND_FIREWALL: ${OUTBOUND_FIREWALL:-true}
-      OUTBOUND_ALLOWLIST: ${OUTBOUND_ALLOWLIST:-crates.io,static.crates.io,docs.rs,api.osv.dev,api.github.com}
+      OUTBOUND_ALLOWLIST: ${OUTBOUND_ALLOWLIST:-crates.io,static.crates.io,docs.rs,api.osv.dev,api.github.com,github.com}
       
       # Server configuration
       # ------------------------------------------------------------------------

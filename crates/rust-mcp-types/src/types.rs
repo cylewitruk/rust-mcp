@@ -1213,6 +1213,9 @@ pub mod krate {
         pub dependents: Vec<CrateIntelDependent>,
         /// Total dependent crate count.
         pub dependent_crate_count: i64,
+        /// GitHub repository health metadata (if available).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub github: Option<CrateIntelGitHub>,
         /// Advisory matches for selected version.
         pub advisories: Vec<CrateIntelAdvisory>,
         /// Whether a freshness check was performed.
@@ -1308,6 +1311,57 @@ pub mod krate {
         /// `["CWE-787"]`).
         #[serde(skip_serializing_if = "Vec::is_empty", default)]
         pub cwe_ids: Vec<String>,
+    }
+
+    /// GitHub repository metadata surfaced in `crate_intel`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct CrateIntelGitHub {
+        /// GitHub owner (user or org).
+        pub owner: String,
+        /// GitHub repository name.
+        pub repo: String,
+        /// Star count.
+        pub stars: u64,
+        /// Fork count.
+        pub forks: u64,
+        /// Open issue + PR count.
+        pub open_issues: u64,
+        /// Whether the repository is archived.
+        pub archived: bool,
+        /// Last push timestamp (ISO 8601).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub last_push: Option<String>,
+        /// SPDX license identifier from the GitHub repo.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub license: Option<String>,
+        /// Total contributor count (including anonymous).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub contributors: Option<u64>,
+        /// ISO 8601 timestamp of the most recent commit on the default branch.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub last_commit_at: Option<String>,
+        /// Subject line of the most recent commit.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub last_commit_message: Option<String>,
+        /// Number of commits in the last 90 days (from git history).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub recent_commit_count: Option<u64>,
+    }
+
+    /// A GitHub release note entry surfaced in API diff and migration tools.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct GitHubReleaseNote {
+        /// Git tag name (e.g. `v1.2.0`).
+        pub tag: String,
+        /// Release title.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub name: Option<String>,
+        /// Release body (markdown).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub body: Option<String>,
+        /// Publication timestamp (ISO 8601).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub published_at: Option<String>,
     }
 
     /// Request payload for `crate_versions`.
@@ -1497,6 +1551,9 @@ pub mod krate {
         pub breaking_changes_detected: bool,
         pub changes: Vec<CrateApiDiffChange>,
         pub truncated: bool,
+        /// GitHub release notes for versions in the diff range (newest first).
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        pub release_notes: Vec<GitHubReleaseNote>,
         pub freshness_check_performed: bool,
         pub freshness_check_result: String,
         pub refresh_enqueued: bool,
@@ -1909,6 +1966,10 @@ pub mod krate {
         pub removed_count: usize,
         pub changed_count: usize,
         pub migration_actions: Vec<CrateMigrationAction>,
+        /// GitHub release notes for versions in the migration range (newest
+        /// first).
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        pub release_notes: Vec<GitHubReleaseNote>,
         pub confidence: String,
         pub confidence_assessment: ConfidenceAssessment,
         pub suggested_next_tools: Vec<String>,

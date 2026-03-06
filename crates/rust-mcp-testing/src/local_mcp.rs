@@ -89,6 +89,19 @@ impl LocalMcpHttpHarness {
         &self.mcp_url
     }
 
+    /// Returns the current session ID, if one has been established.
+    pub async fn session_id(&self) -> Option<String> {
+        self.session_id
+            .lock()
+            .await
+            .clone()
+    }
+
+    /// Overrides the session ID used for subsequent requests.
+    pub async fn set_session_id(&self, session_id: String) {
+        *self.session_id.lock().await = Some(session_id);
+    }
+
     /// Waits for `/readyz` to return success or times out.
     pub async fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
         let readyz_url = format!("{}/readyz", self.base_url());

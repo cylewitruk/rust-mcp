@@ -322,6 +322,7 @@ impl McpServer {
             removed_count: diff_response.removed_count,
             changed_count: diff_response.changed_count,
             migration_actions,
+            release_notes: diff_response.release_notes,
             confidence: confidence_assessment
                 .level
                 .as_str()

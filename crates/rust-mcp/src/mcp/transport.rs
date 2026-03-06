@@ -32,12 +32,13 @@ pub fn streamable_http_service(
         http_config.sse_retry = Some(Duration::from_millis(config.mcp_sse_retry_ms));
     }
 
-    let session_manager =
-        Arc::new(DbSessionManager::new(state.db.clone(), SessionConfig::default()));
+    let service_factory: super::session::ServiceFactory =
+        Arc::new(move || Ok(McpServer::new(service_state.clone())));
+    let session_manager = Arc::new(DbSessionManager::new(
+        state.db.clone(),
+        SessionConfig::default(),
+        service_factory.clone(),
+    ));
 
-    StreamableHttpService::new(
-        move || Ok(McpServer::new(service_state.clone())),
-        session_manager,
-        http_config,
-    )
+    StreamableHttpService::new(move || (service_factory)(), session_manager, http_config)
 }

@@ -1,15 +1,15 @@
 //! Periodic background security advisory synchronization.
 //!
-//! [`run_security_sync`] periodically fetches OSV and (optionally) RustSec
-//! advisory data for all indexed crates. It runs once immediately at startup,
-//! then repeats at the interval given by `SECURITY_SYNC_INTERVAL_SECS`.
-//! Setting the interval to 0 disables the periodic loop (startup sync still
-//! runs).
+//! [`run_security_sync`] periodically fetches OSV, RustSec and GHSA advisory
+//! data for all indexed crates. It runs once immediately at startup, then
+//! repeats at the interval given by `SECURITY_SYNC_INTERVAL_SECS`. Setting
+//! the interval to 0 disables the periodic loop (startup sync still runs).
 //!
 //! Each sync run pages through all indexed crates in batches of
-//! `SECURITY_SYNC_BATCH_SIZE`, querying the OSV API and local RustSec
-//! advisory-db for each crate. The task uses its own rate limiter
-//! configuration and runs independently of all other background tasks.
+//! `SECURITY_SYNC_BATCH_SIZE`, querying the OSV API, local RustSec
+//! advisory-db, and the GitHub Security Advisories API for each crate.
+//! The task uses its own rate limiter configuration and runs independently
+//! of all other background tasks.
 //!
 //! Crates that were successfully checked are stamped with
 //! `security_checked_at = NOW()`. The staleness threshold
@@ -101,8 +101,11 @@ pub async fn run_security_sync_scan(
         let rustsec_result = server
             .sync_rustsec_db_security(batch_size, offset, max_age_secs)
             .await;
+        let ghsa_result = server
+            .sync_ghsa_security(batch_size, offset, max_age_secs)
+            .await;
 
-        let page_outcome = match (osv_result, rustsec_result) {
+        let mut page_outcome = match (osv_result, rustsec_result) {
             (Ok(mut osv), Ok(rustsec)) => {
                 osv.merge(rustsec);
                 osv
@@ -129,6 +132,16 @@ pub async fn run_security_sync_scan(
                 break;
             }
         };
+
+        match ghsa_result {
+            Ok(ghsa) => page_outcome.merge(ghsa),
+            Err(error) => {
+                warn!(%error, "security sync: GHSA sync failed for page");
+                page_outcome
+                    .errors
+                    .push(error);
+            }
+        }
 
         // Stamp successfully checked crates so they're skipped until stale.
         for crate_id in &page_outcome.checked_crate_ids {

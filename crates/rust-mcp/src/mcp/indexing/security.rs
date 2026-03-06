@@ -8,11 +8,12 @@ use serde_json::{Value, json};
 use tracing::{debug, info};
 
 use crate::db::indexing::{
-    clear_osv_advisory_matches, clear_rustsec_db_advisory_matches, fetch_security_crates_page,
-    fetch_security_versions_for_crate, insert_crate_level_advisory_match,
-    upsert_version_advisory_match,
+    clear_ghsa_advisory_matches, clear_osv_advisory_matches, clear_rustsec_db_advisory_matches,
+    fetch_security_crates_page, fetch_security_versions_for_crate,
+    insert_crate_level_advisory_match, upsert_version_advisory_match,
 };
 use crate::db::models::{CrateLevelAdvisoryMatchInsert, VersionAdvisoryMatchInsert};
+use crate::integration::github::GitHubClient;
 use crate::integration::osv::{
     OsvAffected, OsvDatabaseSpecific, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
 };
@@ -804,6 +805,209 @@ impl McpServer {
         outcome.touched_crates.dedup();
         Ok(outcome)
     }
+
+    /// Synchronizes GHSA (GitHub Security Advisories) for indexed crates.
+    ///
+    /// `max_age_secs` controls staleness filtering — crates checked more
+    /// recently than this are skipped. Pass `None` to check all.
+    pub async fn sync_ghsa_security(
+        &self,
+        limit: u32,
+        offset: u32,
+        max_age_secs: Option<i64>,
+    ) -> Result<SecuritySyncOutcome, String> {
+        let crate_rows = fetch_security_crates_page(
+            &self.state.db,
+            i64::from(limit),
+            i64::from(offset),
+            max_age_secs,
+        )
+        .await
+        .map_err(|e| format!("failed to fetch crates for GHSA sync: {e}"))?;
+
+        let mut outcome = SecuritySyncOutcome::default();
+        let github = GitHubClient::new(&self.state);
+
+        for krate in crate_rows {
+            let advisories = match github
+                .fetch_advisories(&krate.name)
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    outcome.errors.push(error);
+                    continue;
+                }
+            };
+
+            if advisories.is_empty() {
+                outcome.crates_processed += 1;
+                outcome
+                    .checked_crate_ids
+                    .push(krate.id);
+                continue;
+            }
+
+            debug!(
+                crate_name = %krate.name,
+                advisories = advisories.len(),
+                "GHSA query returned"
+            );
+
+            let version_rows = fetch_security_versions_for_crate(&self.state.db, krate.id)
+                .await
+                .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
+
+            let version_map = version_rows
+                .iter()
+                .map(|v| (v.version.clone(), v.id))
+                .collect::<HashMap<_, _>>();
+
+            outcome.crates_processed += 1;
+            outcome
+                .touched_crates
+                .push(krate.name.clone());
+
+            clear_ghsa_advisory_matches(&self.state.db, krate.id)
+                .await
+                .map_err(|e| format!("failed to clear GHSA advisories for {}: {e}", krate.name))?;
+
+            for advisory in &advisories {
+                let advisory_id = &advisory.ghsa_id;
+                let title = advisory
+                    .summary
+                    .as_deref()
+                    .unwrap_or(&advisory.ghsa_id);
+                let severity = advisory
+                    .severity
+                    .as_deref()
+                    .map(|s| s.to_ascii_lowercase());
+                let url = advisory.html_url.as_deref();
+                let details = advisory
+                    .description
+                    .as_deref();
+                let cwe_ids: Vec<String> = advisory
+                    .cwes
+                    .iter()
+                    .filter_map(|c| c.cwe_id.clone())
+                    .collect();
+
+                // Find the vulnerability entry matching this crate's ecosystem.
+                let crate_vuln = advisory
+                    .vulnerabilities
+                    .iter()
+                    .find(|v| {
+                        v.package
+                            .as_ref()
+                            .and_then(|p| p.name.as_deref())
+                            == Some(&krate.name)
+                    });
+
+                let affected_range = crate_vuln
+                    .and_then(|v| {
+                        v.vulnerable_version_range
+                            .as_deref()
+                    })
+                    .unwrap_or("unknown");
+
+                let fixed_version = crate_vuln
+                    .and_then(|v| {
+                        v.first_patched_version
+                            .as_ref()
+                    })
+                    .and_then(|v| v.identifier.as_deref());
+                let fixed_versions_json = match fixed_version {
+                    Some(v) => json!([v]),
+                    None => json!([]),
+                };
+
+                // Try to match against indexed versions.
+                let mut matched_any = false;
+                if let Some(vuln) = crate_vuln
+                    && let Some(range_str) = vuln
+                        .vulnerable_version_range
+                        .as_deref()
+                {
+                    for (version, &version_id) in &version_map {
+                        if ghsa_version_in_range(version, range_str) {
+                            matched_any = true;
+                            let insert = VersionAdvisoryMatchInsert {
+                                crate_id: krate.id,
+                                version_id,
+                                advisory_id,
+                                severity: severity.as_deref(),
+                                title,
+                                url,
+                                affected_range,
+                                fixed_versions: &fixed_versions_json,
+                                source: "ghsa",
+                                details,
+                                affected_functions: &[],
+                                cwe_ids: &cwe_ids,
+                            };
+                            upsert_version_advisory_match(&self.state.db, &insert)
+                                .await
+                                .map_err(|e| {
+                                    format!(
+                                        "failed to upsert GHSA {} for {}@{}: {e}",
+                                        advisory_id, krate.name, version
+                                    )
+                                })?;
+                            outcome.advisories_written += 1;
+                        }
+                    }
+                }
+
+                if !matched_any {
+                    let insert = CrateLevelAdvisoryMatchInsert {
+                        crate_id: krate.id,
+                        advisory_id,
+                        severity: severity.as_deref(),
+                        title,
+                        url,
+                        affected_range,
+                        fixed_versions: &fixed_versions_json,
+                        source: "ghsa",
+                        details,
+                        affected_functions: &[],
+                        cwe_ids: &cwe_ids,
+                    };
+                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                        .await
+                        .map_err(|e| {
+                            format!(
+                                "failed to insert crate-level GHSA {} for {}: {e}",
+                                advisory_id, krate.name
+                            )
+                        })?;
+                    outcome.advisories_written += 1;
+                }
+            }
+
+            outcome
+                .checked_crate_ids
+                .push(krate.id);
+        }
+
+        Ok(outcome)
+    }
+}
+
+/// Checks if a semver version falls within a GHSA vulnerable version range.
+///
+/// GHSA ranges use comma-separated constraints like `>= 1.0.0, < 1.5.0`.
+fn ghsa_version_in_range(version: &str, range_str: &str) -> bool {
+    let Some(parsed) = Version::parse(version)
+        .ok()
+        .or_else(|| Version::parse(version.trim_start_matches('v')).ok())
+    else {
+        return false;
+    };
+
+    // GHSA uses comma-separated semver constraints which VersionReq handles.
+    VersionReq::parse(range_str)
+        .map(|req| req.matches(&parsed))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -928,6 +1132,30 @@ Some details.
 
         let funcs = collect_affected_functions(&affected);
         assert_eq!(funcs, vec!["smallvec::SmallVec::grow", "smallvec::SmallVec::insert_many",]);
+    }
+
+    #[test]
+    fn ghsa_version_in_range_matches_simple_range() {
+        assert!(ghsa_version_in_range("1.2.0", ">= 1.0.0, < 1.5.0"));
+        assert!(!ghsa_version_in_range("1.5.0", ">= 1.0.0, < 1.5.0"));
+        assert!(!ghsa_version_in_range("0.9.0", ">= 1.0.0, < 1.5.0"));
+    }
+
+    #[test]
+    fn ghsa_version_in_range_handles_single_constraint() {
+        assert!(ghsa_version_in_range("1.0.0", "< 2.0.0"));
+        assert!(!ghsa_version_in_range("2.0.0", "< 2.0.0"));
+    }
+
+    #[test]
+    fn ghsa_version_in_range_strips_v_prefix() {
+        assert!(ghsa_version_in_range("v1.3.0", ">= 1.0.0, < 2.0.0"));
+    }
+
+    #[test]
+    fn ghsa_version_in_range_returns_false_for_unparseable() {
+        assert!(!ghsa_version_in_range("not-a-version", ">= 1.0.0"));
+        assert!(!ghsa_version_in_range("1.0.0", "garbage range"));
     }
 
     #[test]

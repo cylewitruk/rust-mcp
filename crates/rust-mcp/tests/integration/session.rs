@@ -1,16 +1,24 @@
 //! Integration tests for [`DbSessionManager`] session persistence.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
 use rmcp::transport::streamable_http_server::session::SessionManager;
 use rmcp::transport::streamable_http_server::session::local::SessionConfig;
-use rust_mcp::mcp::session::DbSessionManager;
+use rust_mcp::mcp::server::McpServer;
+use rust_mcp::mcp::session::{DbSessionManager, ServiceFactory};
+use rust_mcp::state::AppState;
+use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
+use serde_json::json;
 
-/// Helper: create a migrated PgPool from a test container.
-async fn migrated_pool(pg: &PostgresTestContainer) -> sqlx::PgPool {
-    let state = rust_mcp::state::AppState::connect(super::common::test_config(
+/// Helper: create a migrated PgPool and AppState from a test container.
+async fn migrated_state(pg: &PostgresTestContainer) -> (sqlx::PgPool, AppState) {
+    let state = AppState::connect(super::common::test_config(
         pg.connection_string()
             .to_string(),
-        std::path::PathBuf::from("/tmp"),
+        PathBuf::from("/tmp"),
     ))
     .await
     .expect("connect");
@@ -18,7 +26,30 @@ async fn migrated_pool(pg: &PostgresTestContainer) -> sqlx::PgPool {
         .run_migrations()
         .await
         .expect("migrate");
-    state.db
+    (state.db.clone(), state)
+}
+
+/// Helper: create a service factory for tests.
+fn test_service_factory(state: &AppState) -> ServiceFactory {
+    let s = state.clone();
+    Arc::new(move || Ok(McpServer::new(s.clone())))
+}
+
+/// Helper: spin up a full MCP HTTP harness backed by the given database URL.
+async fn mcp_harness(database_url: &str) -> LocalMcpHttpHarness {
+    let config = super::common::test_config(database_url.to_string(), PathBuf::from("/tmp"));
+    let state = AppState::connect(config.clone())
+        .await
+        .expect("connect");
+    let router =
+        rust_mcp::http::router(state.clone(), config, super::common::test_prometheus_handle());
+    let mcp = LocalMcpHttpHarness::spawn(router)
+        .await
+        .expect("spawn harness");
+    mcp.wait_until_ready(Duration::from_secs(20))
+        .await
+        .expect("harness ready");
+    mcp
 }
 
 #[tokio::test]
@@ -26,10 +57,11 @@ async fn session_persists_across_manager_instances() {
     let pg = PostgresTestContainer::start()
         .await
         .expect("start postgres");
-    let pool = migrated_pool(&pg).await;
+    let (pool, app_state) = migrated_state(&pg).await;
+    let factory = test_service_factory(&app_state);
 
     // --- First manager: create a session ---
-    let manager1 = DbSessionManager::new(pool.clone(), SessionConfig::default());
+    let manager1 = DbSessionManager::new(pool.clone(), SessionConfig::default(), factory.clone());
     let (session_id, _transport) = manager1
         .create_session()
         .await
@@ -56,10 +88,11 @@ async fn session_persists_across_manager_instances() {
     // --- Drop first manager (simulates server restart) ---
     drop(manager1);
 
-    // --- Second manager: session should be discoverable via DB fallback ---
-    let manager2 = DbSessionManager::new(pool.clone(), SessionConfig::default());
+    // --- Second manager: session should be discoverable via DB fallback
+    // (reconstituted from DB) ---
+    let manager2 = DbSessionManager::new(pool.clone(), SessionConfig::default(), factory.clone());
 
-    // has_session should find it through the DB fallback.
+    // has_session should find it through the DB and reconstitute.
     assert!(
         manager2
             .has_session(&session_id)
@@ -96,9 +129,10 @@ async fn stale_sessions_are_pruned() {
     let pg = PostgresTestContainer::start()
         .await
         .expect("start postgres");
-    let pool = migrated_pool(&pg).await;
+    let (pool, app_state) = migrated_state(&pg).await;
+    let factory = test_service_factory(&app_state);
 
-    let manager = DbSessionManager::new(pool.clone(), SessionConfig::default());
+    let manager = DbSessionManager::new(pool.clone(), SessionConfig::default(), factory.clone());
 
     // Create two sessions.
     let (stale_id, _t1) = manager
@@ -149,9 +183,10 @@ async fn prune_with_no_stale_sessions_returns_zero() {
     let pg = PostgresTestContainer::start()
         .await
         .expect("start postgres");
-    let pool = migrated_pool(&pg).await;
+    let (pool, app_state) = migrated_state(&pg).await;
+    let factory = test_service_factory(&app_state);
 
-    let manager = DbSessionManager::new(pool.clone(), SessionConfig::default());
+    let manager = DbSessionManager::new(pool.clone(), SessionConfig::default(), factory.clone());
     let (_id, _t) = manager
         .create_session()
         .await
@@ -162,4 +197,70 @@ async fn prune_with_no_stale_sessions_returns_zero() {
         .await
         .expect("prune");
     assert_eq!(pruned, 0, "no sessions should be pruned");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Session reconstitution after restart
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Simulates a server restart: initialize a session on server 1, drop it,
+/// spin up server 2 sharing the same database. A tool call using the old
+/// session ID should succeed because the session is transparently
+/// reconstituted from the database.
+#[tokio::test]
+async fn session_reconstituted_after_restart_allows_tool_call() {
+    let pg = PostgresTestContainer::start()
+        .await
+        .expect("start postgres");
+    let (pool, _app_state) = migrated_state(&pg).await;
+    let db_url = pg
+        .connection_string()
+        .to_string();
+
+    // --- Server 1: initialize a session ---
+    let mcp1 = mcp_harness(&db_url).await;
+    let _ = mcp1
+        .initialize("reconstitution-test-server1")
+        .await
+        .expect("initialize on server 1");
+    let session_id = mcp1
+        .session_id()
+        .await
+        .expect("server 1 should have a session ID");
+
+    // Verify the session row exists in the database.
+    let db_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = $1)")
+            .bind(&session_id)
+            .fetch_one(&pool)
+            .await
+            .expect("db query");
+    assert!(db_exists, "session should be persisted in database");
+
+    // --- Drop server 1 (simulates restart) ---
+    drop(mcp1);
+
+    // --- Server 2: same database, fresh in-memory state ---
+    let mcp2 = mcp_harness(&db_url).await;
+
+    // Inject the old session ID so the harness uses it for the next request.
+    mcp2.set_session_id(session_id.clone())
+        .await;
+
+    // A tool call using the old session ID should succeed because the
+    // session is reconstituted from the database.
+    let ping = mcp2
+        .call_tool("ping", json!({"message": "after-restart"}))
+        .await
+        .expect("tool call on reconstituted session should succeed");
+    assert!(ping.get("result").is_some(), "ping should return a result");
+
+    // The session should still exist in the database.
+    let db_exists_after: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = $1)")
+            .bind(&session_id)
+            .fetch_one(&pool)
+            .await
+            .expect("db query after reconstitution");
+    assert!(db_exists_after, "session should still be in database after reconstitution");
 }

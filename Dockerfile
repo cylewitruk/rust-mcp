@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Final runtime image
 FROM alpine:3.23 AS runtime
 
-RUN apk add --no-cache ca-certificates tzdata ripgrep postgresql18 postgresql18-contrib su-exec tinyproxy && \
+RUN apk add --no-cache ca-certificates tzdata ripgrep git postgresql18 postgresql18-contrib su-exec tinyproxy && \
     mkdir -p /etc/tinyproxy
 
 # Separate users: postgres owns the DB, rust-mcp runs the application

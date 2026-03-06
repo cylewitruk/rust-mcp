@@ -65,6 +65,8 @@ pub enum OutboundSource {
     DocsRs,
     /// OSV vulnerability API.
     Osv,
+    /// GitHub REST API (repo metadata, GHSA advisories).
+    GitHub,
 }
 
 /// Process-wide outbound request limiters for each remote data source.
@@ -73,6 +75,7 @@ pub struct OutboundRateLimiters {
     crates_io: OutboundRateLimiter,
     docs_rs: OutboundRateLimiter,
     osv: OutboundRateLimiter,
+    github: OutboundRateLimiter,
 }
 
 /// Two-tier outbound rate limiter.
@@ -204,6 +207,11 @@ impl OutboundRateLimiters {
                 config.osv_window_max_requests,
                 Duration::from_secs(config.osv_window_duration_secs),
             ),
+            github: OutboundRateLimiter::new(
+                Duration::from_millis(config.github_min_interval_ms),
+                config.github_window_max_requests,
+                Duration::from_secs(config.github_window_duration_secs),
+            ),
         }
     }
 
@@ -212,6 +220,7 @@ impl OutboundRateLimiters {
             OutboundSource::CratesIo => self.crates_io.acquire().await,
             OutboundSource::DocsRs => self.docs_rs.acquire().await,
             OutboundSource::Osv => self.osv.acquire().await,
+            OutboundSource::GitHub => self.github.acquire().await,
         }
     }
 }

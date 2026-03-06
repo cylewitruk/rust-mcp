@@ -1072,3 +1072,59 @@ pub struct DeprecatedItemRow {
     pub canonical_path: Option<String>,
     pub index_source: String,
 }
+
+// ── GitHub repo metadata ─────────────────────────────────────────────
+
+/// Stored GitHub repo metadata row.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GitHubMetadataRow {
+    pub owner: String,
+    pub repo: String,
+    pub stargazers_count: i64,
+    pub forks_count: i64,
+    pub open_issues_count: i64,
+    pub archived: bool,
+    pub pushed_at: Option<String>,
+    pub license_spdx: Option<String>,
+    pub contributor_count: Option<i64>,
+    pub last_commit_at: Option<String>,
+    pub last_commit_message: Option<String>,
+    pub recent_commit_count: Option<i64>,
+    pub fetched_at: String,
+}
+
+/// Insert DTO for GitHub repo metadata.
+#[allow(missing_docs)]
+pub struct GitHubMetadataInsert<'a> {
+    pub owner: &'a str,
+    pub repo: &'a str,
+    pub stargazers_count: i64,
+    pub forks_count: i64,
+    pub open_issues_count: i64,
+    pub archived: bool,
+    /// ISO 8601 timestamp string for `pushed_at`, or `None`.
+    pub pushed_at: Option<&'a str>,
+    pub license_spdx: Option<&'a str>,
+    pub contributor_count: Option<i64>,
+}
+
+/// A crate row that needs GitHub metadata fetching.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GitHubCandidateRow {
+    pub crate_id: i64,
+    pub crate_name: String,
+    pub repository_url: Option<String>,
+}
+
+/// Stored GitHub release row.
+#[allow(missing_docs)]
+#[derive(Debug, Clone, FromRow)]
+pub struct GitHubReleaseRow {
+    pub tag_name: String,
+    pub release_name: Option<String>,
+    pub body: Option<String>,
+    pub published_at: Option<String>,
+    pub prerelease: bool,
+}

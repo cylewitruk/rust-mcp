@@ -9,5 +9,7 @@ mod common;
 
 mod crates_io;
 mod discovery;
+mod github;
 mod index;
+mod osv;
 mod source_download;

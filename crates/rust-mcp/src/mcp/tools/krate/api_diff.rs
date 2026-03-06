@@ -3,8 +3,10 @@ use std::collections::BTreeMap;
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateApiDiffChange, CrateApiDiffChangeType, CrateApiDiffRequest, CrateApiDiffResponse,
+    GitHubReleaseNote,
 };
 
+use crate::db::indexing::fetch_github_releases;
 use crate::db::models::ApiDiffSymbolRow;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
@@ -321,6 +323,19 @@ impl McpServer {
                 .truncate(limit);
         }
 
+        // Best-effort: fetch GitHub release notes for context.
+        let release_notes = fetch_github_releases(&self.state.db, ctx.crate_row.id, 20)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| GitHubReleaseNote {
+                tag: r.tag_name,
+                name: r.release_name,
+                body: r.body,
+                published_at: r.published_at,
+            })
+            .collect();
+
         Ok(Json(CrateApiDiffResponse {
             crate_name: ctx.crate_row.name,
             from_version: from_version_row.version,
@@ -331,6 +346,7 @@ impl McpServer {
             breaking_changes_detected: summary.breaking_changes_detected,
             changes: summary.changes,
             truncated,
+            release_notes,
             freshness_check_performed: ctx
                 .freshness_outcome
                 .freshness_check_performed,

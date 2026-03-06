@@ -4,8 +4,9 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::models::{
-    CrateLevelAdvisoryMatchInsert, IndexCoverageCountsRow, IndexFailureByScopeRow,
-    IndexFreshnessRow, IndexOperationalMetricsRow, IndexQueueCountsRow, IndexedExtractionBatch,
+    CrateLevelAdvisoryMatchInsert, GitHubCandidateRow, GitHubMetadataInsert, GitHubMetadataRow,
+    GitHubReleaseRow, IndexCoverageCountsRow, IndexFailureByScopeRow, IndexFreshnessRow,
+    IndexOperationalMetricsRow, IndexQueueCountsRow, IndexedExtractionBatch,
     LocalCacheVersionKeyRow, RefreshJobGaugeCountsRow, RefreshJobQueueRow,
     RefreshJobRetryDistributionRow, RustdocSyncCandidateRow, SecurityCrateRow, SecurityVersionRow,
     VersionAdvisoryMatchInsert,
@@ -1645,4 +1646,181 @@ pub async fn prune_source_files_for_crate_version(
     };
 
     Ok(result.rows_affected())
+}
+
+// ── GitHub repo metadata ─────────────────────────────────────────────
+
+/// Fetches stored GitHub repo metadata for a crate, if present.
+pub async fn fetch_github_metadata(
+    db: &PgPool,
+    crate_id: i64,
+) -> Result<Option<GitHubMetadataRow>, sqlx::Error> {
+    sqlx::query_as::<_, GitHubMetadataRow>(
+        "SELECT owner, repo, stargazers_count, forks_count, open_issues_count,
+                archived, pushed_at::TEXT, license_spdx, contributor_count,
+                last_commit_at::TEXT, last_commit_message, recent_commit_count,
+                fetched_at::TEXT
+         FROM github_repo_metadata
+         WHERE crate_id = $1",
+    )
+    .bind(crate_id)
+    .fetch_optional(db)
+    .await
+}
+
+/// Upserts GitHub repo metadata for a crate.
+pub async fn upsert_github_metadata(
+    db: &PgPool,
+    crate_id: i64,
+    meta: &GitHubMetadataInsert<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO github_repo_metadata
+            (crate_id, owner, repo, stargazers_count, forks_count,
+             open_issues_count, archived, pushed_at, license_spdx,
+             contributor_count, fetched_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::TIMESTAMPTZ, $9, $10, NOW())
+         ON CONFLICT (crate_id)
+         DO UPDATE SET
+            stargazers_count = EXCLUDED.stargazers_count,
+            forks_count = EXCLUDED.forks_count,
+            open_issues_count = EXCLUDED.open_issues_count,
+            archived = EXCLUDED.archived,
+            pushed_at = EXCLUDED.pushed_at,
+            license_spdx = EXCLUDED.license_spdx,
+            contributor_count = EXCLUDED.contributor_count,
+            fetched_at = NOW()",
+    )
+    .bind(crate_id)
+    .bind(meta.owner)
+    .bind(meta.repo)
+    .bind(meta.stargazers_count)
+    .bind(meta.forks_count)
+    .bind(meta.open_issues_count)
+    .bind(meta.archived)
+    .bind(meta.pushed_at)
+    .bind(meta.license_spdx)
+    .bind(meta.contributor_count)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Updates the git-probe commit liveness columns for a crate's GitHub
+/// metadata row. The row must already exist (upserted via API metadata first).
+pub async fn update_git_probe_data(
+    db: &PgPool,
+    crate_id: i64,
+    last_commit_at: Option<&str>,
+    last_commit_message: Option<&str>,
+    recent_commit_count: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE github_repo_metadata
+         SET last_commit_at = $2::TIMESTAMPTZ,
+             last_commit_message = $3,
+             recent_commit_count = $4
+         WHERE crate_id = $1",
+    )
+    .bind(crate_id)
+    .bind(last_commit_at)
+    .bind(last_commit_message)
+    .bind(recent_commit_count)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Fetches crates that have a GitHub repository URL but no recent metadata.
+pub async fn fetch_crates_needing_github_metadata(
+    db: &PgPool,
+    max_age_secs: i64,
+    limit: i64,
+) -> Result<Vec<GitHubCandidateRow>, sqlx::Error> {
+    sqlx::query_as::<_, GitHubCandidateRow>(
+        "SELECT c.id AS crate_id, c.name AS crate_name, c.repository_url
+         FROM crates c
+         LEFT JOIN github_repo_metadata g ON g.crate_id = c.id
+         WHERE c.repository_url LIKE '%github.com/%'
+           AND (g.id IS NULL
+                OR g.fetched_at < NOW() - make_interval(secs => $1::DOUBLE PRECISION))
+         ORDER BY c.id
+         LIMIT $2",
+    )
+    .bind(max_age_secs)
+    .bind(limit)
+    .fetch_all(db)
+    .await
+}
+
+/// Clears GHSA-sourced advisory matches for a crate before re-inserting fresh
+/// data.
+pub async fn clear_ghsa_advisory_matches(db: &PgPool, crate_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM advisory_matches WHERE crate_id = $1 AND source = 'ghsa'")
+        .bind(crate_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+// ── GitHub releases ─────────────────────────────────────────────────
+
+/// A release tuple: `(tag_name, release_name, body, published_at, prerelease)`.
+type ReleaseTuple = (String, Option<String>, Option<String>, Option<String>, bool);
+
+/// Upserts a batch of GitHub releases for a crate, replacing stale entries.
+pub async fn upsert_github_releases(
+    db: &PgPool,
+    crate_id: i64,
+    releases: &[ReleaseTuple],
+) -> Result<(), sqlx::Error> {
+    // Clear existing releases for this crate, then bulk insert.
+    sqlx::query("DELETE FROM github_releases WHERE crate_id = $1")
+        .bind(crate_id)
+        .execute(db)
+        .await?;
+
+    for (tag_name, release_name, body, published_at, prerelease) in releases {
+        sqlx::query(
+            "INSERT INTO github_releases
+                (crate_id, tag_name, release_name, body, published_at, prerelease, fetched_at)
+             VALUES ($1, $2, $3, $4, $5::TIMESTAMPTZ, $6, NOW())
+             ON CONFLICT (crate_id, tag_name) DO UPDATE SET
+                release_name = EXCLUDED.release_name,
+                body = EXCLUDED.body,
+                published_at = EXCLUDED.published_at,
+                prerelease = EXCLUDED.prerelease,
+                fetched_at = NOW()",
+        )
+        .bind(crate_id)
+        .bind(tag_name)
+        .bind(release_name)
+        .bind(body)
+        .bind(published_at.as_deref())
+        .bind(prerelease)
+        .execute(db)
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Fetches stored GitHub releases for a crate, ordered by published_at
+/// descending.
+pub async fn fetch_github_releases(
+    db: &PgPool,
+    crate_id: i64,
+    limit: i64,
+) -> Result<Vec<GitHubReleaseRow>, sqlx::Error> {
+    sqlx::query_as::<_, GitHubReleaseRow>(
+        "SELECT tag_name, release_name, body, published_at::TEXT, prerelease
+         FROM github_releases
+         WHERE crate_id = $1
+         ORDER BY published_at DESC NULLS LAST
+         LIMIT $2",
+    )
+    .bind(crate_id)
+    .bind(limit)
+    .fetch_all(db)
+    .await
 }

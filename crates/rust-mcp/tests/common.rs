@@ -62,6 +62,13 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
         security_sync_interval_secs: 0,
         security_sync_batch_size: 50,
         session_idle_timeout_secs: 0,
+        github_base_url: "https://api.github.com".to_string(),
+        github_min_interval_ms: 1,
+        github_window_max_requests: 0,
+        github_window_duration_secs: 1,
+        git_probe_clone_depth: 0,
+        git_probe_timeout_secs: 30,
+        git_probe_enabled: false,
     }
 }
 

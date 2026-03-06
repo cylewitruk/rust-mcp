@@ -1,9 +1,10 @@
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
-    CrateIntelAdvisory, CrateIntelDependency, CrateIntelDependent, CrateIntelRequest,
-    CrateIntelResponse, CrateIntelVersion,
+    CrateIntelAdvisory, CrateIntelDependency, CrateIntelDependent, CrateIntelGitHub,
+    CrateIntelRequest, CrateIntelResponse, CrateIntelVersion,
 };
 
+use crate::db::indexing::fetch_github_metadata;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::progress::ToolCallContext;
@@ -91,6 +92,28 @@ impl McpServer {
         )
         .await
         .map_err(|e| format!("advisory query failed for {}: {e}", ctx.crate_row.name))?;
+
+        let github = match fetch_github_metadata(&self.state.db, ctx.crate_row.id).await {
+            Ok(Some(meta)) => Some(CrateIntelGitHub {
+                owner: meta.owner,
+                repo: meta.repo,
+                stars: meta.stargazers_count as u64,
+                forks: meta.forks_count as u64,
+                open_issues: meta.open_issues_count as u64,
+                archived: meta.archived,
+                last_push: meta.pushed_at,
+                license: meta.license_spdx,
+                contributors: meta
+                    .contributor_count
+                    .map(|c| c as u64),
+                last_commit_at: meta.last_commit_at,
+                last_commit_message: meta.last_commit_message,
+                recent_commit_count: meta
+                    .recent_commit_count
+                    .map(|c| c as u64),
+            }),
+            _ => None,
+        };
 
         let (readme, readme_truncated) = truncate_optional_text(
             resolution
@@ -194,6 +217,7 @@ impl McpServer {
             dependencies,
             dependents,
             dependent_crate_count,
+            github,
             advisories,
             freshness_check_performed: ctx
                 .freshness_outcome
