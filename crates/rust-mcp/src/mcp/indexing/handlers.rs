@@ -6,7 +6,7 @@ pub use rust_mcp_types::types::index::{
     IndexStatusResponse,
 };
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::db::indexing::{
     enqueue_or_get_refresh_job_id, fetch_index_coverage_counts, fetch_index_failures_by_scope,
@@ -248,6 +248,79 @@ impl McpServer {
                         synced_dependencies: 0,
                         error: Some(error),
                     });
+                }
+            }
+        }
+
+        // Enqueue source and symbol enrichment jobs for successfully
+        // synced crates and wait for them inline so that subsequent
+        // source_search / symbol_search calls find data immediately.
+        let enriched_crates: Vec<&str> = results
+            .iter()
+            .filter(|r| r.error.is_none())
+            .map(|r| r.name.as_str())
+            .collect();
+
+        if !enriched_crates.is_empty() {
+            tcx.notify_progress(&format!(
+                "Enriching {} crate(s) (source files & symbols)",
+                enriched_crates.len()
+            ))
+            .await;
+
+            let mut enrichment_jobs: Vec<(String, String, i64)> = Vec::new();
+            for crate_name in &enriched_crates {
+                for scope in ["local_cache", "rustdoc_json"] {
+                    match self
+                        .state
+                        .indexing_coordinator
+                        .enqueue_on_demand(&self.state.db, crate_name, scope)
+                        .await
+                    {
+                        Ok(job_id) => enrichment_jobs.push((
+                            crate_name.to_string(),
+                            scope.to_string(),
+                            job_id,
+                        )),
+                        Err(e) => warn!(
+                            crate_name,
+                            scope,
+                            error = %e,
+                            "failed to enqueue enrichment job"
+                        ),
+                    }
+                }
+            }
+
+            for (idx, (crate_name, scope, job_id)) in enrichment_jobs
+                .iter()
+                .enumerate()
+            {
+                tcx.notify_progress(&format!(
+                    "Waiting for {scope} enrichment [{}/{}]: {crate_name}",
+                    idx + 1,
+                    enrichment_jobs.len()
+                ))
+                .await;
+
+                match self
+                    .state
+                    .indexing_coordinator
+                    .wait_for_job(*job_id)
+                    .await
+                {
+                    Ok(super::coordinator::JobOutcome::Completed) => {
+                        debug!(crate_name, scope, "enrichment completed");
+                    }
+                    Ok(super::coordinator::JobOutcome::Failed(msg)) => {
+                        warn!(crate_name, scope, error = %msg, "enrichment failed");
+                    }
+                    Ok(super::coordinator::JobOutcome::Pending) => {
+                        warn!(crate_name, scope, "enrichment still pending after wait");
+                    }
+                    Err(e) => {
+                        warn!(crate_name, scope, error = %e, "enrichment wait timed out");
+                    }
                 }
             }
         }

@@ -4,9 +4,8 @@ use std::time::Instant;
 use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{Implementation, Meta, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{Implementation, Meta, ServerCapabilities, ServerInfo};
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
-use rust_mcp_types::protocol::SUPPORTED_MCP_PROTOCOL_VERSION;
 use rust_mcp_types::types::common::PingRequest;
 use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
 use tracing::warn;
@@ -698,26 +697,12 @@ impl McpServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
-        // Construct ProtocolVersion from the canonical constant.  The inner field of
-        // ProtocolVersion is private (rmcp crate), so we go through serde; unknown
-        // version strings are accepted and wrapped in Cow::Owned by the Deserialize
-        // impl.
-        let protocol_version = serde_json::from_value::<ProtocolVersion>(
-            serde_json::Value::String(SUPPORTED_MCP_PROTOCOL_VERSION.to_string()),
-        )
-        .unwrap_or(ProtocolVersion::V_2025_06_18);
-
-        ServerInfo {
-            protocol_version,
-            instructions: Some(SERVER_INSTRUCTIONS.to_string()),
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
-            server_info: Implementation {
-                name: "rust-mcp".to_owned(),
-                version: env!("CARGO_PKG_VERSION").to_owned(),
-                ..Default::default()
-            },
-        }
+        )
+        .with_instructions(SERVER_INSTRUCTIONS)
+        .with_server_info(Implementation::new("rust-mcp", env!("CARGO_PKG_VERSION")))
     }
 }

@@ -1,6 +1,32 @@
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
+/// Lenient deserializer that accepts both JSON numbers and strings for
+/// `Option<u32>` fields.  Some MCP clients stringify numeric tool arguments;
+/// this avoids hard deserialization failures in those cases.
+mod lenient_u32 {
+    use serde::{Deserialize, Deserializer, de};
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Val {
+            Num(u32),
+            Str(String),
+        }
+
+        Ok(match Option::<Val>::deserialize(d)? {
+            None => None,
+            Some(Val::Num(n)) => Some(n),
+            Some(Val::Str(s)) if s.is_empty() => None,
+            Some(Val::Str(s)) => Some(
+                s.parse::<u32>()
+                    .map_err(de::Error::custom)?,
+            ),
+        })
+    }
+}
+
 /// Core/shared contracts reused by multiple MCP tools.
 pub mod common {
     use super::*;
@@ -195,8 +221,10 @@ pub mod index {
         /// Search query for candidates.
         pub query: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Page size.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub per_page: Option<u32>,
         /// Also sync dependency metadata.
         pub include_dependencies: Option<bool>,
@@ -216,8 +244,10 @@ pub mod index {
         /// Human-readable status message.
         pub message: String,
         /// Estimated total job duration in seconds.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub estimated_seconds: Option<u32>,
         /// Estimated remaining duration in seconds.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub estimated_seconds_remaining: Option<u32>,
         /// Epoch milliseconds when processing started.
         pub started_at_epoch_ms: u128,
@@ -405,8 +435,10 @@ pub mod source {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Max results.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -461,6 +493,7 @@ pub mod source {
         /// Timestamp when the source was indexed.
         pub indexed_at: String,
         /// Best-effort matching line number.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub match_line: Option<u32>,
         /// Snippet around the match.
         pub snippet: String,
@@ -476,8 +509,10 @@ pub mod source {
         /// Source path.
         pub path: String,
         /// Start line (inclusive).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub start_line: Option<u32>,
         /// End line (inclusive).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub end_line: Option<u32>,
     }
 
@@ -518,6 +553,7 @@ pub mod source {
         /// Source path.
         pub path: String,
         /// Anchor line.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub line: Option<u32>,
         /// Symbol name to resolve anchor.
         pub symbol_name: Option<String>,
@@ -618,8 +654,10 @@ pub mod symbol {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Max results.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -712,8 +750,10 @@ pub mod docs {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Max results.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -904,6 +944,7 @@ pub mod dependency {
         /// Check feature unification.
         pub check_features: Option<bool>,
         /// Expansion depth limit.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -995,6 +1036,7 @@ pub mod dependency {
         /// Features to evaluate.
         pub features: Vec<String>,
         /// Heavy feature threshold.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub heavy_threshold: Option<u32>,
     }
 
@@ -1086,8 +1128,10 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Max results.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1171,10 +1215,13 @@ pub mod krate {
         /// Version (default: latest).
         pub version: Option<String>,
         /// Max version history entries.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub versions_limit: Option<u32>,
         /// Max dependents entries.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub dependents_limit: Option<u32>,
         /// Max readme characters.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub readme_max_chars: Option<u32>,
     }
 
@@ -1380,8 +1427,10 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
         /// Max results.
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1490,7 +1539,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1542,6 +1593,7 @@ pub mod krate {
         pub crate_name: String,
         pub from_version: String,
         pub to_version: String,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1638,6 +1690,7 @@ pub mod krate {
         pub crate_name: String,
         pub version: Option<String>,
         pub direction: Option<CrateGraphDirection>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub depth: Option<u32>,
     }
 
@@ -1693,7 +1746,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1793,7 +1848,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1850,7 +1907,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1904,7 +1963,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -1958,6 +2019,7 @@ pub mod krate {
         pub crate_name: String,
         pub from_version: String,
         pub to_version: String,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -2049,7 +2111,9 @@ pub mod krate {
         pub left_versions: Option<Vec<String>>,
         pub right_versions: Option<Vec<String>>,
         pub check_features: Option<bool>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub version_limit: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub max_pairs: Option<u32>,
     }
 
@@ -2152,7 +2216,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -2206,7 +2272,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
         pub allow_licenses: Option<Vec<String>>,
         pub deny_licenses: Option<Vec<String>>,
@@ -2270,7 +2338,9 @@ pub mod krate {
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
@@ -2425,8 +2495,10 @@ pub mod krate {
         /// Version (default: latest).
         pub version: Option<String>,
         /// Max results (default: 50).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
         /// Page (1-based).
+        #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
     }
 

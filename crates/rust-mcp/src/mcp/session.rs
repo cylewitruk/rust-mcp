@@ -168,19 +168,11 @@ impl DbSessionManager {
         });
 
         // Build and send the synthetic initialize request.
-        let init_params = InitializeRequestParams {
-            meta: None,
-            protocol_version: ProtocolVersion::LATEST,
-            capabilities: ClientCapabilities::default(),
-            client_info: Implementation {
-                name: "rust-mcp-session-reconstitution".into(),
-                version: "internal".into(),
-                title: None,
-                description: None,
-                icons: None,
-                website_url: None,
-            },
-        };
+        let init_params = InitializeRequestParams::new(
+            ClientCapabilities::default(),
+            Implementation::new("rust-mcp-session-reconstitution", "internal"),
+        )
+        .with_protocol_version(ProtocolVersion::LATEST);
         let init_request = rmcp::model::InitializeRequest::new(init_params);
         let init_msg = ClientJsonRpcMessage::request(
             ClientRequest::InitializeRequest(init_request),
