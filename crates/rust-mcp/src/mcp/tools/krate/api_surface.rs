@@ -201,7 +201,7 @@ impl McpServer {
             .clone();
 
         let suggested_next_tools = if symbols.is_empty() {
-            vec!["index_refresh".to_string(), "crate_intel".to_string()]
+            vec!["index_crates".to_string(), "index_refresh".to_string(), "crate_intel".to_string()]
         } else {
             vec![
                 "crate_type_info".to_string(),

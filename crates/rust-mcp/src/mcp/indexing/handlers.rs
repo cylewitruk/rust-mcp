@@ -1,9 +1,9 @@
 use rmcp::Json;
 pub use rust_mcp_types::types::index::{
-    IndexCoverage, IndexFailureByScope, IndexFreshness, IndexOperationalMetrics, IndexQueue,
-    IndexRefreshRequest, IndexRefreshResponse, IndexRefreshResult, IndexRefreshScope,
-    IndexRetryDistribution, IndexStatusRequest, IndexStatusResponse, IndexSyncCratesRequest,
-    IndexSyncCratesResponse,
+    IndexCoverage, IndexCrateResult, IndexCratesRequest, IndexCratesResponse, IndexFailureByScope,
+    IndexFreshness, IndexOperationalMetrics, IndexQueue, IndexRefreshRequest, IndexRefreshResponse,
+    IndexRefreshResult, IndexRefreshScope, IndexRetryDistribution, IndexStatusRequest,
+    IndexStatusResponse,
 };
 use serde_json::Value;
 use tracing::{debug, info};
@@ -14,15 +14,12 @@ use crate::db::indexing::{
     fetch_recent_refresh_job_errors, fetch_refresh_eta_stats, fetch_refresh_job_retry_distribution,
     persist_crate_sync,
 };
-use crate::integration::crates_io::{
-    CratesIoClient, CratesIoCrateDetailResponse, CratesIoSearchResponse,
-};
+use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
 use crate::mcp::models::ResponseFreshnessSource;
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    DEFAULT_SYNC_QUERY, dedupe_strings, normalize_optional, normalize_required, sync_page,
-    sync_per_page,
+    dedupe_strings, normalize_optional, normalize_required, sync_page, sync_per_page,
 };
 
 /// Outcome of syncing a single crate's metadata from crates.io.
@@ -200,79 +197,66 @@ impl McpServer {
         Ok(format!("refresh-job-{}", outcome.job_id))
     }
 
-    /// Handles the `index_sync_crates` tool call.
-    pub async fn handle_index_sync_crates(
+    /// Handles the `index_crates` tool call.
+    pub async fn handle_index_crates(
         &self,
-        request: IndexSyncCratesRequest,
+        request: IndexCratesRequest,
         tcx: ToolCallContext,
-    ) -> Result<Json<IndexSyncCratesResponse>, String> {
-        let query =
-            normalize_optional(request.query).unwrap_or_else(|| DEFAULT_SYNC_QUERY.to_string());
-        let page = sync_page(request.page);
-        let per_page = sync_per_page(request.per_page);
+    ) -> Result<Json<IndexCratesResponse>, String> {
+        if request.crates.is_empty() {
+            return Err("crates list must not be empty".to_string());
+        }
+
         let include_dependencies = request
             .include_dependencies
             .unwrap_or(true);
 
-        let params = vec![
-            ("q", query.clone()),
-            ("page", page.to_string()),
-            ("per_page", per_page.to_string()),
-        ];
-        let crates_io = CratesIoClient::new(&self.state);
-        let search_response: CratesIoSearchResponse = crates_io
-            .search_crates(&params)
-            .await?;
-
-        let mut synced_crates = 0_usize;
-        let mut synced_versions = 0_usize;
-        let mut synced_dependencies = 0_usize;
-        let mut selected_versions = Vec::new();
-        let mut errors = Vec::new();
-
-        let total = search_response.crates.len();
-        tcx.notify_progress(&format!("Syncing {total} crate(s) from crates.io"))
+        let total = request.crates.len();
+        tcx.notify_progress(&format!("Indexing {total} crate(s) from crates.io"))
             .await;
 
-        for item in search_response.crates {
-            let crate_name = if item.id.trim().is_empty() {
-                item.name.trim().to_string()
-            } else {
-                item.id.trim().to_string()
-            };
+        let mut results = Vec::with_capacity(total);
+        let mut succeeded = 0_usize;
+        let mut failed = 0_usize;
 
+        for entry in &request.crates {
+            let crate_name = entry.name.trim();
             if crate_name.is_empty() {
                 continue;
             }
 
             match self
-                .sync_single_crate(&crate_name, include_dependencies)
+                .sync_single_crate(crate_name, include_dependencies)
                 .await
             {
                 Ok(outcome) => {
-                    synced_crates += 1;
-                    synced_versions += outcome.versions_synced;
-                    synced_dependencies += outcome.dependencies_synced;
-                    if let Some(version) = outcome.selected_version {
-                        selected_versions.push(format!("{crate_name}@{version}"));
-                    }
+                    succeeded += 1;
+                    results.push(IndexCrateResult {
+                        name: crate_name.to_string(),
+                        version: outcome.selected_version,
+                        synced_versions: outcome.versions_synced,
+                        synced_dependencies: outcome.dependencies_synced,
+                        error: None,
+                    });
                 }
                 Err(error) => {
-                    errors.push(format!("{crate_name}: {error}"));
+                    failed += 1;
+                    results.push(IndexCrateResult {
+                        name: crate_name.to_string(),
+                        version: None,
+                        synced_versions: 0,
+                        synced_dependencies: 0,
+                        error: Some(error),
+                    });
                 }
             }
         }
 
-        Ok(Json(IndexSyncCratesResponse {
-            query,
-            page,
-            per_page,
-            total_candidates: search_response.meta.total,
-            synced_crates,
-            synced_versions,
-            synced_dependencies,
-            selected_versions,
-            errors,
+        Ok(Json(IndexCratesResponse {
+            requested: total,
+            succeeded,
+            failed,
+            results,
             freshness: vec![
                 ResponseFreshnessSource {
                     source: "crates.io".to_string(),
@@ -403,7 +387,7 @@ impl McpServer {
     pub async fn handle_index_refresh(
         &self,
         request: IndexRefreshRequest,
-        tcx: ToolCallContext,
+        _tcx: ToolCallContext,
     ) -> Result<Json<IndexRefreshResponse>, String> {
         let scope = request
             .scope
@@ -505,40 +489,112 @@ impl McpServer {
                 }
             }
             IndexRefreshScope::All => {
-                let Json(sync_response) = self
-                    .handle_index_sync_crates(
-                        IndexSyncCratesRequest {
-                            query: request.query,
-                            page: request.page,
-                            per_page: request.per_page,
-                            include_dependencies: request.include_dependencies,
-                        },
-                        tcx,
-                    )
+                let crate_name = normalize_required(
+                    normalize_optional(request.crate_name).unwrap_or_default(),
+                    "crate_name",
+                )?;
+                let include_deps = request
+                    .include_dependencies
+                    .unwrap_or(true);
+
+                // 1. Crate metadata from crates.io
+                let crate_outcome = self
+                    .sync_single_crate(&crate_name, include_deps)
                     .await?;
+                let selected_version = crate_outcome
+                    .selected_version
+                    .clone()
+                    .map(|v| format!("{crate_name}@{v}"));
+
+                let mut errors = Vec::new();
+
+                // 2. Local source cache
+                if let Err(e) = self
+                    .sync_local_source_cache(Some(crate_name.clone()), None, None, None, false)
+                    .await
+                {
+                    errors.push(format!("local_cache: {e}"));
+                }
+
+                // 3. Rustdoc JSON
+                if let Err(e) = self
+                    .sync_rustdoc_json_cache(
+                        Some(crate_name.clone()),
+                        None,
+                        None,
+                        false,
+                        false,
+                        None,
+                    )
+                    .await
+                {
+                    errors.push(format!("rustdoc_json: {e}"));
+                }
+
+                // 4. Docs.rs pages
+                if let Err(e) = self
+                    .sync_docs_pages(Some(crate_name.clone()), None, None)
+                    .await
+                {
+                    errors.push(format!("docs: {e}"));
+                }
 
                 Ok(Json(IndexRefreshResponse {
                     job_id,
                     scope,
                     accepted: true,
-                    status: "completed".to_string(),
-                    message: "completed sync over search page".to_string(),
+                    status: if errors.is_empty() {
+                        "completed".to_string()
+                    } else {
+                        "completed_with_errors".to_string()
+                    },
+                    message: format!("refreshed all sources for {crate_name}"),
                     estimated_seconds,
                     estimated_seconds_remaining: Some(0),
                     started_at_epoch_ms,
                     finished_at_epoch_ms: Some(now_epoch_millis()),
                     result: Some(IndexRefreshResult {
-                        synced_crates: sync_response.synced_crates,
-                        synced_versions: sync_response.synced_versions,
-                        synced_dependencies: sync_response.synced_dependencies,
-                        selected_versions: sync_response.selected_versions,
-                        errors: sync_response.errors,
+                        synced_crates: 1,
+                        synced_versions: crate_outcome.versions_synced,
+                        synced_dependencies: crate_outcome.dependencies_synced,
+                        selected_versions: selected_version
+                            .into_iter()
+                            .collect(),
+                        errors,
                         synced_types: None,
                         synced_impls: None,
                         synced_traits: None,
                     }),
-                    freshness: sync_response.freshness,
-                    provenance: sync_response.provenance,
+                    freshness: vec![
+                        ResponseFreshnessSource {
+                            source: "crates.io".to_string(),
+                            status: "refreshed".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "cargo_registry".to_string(),
+                            status: "scanned".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "rustdoc_json".to_string(),
+                            status: "scanned".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "docs.rs".to_string(),
+                            status: "refreshed".to_string(),
+                            checked_at: None,
+                        },
+                        ResponseFreshnessSource {
+                            source: "local_postgres_index".to_string(),
+                            status: "updated".to_string(),
+                            checked_at: None,
+                        },
+                    ],
+                    provenance: "crates.io + cargo_registry + rustdoc_json + docs.rs + \
+                                 local_postgres_index"
+                        .to_string(),
                 }))
             }
             IndexRefreshScope::Security => {

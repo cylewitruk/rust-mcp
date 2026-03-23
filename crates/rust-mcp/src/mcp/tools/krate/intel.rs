@@ -182,7 +182,12 @@ impl McpServer {
         };
 
         let suggested_next_tools = if dependencies.is_empty() && dependents.is_empty() {
-            vec!["crate_features".to_string(), "crate_api".to_string(), "index_refresh".to_string()]
+            vec![
+                "index_crates".to_string(),
+                "crate_features".to_string(),
+                "crate_api".to_string(),
+                "index_refresh".to_string(),
+            ]
         } else {
             vec!["crate_features".to_string(), "crate_api".to_string(), "crate_graph".to_string()]
         };

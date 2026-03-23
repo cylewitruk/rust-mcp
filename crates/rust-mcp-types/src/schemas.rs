@@ -67,10 +67,10 @@ pub mod schema {
 pub mod index {
     use super::{ToolSchema, types};
 
-    /// JSON Schemas for `index_sync_crates`.
-    pub fn sync_crates() -> ToolSchema {
-        ToolSchema::new::<types::index::IndexSyncCratesRequest, types::index::IndexSyncCratesResponse>(
-            "index_sync_crates",
+    /// JSON Schemas for `index_crates`.
+    pub fn crates() -> ToolSchema {
+        ToolSchema::new::<types::index::IndexCratesRequest, types::index::IndexCratesResponse>(
+            "index_crates",
         )
     }
 
@@ -90,7 +90,7 @@ pub mod index {
 
     /// Returns all index tool schemas.
     pub fn all() -> Vec<ToolSchema> {
-        vec![sync_crates(), status(), refresh()]
+        vec![crates(), status(), refresh()]
     }
 }
 
@@ -267,6 +267,13 @@ pub mod krate {
         )
     }
 
+    /// JSON Schemas for `crate_deprecated`.
+    pub fn deprecated() -> ToolSchema {
+        ToolSchema::new::<types::krate::CrateDeprecatedRequest, types::krate::CrateDeprecatedResponse>(
+            "crate_deprecated",
+        )
+    }
+
     /// JSON Schemas for `crate_derive_macros`.
     pub fn derive_macros() -> ToolSchema {
         ToolSchema::new::<
@@ -364,6 +371,7 @@ pub mod krate {
             re_exports(),
             import_path(),
             error_types(),
+            deprecated(),
             derive_macros(),
             compare(),
             compatibility(),
@@ -415,7 +423,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
 
         assert_eq!(schemas.len(), names.len(), "duplicate tool names found");
-        assert_eq!(schemas.len(), 34, "unexpected tool schema count");
+        assert_eq!(schemas.len(), 35, "unexpected tool schema count");
     }
 
     #[test]

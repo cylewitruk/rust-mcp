@@ -420,7 +420,7 @@ impl McpServer {
             .clone();
 
         let suggested_next_tools = if type_definition.is_none() {
-            vec!["crate_api".to_string(), "symbol_search".to_string()]
+            vec!["index_crates".to_string(), "crate_api".to_string(), "symbol_search".to_string()]
         } else {
             vec![
                 "crate_trait_impls".to_string(),

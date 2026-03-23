@@ -257,7 +257,7 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             suggested_next_tools: if hits.is_empty() {
-                vec!["index_sync_crates".to_string()]
+                vec!["index_crates".to_string()]
             } else {
                 vec![
                     "crate_intel".to_string(),

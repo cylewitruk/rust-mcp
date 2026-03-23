@@ -8,9 +8,6 @@ use serde_json::Value;
 
 use super::models::{CrateSearchRow, ResponseFreshnessSource};
 
-/// Default search query used for crate sync operations.
-pub const DEFAULT_SYNC_QUERY: &str = "rust";
-
 /// Trims and returns `None` for empty or whitespace-only strings.
 pub fn normalize_optional(value: Option<String>) -> Option<String> {
     value

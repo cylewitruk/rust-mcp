@@ -134,7 +134,7 @@ impl McpServer {
                 .map_err(|e| format!("latest license version lookup failed for {crate_name}: {e}"))?
                 .ok_or_else(|| {
                     format!(
-                        "crate '{}' has no indexed versions yet; run index_sync_crates first",
+                        "crate '{}' has no indexed versions yet; run index_crates first",
                         ctx.crate_row.name
                     )
                 })?;

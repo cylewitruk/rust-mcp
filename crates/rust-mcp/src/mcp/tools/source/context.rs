@@ -104,7 +104,7 @@ impl McpServer {
             .await
             .map_err(|e| format!("crate lookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
-                format!("crate '{crate_name}' is not indexed locally; run index_sync_crates first")
+                format!("crate '{crate_name}' is not indexed locally; run index_crates first")
             })?;
 
         let latest_version = tools::fetch_latest_crate_version(&self.state.db, crate_row.id)
@@ -112,7 +112,7 @@ impl McpServer {
             .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
                 format!(
-                    "crate '{}' has no indexed versions yet; run index_sync_crates first",
+                    "crate '{}' has no indexed versions yet; run index_crates first",
                     crate_row.name
                 )
             })?;
@@ -132,7 +132,7 @@ impl McpServer {
                 .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
                 .ok_or_else(|| {
                     format!(
-                        "crate '{}' has no indexed versions yet; run index_sync_crates first",
+                        "crate '{}' has no indexed versions yet; run index_crates first",
                         crate_row.name
                     )
                 })?
@@ -331,7 +331,7 @@ impl McpServer {
         };
 
         let suggested_next_tools = if containing_impl.is_none() && surrounding_types.is_empty() {
-            vec!["source_search".to_string(), "crate_api".to_string()]
+            vec!["index_crates".to_string(), "source_search".to_string(), "crate_api".to_string()]
         } else {
             vec![
                 "source_read".to_string(),

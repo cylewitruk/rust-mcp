@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::FromRow;
 use sqlx::types::Json;
 
@@ -689,7 +689,7 @@ pub struct IndexedSymbolInsert {
 }
 
 /// Insert DTO for a type definition extracted from source or rustdoc metadata.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct IndexedTypeInsert {
     /// Type name as indexed.
     pub type_name: String,
@@ -729,8 +729,33 @@ pub struct IndexedTypeInsert {
     pub attrs: Option<Value>,
 }
 
+impl Default for IndexedTypeInsert {
+    fn default() -> Self {
+        Self {
+            type_name: String::new(),
+            kind: String::new(),
+            visibility: None,
+            generic_params: json!([]),
+            fields: json!([]),
+            variants: json!([]),
+            start_line: 0,
+            end_line: 0,
+            rustdoc_item_id: None,
+            canonical_path: None,
+            definition_path: None,
+            deprecated_since: None,
+            deprecated_note: None,
+            is_non_exhaustive: false,
+            auto_traits: json!([]),
+            where_clauses: json!([]),
+            docs: None,
+            attrs: None,
+        }
+    }
+}
+
 /// Insert DTO for an impl block extracted from source or rustdoc metadata.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct IndexedImplInsert {
     /// Terminal type name the impl applies to.
     pub type_name: String,
@@ -764,6 +789,29 @@ pub struct IndexedImplInsert {
     pub where_clauses: Value,
     /// Raw markdown documentation from rustdoc `item.docs`.
     pub docs: Option<String>,
+}
+
+impl Default for IndexedImplInsert {
+    fn default() -> Self {
+        Self {
+            type_name: String::new(),
+            type_name_display: None,
+            trait_name: None,
+            trait_name_display: None,
+            impl_kind: String::new(),
+            methods: json!([]),
+            start_line: 0,
+            end_line: 0,
+            rustdoc_item_id: None,
+            is_blanket: false,
+            is_synthetic: false,
+            is_negative: false,
+            blanket_type: None,
+            generics: json!([]),
+            where_clauses: json!([]),
+            docs: None,
+        }
+    }
 }
 
 /// Insert DTO for a trait definition extracted from source or rustdoc metadata.
@@ -1127,4 +1175,42 @@ pub struct GitHubReleaseRow {
     pub body: Option<String>,
     pub published_at: Option<String>,
     pub prerelease: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexed_type_insert_default_jsonb_fields_are_arrays() {
+        let insert = IndexedTypeInsert::default();
+        assert!(
+            insert
+                .generic_params
+                .is_array(),
+            "generic_params should default to []"
+        );
+        assert!(insert.fields.is_array(), "fields should default to []");
+        assert!(insert.variants.is_array(), "variants should default to []");
+        assert!(insert.auto_traits.is_array(), "auto_traits should default to []");
+        assert!(
+            insert
+                .where_clauses
+                .is_array(),
+            "where_clauses should default to []"
+        );
+    }
+
+    #[test]
+    fn indexed_impl_insert_default_jsonb_fields_are_arrays() {
+        let insert = IndexedImplInsert::default();
+        assert!(insert.methods.is_array(), "methods should default to []");
+        assert!(insert.generics.is_array(), "generics should default to []");
+        assert!(
+            insert
+                .where_clauses
+                .is_array(),
+            "where_clauses should default to []"
+        );
+    }
 }

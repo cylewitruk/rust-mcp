@@ -238,19 +238,17 @@ async fn live_source_read_downloads_and_indexes_on_demand() -> Result<()> {
     let sync_response = ctx
         .mcp
         .call_tool(
-            "index_sync_crates",
+            "index_crates",
             json!({
-                "query": "itoa",
-                "page": 1,
-                "per_page": 1
+                "crates": [{ "name": "itoa" }]
             }),
         )
         .await
-        .context("index_sync_crates for itoa failed")?;
+        .context("index_crates for itoa failed")?;
     let sync_payload = common::structured_content(&sync_response);
     assert!(
         sync_payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .unwrap_or_default()
             >= 1,

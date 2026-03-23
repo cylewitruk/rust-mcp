@@ -331,7 +331,11 @@ impl McpServer {
                 .to_string(),
             confidence_assessment,
             suggested_next_tools: if hits.is_empty() {
-                vec!["index_refresh".to_string(), "crate_intel".to_string()]
+                vec![
+                    "index_crates".to_string(),
+                    "index_refresh".to_string(),
+                    "crate_intel".to_string(),
+                ]
             } else {
                 vec!["source_read".to_string(), "crate_intel".to_string()]
             },

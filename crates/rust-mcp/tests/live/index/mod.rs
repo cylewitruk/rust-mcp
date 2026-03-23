@@ -64,21 +64,19 @@ async fn live_local_cargo_registry_refresh_indexes_real_sources() -> Result<()> 
     let sync_response = context
         .mcp
         .call_tool(
-            "index_sync_crates",
+            "index_crates",
             json!({
-                "query": "tokio",
-                "page": 1,
-                "per_page": 5,
+                "crates": [{ "name": "tokio" }],
                 "include_dependencies": false
             }),
         )
         .await
-        .context("index_sync_crates live call failed")?;
+        .context("index_crates live call failed")?;
     let sync_payload = common::structured_content(&sync_response);
 
     assert!(
         sync_payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .unwrap_or_default()
             >= 1,

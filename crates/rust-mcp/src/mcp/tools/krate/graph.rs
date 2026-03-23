@@ -378,7 +378,7 @@ impl McpServer {
         };
 
         let suggested_next_tools = if nodes.is_empty() {
-            vec!["crate_intel".to_string(), "index_refresh".to_string()]
+            vec!["index_crates".to_string(), "crate_intel".to_string(), "index_refresh".to_string()]
         } else {
             vec![
                 "crate_intel".to_string(),

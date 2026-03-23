@@ -8,7 +8,7 @@ pub mod common {
     /// Request payload for the `ping` tool.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct PingRequest {
-        /// Optional suffix included in the pong response.
+        /// Optional pong message suffix.
         pub message: Option<String>,
     }
 
@@ -69,11 +69,11 @@ pub mod common {
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum LicensePolicyResult {
-        /// The policy permits the candidate.
+        /// Allowed.
         Allowed,
-        /// The policy rejects the candidate.
+        /// Denied.
         Denied,
-        /// The policy could not be evaluated conclusively.
+        /// Unknown.
         Unknown,
     }
 }
@@ -85,9 +85,7 @@ pub mod schema {
     /// Request payload for `schema_get`.
     #[derive(Debug, Clone, Default, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct ToolSchemasRequest {
-        /// Optional MCP tool name filter.
-        ///
-        /// When omitted, the server returns all known tool contracts.
+        /// Tool name filter (omit for all).
         pub tool_name: Option<String>,
     }
 
@@ -119,43 +117,53 @@ pub mod index {
     use super::common::ResponseFreshnessSource;
     use super::*;
 
-    /// Request payload for `index_sync_crates`.
+    /// A single crate to index.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-    pub struct IndexSyncCratesRequest {
-        /// Optional search query sent to crates.io.
-        pub query: Option<String>,
-        /// 1-based page for crates.io search pagination.
-        pub page: Option<u32>,
-        /// Number of crates to synchronize per page.
-        pub per_page: Option<u32>,
-        /// Whether to also fetch dependency metadata for selected versions.
+    pub struct IndexCrateEntry {
+        /// Crate name (e.g. `serde`).
+        pub name: String,
+        /// Version to index (default: latest).
+        pub version: Option<String>,
+    }
+
+    /// Request payload for `index_crates`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct IndexCratesRequest {
+        /// Crates to index.
+        pub crates: Vec<IndexCrateEntry>,
+        /// Also fetch dependency metadata.
         pub include_dependencies: Option<bool>,
     }
 
-    /// Response payload for `index_sync_crates`.
+    /// Per-crate result from `index_crates`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
-    pub struct IndexSyncCratesResponse {
-        /// Effective crates.io query used for the sync.
-        pub query: String,
-        /// Effective 1-based page used for synchronization.
-        pub page: u32,
-        /// Effective page size used for synchronization.
-        pub per_page: u32,
-        /// Number of candidate crates returned by crates.io.
-        pub total_candidates: u64,
-        /// Number of crates successfully synchronized.
-        pub synced_crates: usize,
-        /// Number of crate versions synchronized.
+    pub struct IndexCrateResult {
+        /// Crate name.
+        pub name: String,
+        /// Version that was indexed (e.g. `"1.0.204"`).
+        pub version: Option<String>,
+        /// Number of versions synchronized.
         pub synced_versions: usize,
         /// Number of dependency edges synchronized.
         pub synced_dependencies: usize,
-        /// Selected crate versions synchronized in `crate@version` format.
-        pub selected_versions: Vec<String>,
-        /// Per-crate errors encountered during synchronization.
-        pub errors: Vec<String>,
-        /// Freshness provenance for the sync operation.
+        /// Error message if this crate failed to index.
+        pub error: Option<String>,
+    }
+
+    /// Response payload for `index_crates`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct IndexCratesResponse {
+        /// Number of crates requested.
+        pub requested: usize,
+        /// Number of crates successfully indexed.
+        pub succeeded: usize,
+        /// Number of crates that failed to index.
+        pub failed: usize,
+        /// Per-crate results.
+        pub results: Vec<IndexCrateResult>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -163,34 +171,34 @@ pub mod index {
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum IndexRefreshScope {
-        /// Refresh one crate using `crate_name`.
+        /// Crates.io metadata.
         Crate,
-        /// Refresh all crates from the default sync query.
+        /// All pipelines.
         All,
-        /// Refresh security advisory data.
+        /// Security advisories.
         Security,
-        /// Refresh docs.rs HTML pages.
+        /// Docs.rs pages.
         Docs,
-        /// Refresh symbols/types from local cache extraction.
+        /// Local cache symbols.
         LocalCache,
-        /// Refresh rustdoc JSON indexed data.
+        /// Rustdoc JSON data.
         RustdocJson,
     }
 
     /// Request payload for `index_refresh`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexRefreshRequest {
-        /// Requested refresh scope.
+        /// Refresh scope.
         pub scope: Option<IndexRefreshScope>,
-        /// Optional crate filter for crate-scoped refresh.
+        /// Filter by crate.
         pub crate_name: Option<String>,
-        /// Optional crates.io search query for refresh candidate selection.
+        /// Search query for candidates.
         pub query: Option<String>,
-        /// Optional 1-based page for candidate selection.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Optional page size for candidate selection.
+        /// Page size.
         pub per_page: Option<u32>,
-        /// Whether dependency metadata should also be synchronized.
+        /// Also sync dependency metadata.
         pub include_dependencies: Option<bool>,
     }
 
@@ -217,9 +225,9 @@ pub mod index {
         pub finished_at_epoch_ms: Option<u128>,
         /// Job result when processing is complete.
         pub result: Option<IndexRefreshResult>,
-        /// Freshness provenance for the job.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -268,7 +276,7 @@ pub mod index {
         pub failures_by_scope: Vec<IndexFailureByScope>,
         /// Most recent refresh worker errors.
         pub last_errors: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -374,31 +382,31 @@ pub mod source {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "lowercase")]
     pub enum SourceSearchMode {
-        /// Case-insensitive substring matching.
+        /// Substring match.
         #[serde(alias = "contains")]
         Text,
-        /// Case-insensitive regex matching.
+        /// Regex match.
         Regex,
     }
 
     /// Request payload for `source_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceSearchRequest {
-        /// Query text or regex pattern.
+        /// Text or regex pattern.
         pub query: String,
-        /// Optional crate filter.
+        /// Filter by crate.
         pub crate_name: Option<String>,
-        /// Optional version filter.
+        /// Filter by version.
         pub version: Option<String>,
-        /// Optional source path glob filter.
+        /// Path glob filter.
         pub path_glob: Option<String>,
-        /// Optional matching mode.
+        /// Matching mode.
         pub mode: Option<SourceSearchMode>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Optional result limit.
+        /// Max results.
         pub limit: Option<u32>,
     }
 
@@ -415,27 +423,27 @@ pub mod source {
         pub path_glob: Option<String>,
         /// Effective matching mode.
         pub mode: SourceSearchMode,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         /// Effective result limit.
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         /// Returned hit count.
         pub count: usize,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
         /// Matched source hits.
         pub hits: Vec<SourceSearchHit>,
@@ -461,15 +469,15 @@ pub mod source {
     /// Request payload for `source_read`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceReadRequest {
-        /// Crate name to read from.
+        /// Crate name.
         pub crate_name: String,
-        /// Optional crate version; latest indexed version is used when omitted.
+        /// Version (default: latest).
         pub version: Option<String>,
-        /// Source path to read.
+        /// Source path.
         pub path: String,
-        /// Optional inclusive starting line.
+        /// Start line (inclusive).
         pub start_line: Option<u32>,
-        /// Optional inclusive ending line.
+        /// End line (inclusive).
         pub end_line: Option<u32>,
     }
 
@@ -490,28 +498,28 @@ pub mod source {
         pub total_lines: u32,
         /// Source text content for the requested range.
         pub content: String,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
     /// Request payload for `source_context`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceContextRequest {
-        /// Crate name containing the target source file.
+        /// Crate name.
         pub crate_name: String,
-        /// Optional crate version; latest indexed version is used when omitted.
+        /// Version (default: latest).
         pub version: Option<String>,
-        /// Source path to inspect.
+        /// Source path.
         pub path: String,
-        /// Optional line used to anchor context extraction.
+        /// Anchor line.
         pub line: Option<u32>,
-        /// Optional symbol name used to resolve the anchor line.
+        /// Symbol name to resolve anchor.
         pub symbol_name: Option<String>,
     }
 
@@ -538,23 +546,23 @@ pub mod source {
         pub containing_impl: Option<SourceContextImplBlock>,
         /// Surrounding type declarations near the anchor line.
         pub surrounding_types: Vec<SourceContextTypeContext>,
-        /// Whether a freshness check was performed.
+        /// Freshness check done.
         pub freshness_check_performed: bool,
-        /// Freshness check outcome label.
+        /// Freshness result.
         pub freshness_check_result: String,
-        /// Whether a refresh job was enqueued.
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
-        /// Enqueued refresh job id.
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -595,23 +603,23 @@ pub mod symbol {
     /// Request payload for `symbol_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SymbolSearchRequest {
-        /// Symbol query string.
+        /// Query string.
         pub query: String,
-        /// Optional crate filter.
+        /// Filter by crate.
         pub crate_name: Option<String>,
-        /// Optional version filter.
+        /// Filter by version.
         pub version: Option<String>,
-        /// Optional symbol kind filter.
+        /// Filter by kind.
         pub kind: Option<String>,
-        /// Whether to include all versions instead of latest-only semantics.
+        /// Include all versions.
         pub include_all_versions: Option<bool>,
-        /// Whether to collapse duplicate canonical paths.
+        /// Collapse duplicate paths.
         pub collapse_by_canonical: Option<bool>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Page size.
+        /// Max results.
         pub limit: Option<u32>,
     }
 
@@ -630,28 +638,28 @@ pub mod symbol {
         pub include_all_versions: bool,
         /// Effective canonical-path collapsing behavior.
         pub collapse_by_canonical: bool,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         /// Effective page size.
         pub limit: u32,
         /// Total number of matching rows before pagination.
         pub total_count: usize,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
         /// Number of hits returned in this page.
         pub count: usize,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         #[serde(default)]
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
         /// Matched symbol hits.
         pub hits: Vec<SymbolSearchHit>,
@@ -693,19 +701,19 @@ pub mod docs {
     /// Request payload for `docs_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DocsSearchRequest {
-        /// Search query string.
+        /// Query string.
         pub query: String,
-        /// Optional crate filter.
+        /// Filter by crate.
         pub crate_name: Option<String>,
-        /// Optional version filter.
+        /// Filter by version.
         pub version: Option<String>,
-        /// Optional docs path prefix filter.
+        /// Path prefix filter.
         pub path_prefix: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Result limit.
+        /// Max results.
         pub limit: Option<u32>,
     }
 
@@ -720,28 +728,28 @@ pub mod docs {
         pub version: Option<String>,
         /// Effective path prefix filter.
         pub path_prefix: Option<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         /// Effective result limit.
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         /// Number of hits returned.
         pub count: usize,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         #[serde(default)]
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
         /// Matched docs page hits.
         pub hits: Vec<DocsSearchHit>,
@@ -775,7 +783,7 @@ pub mod dependency {
     /// Request payload for `dependency_audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditRequest {
-        /// Raw Cargo.toml manifest content to audit.
+        /// Cargo.toml manifest content.
         pub cargo_toml: String,
     }
 
@@ -794,15 +802,15 @@ pub mod dependency {
     )]
     #[serde(rename_all = "snake_case")]
     pub enum DependencyAuditIssueCategory {
-        /// Selected version is yanked.
+        /// Yanked version.
         Yanked,
-        /// Selected version is affected by an advisory.
+        /// Advisory match.
         Advisory,
-        /// Selected version is outdated.
+        /// Outdated version.
         Outdated,
-        /// Selected version conflicts with package MSRV.
+        /// MSRV conflict.
         MsrvConflict,
-        /// Dependency could not be resolved from index data.
+        /// Unresolved.
         Unresolved,
     }
 
@@ -810,11 +818,11 @@ pub mod dependency {
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum DependencyAuditSeverity {
-        /// Low-severity issue.
+        /// Low.
         Low,
-        /// Medium-severity issue.
+        /// Medium.
         Medium,
-        /// High-severity issue.
+        /// High.
         High,
     }
 
@@ -833,15 +841,15 @@ pub mod dependency {
         pub dependencies: Vec<DependencyAuditDependency>,
         /// Issues detected across dependencies.
         pub issues: Vec<DependencyAuditIssue>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -886,25 +894,25 @@ pub mod dependency {
     /// Request payload for `dependency_resolve`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveRequest {
-        /// Explicit dependency inputs.
+        /// Dependency inputs.
         pub dependencies: Option<Vec<DependencyResolveInputDependency>>,
-        /// Raw Cargo.toml manifest text to extract dependency inputs from.
+        /// Cargo.toml manifest text to extract deps from.
         #[serde(default)]
         pub cargo_toml: Option<String>,
-        /// Additional dependencies layered over manifest inputs.
+        /// Extra dependencies over manifest inputs.
         pub additions: Option<Vec<DependencyResolveInputDependency>>,
-        /// Whether to compute feature-unification summary data.
+        /// Check feature unification.
         pub check_features: Option<bool>,
-        /// Cap on dependency expansion depth/breadth.
+        /// Expansion depth limit.
         pub limit: Option<u32>,
     }
 
-    /// One explicit or manifest-derived dependency input.
+    /// Dependency input.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveInputDependency {
-        /// Dependency crate name.
+        /// Crate name.
         pub name: String,
-        /// Optional semver requirement.
+        /// Semver requirement.
         pub version_req: Option<String>,
     }
 
@@ -923,13 +931,13 @@ pub mod dependency {
         pub check_features: bool,
         /// Optional feature-unification summary.
         pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -980,13 +988,13 @@ pub mod dependency {
     /// Request payload for `dependency_feature_impact`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyFeatureImpactRequest {
-        /// Target crate name.
+        /// Crate name.
         pub crate_name: String,
-        /// Optional target version.
+        /// Version (default: latest).
         pub version: Option<String>,
-        /// Feature names to evaluate.
+        /// Features to evaluate.
         pub features: Vec<String>,
-        /// Threshold used to classify heavy features.
+        /// Heavy feature threshold.
         pub heavy_threshold: Option<u32>,
     }
 
@@ -1011,23 +1019,23 @@ pub mod dependency {
         pub per_feature: Vec<DependencyFeatureImpactEntry>,
         /// Features classified as heavy.
         pub heavy_features: Vec<String>,
-        /// Whether a freshness check was performed.
+        /// Freshness check done.
         pub freshness_check_performed: bool,
-        /// Freshness check outcome label.
+        /// Freshness result.
         pub freshness_check_result: String,
-        /// Whether a refresh job was enqueued.
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
-        /// Enqueued refresh job id.
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -1056,30 +1064,30 @@ pub mod krate {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "lowercase")]
     pub enum CrateSearchSort {
-        /// Rank by textual relevance.
+        /// By relevance.
         Relevance,
-        /// Rank by download counts.
+        /// By downloads.
         Downloads,
-        /// Rank by most recent publication activity.
+        /// By recency.
         Recent,
     }
 
     /// Request payload for `crate_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateSearchRequest {
-        /// Optional free-text query.
+        /// Search query.
         pub query: Option<String>,
-        /// Optional category filter.
+        /// Category filter.
         pub category: Option<String>,
-        /// Optional keyword filter.
+        /// Keyword filter.
         pub keyword: Option<String>,
-        /// Optional sort mode.
+        /// Sort mode.
         pub sort: Option<CrateSearchSort>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Optional hit limit.
+        /// Max results.
         pub limit: Option<u32>,
     }
 
@@ -1094,17 +1102,17 @@ pub mod krate {
         pub keyword: Option<String>,
         /// Effective sort mode.
         pub sort: CrateSearchSort,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         /// Effective hit limit.
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         /// Returned hit count.
         pub count: usize,
@@ -1112,15 +1120,15 @@ pub mod krate {
         pub freshness_checks_performed: usize,
         /// Number of refresh jobs enqueued during freshness probing.
         pub refresh_jobs_enqueued: usize,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
         /// Ranked crate hits.
         pub hits: Vec<CrateSearchHit>,
@@ -1158,15 +1166,15 @@ pub mod krate {
     /// Request payload for `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelRequest {
-        /// Target crate name.
+        /// Crate name.
         pub crate_name: String,
-        /// Optional target version.
+        /// Version (default: latest).
         pub version: Option<String>,
-        /// Limit for version history entries.
+        /// Max version history entries.
         pub versions_limit: Option<u32>,
-        /// Limit for dependents entries.
+        /// Max dependents entries.
         pub dependents_limit: Option<u32>,
-        /// Max characters for readme text.
+        /// Max readme characters.
         pub readme_max_chars: Option<u32>,
     }
 
@@ -1218,23 +1226,23 @@ pub mod krate {
         pub github: Option<CrateIntelGitHub>,
         /// Advisory matches for selected version.
         pub advisories: Vec<CrateIntelAdvisory>,
-        /// Whether a freshness check was performed.
+        /// Freshness check done.
         pub freshness_check_performed: bool,
-        /// Freshness check outcome label.
+        /// Freshness result.
         pub freshness_check_result: String,
-        /// Whether a refresh job was enqueued.
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
-        /// Enqueued refresh job id.
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -1367,13 +1375,13 @@ pub mod krate {
     /// Request payload for `crate_versions`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateVersionsRequest {
-        /// Target crate name.
+        /// Crate name.
         pub crate_name: String,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
-        /// Maximum number of versions to return.
+        /// Max results.
         pub limit: Option<u32>,
     }
 
@@ -1382,17 +1390,17 @@ pub mod krate {
     pub struct CrateVersionsResponse {
         /// Target crate name.
         pub crate_name: String,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         /// Effective page size.
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         /// rust-version from the latest indexed version.
         pub latest_rust_version: Option<String>,
@@ -1400,23 +1408,23 @@ pub mod krate {
         pub count: usize,
         /// Version timeline entries.
         pub versions: Vec<CrateVersionTimelineItem>,
-        /// Whether a freshness check was performed.
+        /// Freshness check done.
         pub freshness_check_performed: bool,
-        /// Freshness check outcome label.
+        /// Freshness result.
         pub freshness_check_result: String,
-        /// Whether a refresh job was enqueued.
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
-        /// Enqueued refresh job id.
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Provenance string describing the data origin.
+        /// Data origin.
         pub provenance: String,
     }
 
@@ -1476,15 +1484,12 @@ pub mod krate {
     pub struct CrateApiRequest {
         pub crate_name: String,
         pub version: Option<String>,
-        /// Optional glob pattern to filter results by source file path or
-        /// symbol name. For example, `*connection*` matches both file
-        /// paths containing "connection" and symbol names like
-        /// `MultiplexedConnection`.
+        /// Glob filter for path or symbol name (e.g. `*connection*`).
         pub path_glob: Option<String>,
         pub kinds: Option<Vec<String>>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -1496,16 +1501,16 @@ pub mod krate {
         pub latest_version: String,
         pub path_glob: Option<String>,
         pub kinds: Vec<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub symbols: Vec<CrateApiSymbol>,
@@ -1685,9 +1690,9 @@ pub mod krate {
         pub path_glob: Option<String>,
         pub include_unsafe: Option<bool>,
         pub include_concurrency: Option<bool>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -1715,16 +1720,16 @@ pub mod krate {
         pub path_glob: Option<String>,
         pub include_unsafe: bool,
         pub include_concurrency: bool,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub scanned_files: usize,
         pub count: usize,
@@ -1785,9 +1790,9 @@ pub mod krate {
         pub crate_name: String,
         pub symbol_name: String,
         pub version: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -1798,16 +1803,16 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub symbol_name: String,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         /// Number of dependent crate versions whose source directories were
@@ -1842,9 +1847,9 @@ pub mod krate {
         pub crate_name: String,
         pub version: Option<String>,
         pub path_prefix: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -1855,16 +1860,16 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub path_prefix: Option<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub re_exports: Vec<CrateReExportEntry>,
@@ -1896,9 +1901,9 @@ pub mod krate {
         pub symbol_name: String,
         pub version: Option<String>,
         pub kind: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -1910,16 +1915,16 @@ pub mod krate {
         pub latest_version: String,
         pub symbol_name: String,
         pub kind: Option<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub best_import_path: Option<String>,
@@ -2144,9 +2149,9 @@ pub mod krate {
         pub crate_name: String,
         pub version: Option<String>,
         pub type_name: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -2157,16 +2162,16 @@ pub mod krate {
         pub selected_version: String,
         pub latest_version: String,
         pub type_name: Option<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub error_types: Vec<CrateErrorTypeEntry>,
@@ -2198,9 +2203,9 @@ pub mod krate {
     pub struct CrateAlternativesRequest {
         pub crate_name: String,
         pub version: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
         pub allow_licenses: Option<Vec<String>>,
@@ -2212,16 +2217,16 @@ pub mod krate {
         pub crate_name: String,
         pub selected_version: String,
         pub latest_version: String,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub allow_licenses: Vec<String>,
@@ -2262,9 +2267,9 @@ pub mod krate {
         pub version: Option<String>,
         pub trait_name: Option<String>,
         pub type_name: Option<String>,
-        /// Opaque cursor token for paging.
+        /// Paging cursor.
         pub cursor: Option<String>,
-        /// 1-based page when cursor is not provided.
+        /// Page (1-based).
         pub page: Option<u32>,
         pub limit: Option<u32>,
     }
@@ -2276,16 +2281,16 @@ pub mod krate {
         pub latest_version: String,
         pub trait_name: Option<String>,
         pub type_name: Option<String>,
-        /// Cursor that was used for this page.
+        /// Current cursor.
         pub cursor: Option<String>,
-        /// Cursor for the next page when more results exist.
+        /// Next page cursor.
         pub next_cursor: Option<String>,
-        /// Effective 1-based page.
+        /// Page.
         pub page: u32,
         pub limit: u32,
-        /// Whether more results are available.
+        /// More results available.
         pub has_more: bool,
-        /// Whether results were truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         pub count: usize,
         pub impls: Vec<CrateTraitImplRelation>,
@@ -2415,13 +2420,13 @@ pub mod krate {
     /// Request payload for `crate_deprecated`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeprecatedRequest {
-        /// Target crate name.
+        /// Crate name.
         pub crate_name: String,
-        /// Specific version to inspect; defaults to the latest indexed version.
+        /// Version (default: latest).
         pub version: Option<String>,
-        /// Maximum number of deprecated items to return (default: 50).
+        /// Max results (default: 50).
         pub limit: Option<u32>,
-        /// 1-based page when not using a cursor.
+        /// Page (1-based).
         pub page: Option<u32>,
     }
 
@@ -2438,45 +2443,44 @@ pub mod krate {
         pub count: usize,
         /// Whether additional results are available on the next page.
         pub has_more: bool,
-        /// Whether the result set was truncated by pagination.
+        /// Truncated by pagination.
         pub truncated: bool,
         /// Deprecated items found in this version.
         pub deprecated_items: Vec<DeprecatedItem>,
-        /// Whether a freshness check was performed.
+        /// Freshness check done.
         pub freshness_check_performed: bool,
-        /// Freshness check outcome label.
+        /// Freshness result.
         pub freshness_check_result: String,
-        /// Whether a background refresh was enqueued.
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
-        /// Enqueued refresh job id.
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
-        /// Freshness provenance details.
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
-        /// Coarse confidence string.
+        /// Confidence level.
         pub confidence: String,
-        /// Structured confidence assessment.
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
-        /// Suggested follow-up calls.
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
-        /// Data origin description.
+        /// Data origin.
         pub provenance: String,
     }
 
     /// One deprecated API item returned by `crate_deprecated`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DeprecatedItem {
-        /// Symbol or type name.
+        /// Symbol name.
         pub name: String,
-        /// Item kind (e.g. `fn`, `struct`, `enum`, `type`, `const`).
+        /// Kind (e.g. `fn`, `struct`, `enum`).
         pub kind: String,
-        /// Version since which the item has been deprecated, if available.
+        /// Deprecated since version.
         pub deprecated_since: Option<String>,
-        /// Deprecation note, usually explaining the reason and suggesting a
-        /// replacement.
+        /// Deprecation note / replacement.
         pub deprecated_note: Option<String>,
-        /// Best-known canonical import path for this item.
+        /// Canonical import path.
         pub canonical_path: Option<String>,
-        /// Index source that provided the data (`rustdoc_json` or `syn`).
+        /// Index source.
         pub index_source: String,
     }
 }

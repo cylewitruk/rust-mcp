@@ -8,30 +8,34 @@ use super::{
 };
 
 #[tokio::test]
-async fn tool_index_sync_crates_syncs_seeded_fixtures() {
+async fn tool_index_crates_syncs_seeded_fixtures() {
     let context = seeded_initialized_context().await;
 
     let payload = sync_seeded_demo_crates(&context.rust_mcp, true).await;
 
     assert!(
         payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .is_some_and(|count| count >= 2),
         "expected sync to ingest seeded crates: {payload}"
     );
 
-    let selected_versions = payload
-        .get("selected_versions")
+    let results = payload
+        .get("results")
         .and_then(Value::as_array)
-        .expect("index_sync_crates should return selected_versions array");
-    let expected_primary = format!("{SEEDED_CRATE_NAME}@{SEEDED_CRATE_NEXT_VERSION}");
+        .expect("index_crates should return results array");
     assert!(
-        selected_versions
-            .iter()
-            .filter_map(Value::as_str)
-            .any(|value| value == expected_primary),
-        "expected selected_versions to include {expected_primary}, got: {selected_versions:?}"
+        results.iter().any(|r| {
+            r.get("name")
+                .and_then(Value::as_str)
+                == Some(SEEDED_CRATE_NAME)
+                && r.get("version")
+                    .and_then(Value::as_str)
+                    == Some(SEEDED_CRATE_NEXT_VERSION)
+        }),
+        "expected results to include {SEEDED_CRATE_NAME}@{SEEDED_CRATE_NEXT_VERSION}, got: \
+         {results:?}"
     );
 }
 
@@ -87,27 +91,29 @@ async fn tool_index_refresh_rustdoc_json_uses_local_fallback_when_docs_rs_is_unr
 
     let sync_payload = call_tool_payload(
         &context.rust_mcp,
-        "index_sync_crates",
+        "index_crates",
         json!({
-            "query": TOKIO_FALLBACK_CRATE_NAME,
-            "page": 1,
-            "per_page": 5,
+            "crates": [{ "name": TOKIO_FALLBACK_CRATE_NAME }],
             "include_dependencies": false
         }),
     )
     .await;
 
-    let expected_selected = format!("{TOKIO_FALLBACK_CRATE_NAME}@{TOKIO_FALLBACK_CRATE_VERSION}");
-    let selected_versions = sync_payload
-        .get("selected_versions")
+    let results = sync_payload
+        .get("results")
         .and_then(Value::as_array)
-        .expect("index_sync_crates should return selected_versions array");
+        .expect("index_crates should return results array");
     assert!(
-        selected_versions
-            .iter()
-            .filter_map(Value::as_str)
-            .any(|value| value == expected_selected),
-        "expected selected_versions to include {expected_selected}: {sync_payload}"
+        results.iter().any(|r| {
+            r.get("name")
+                .and_then(Value::as_str)
+                == Some(TOKIO_FALLBACK_CRATE_NAME)
+                && r.get("version")
+                    .and_then(Value::as_str)
+                    == Some(TOKIO_FALLBACK_CRATE_VERSION)
+        }),
+        "expected results to include {TOKIO_FALLBACK_CRATE_NAME}@{TOKIO_FALLBACK_CRATE_VERSION}: \
+         {sync_payload}"
     );
 
     let refresh_payload = call_tool_payload(

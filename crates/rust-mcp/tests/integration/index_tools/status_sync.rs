@@ -84,7 +84,7 @@ async fn index_refresh_local_cache_returns_terminal_status() {
 }
 
 #[tokio::test]
-async fn index_sync_crates_writes_versions_features_and_dependencies_from_mock_api() {
+async fn index_crates_writes_versions_features_and_dependencies_from_mock_api() {
     let context = mock_index_sync_context()
         .await
         .expect("failed to build mock index sync context");
@@ -92,59 +92,43 @@ async fn index_sync_crates_writes_versions_features_and_dependencies_from_mock_a
     let response = context
         .mcp
         .call_tool(
-            "index_sync_crates",
+            "index_crates",
             json!({
-                "query": "demo",
-                "page": 1,
-                "per_page": 10,
+                "crates": [{ "name": "demo_crate" }],
                 "include_dependencies": true
             }),
         )
         .await
-        .expect("index_sync_crates call failed");
+        .expect("index_crates call failed");
     let payload = common::structured_content(&response);
 
     assert_eq!(
         payload
-            .get("total_candidates")
+            .get("succeeded")
             .and_then(Value::as_u64),
         Some(1)
     );
     assert_eq!(
         payload
-            .get("synced_crates")
+            .get("failed")
             .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        payload
-            .get("synced_versions")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        payload
-            .get("synced_dependencies")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        payload
-            .get("errors")
-            .and_then(Value::as_array)
-            .map(|errors| errors.len()),
         Some(0)
     );
-    assert!(
-        payload
-            .get("selected_versions")
-            .and_then(Value::as_array)
-            .is_some_and(|versions| {
-                versions
-                    .iter()
-                    .any(|version| version.as_str() == Some("demo_crate@1.2.3"))
-            })
-    );
+
+    let results = payload
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("index_crates should return results array");
+    assert!(results.iter().any(|r| {
+        r.get("name")
+            .and_then(Value::as_str)
+            == Some("demo_crate")
+            && r.get("version")
+                .and_then(Value::as_str)
+                == Some("1.2.3")
+            && r.get("error")
+                .is_none_or(Value::is_null)
+    }));
 
     let demo_crate_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM crates WHERE name = 'demo_crate')",

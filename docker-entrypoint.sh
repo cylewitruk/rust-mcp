@@ -105,5 +105,10 @@ EOF
     echo "firewall: egress filter active"
 fi
 
+# Ensure the data directory exists and is writable by the app user
+MCP_DATA_DIR="${MCP_DATA_DIR:-/var/lib/rust-mcp}"
+mkdir -p "$MCP_DATA_DIR"
+chown rust-mcp:rust-mcp "$MCP_DATA_DIR"
+
 # Drop privileges: hand off PID 1 to the app as rust-mcp user
 exec su-exec rust-mcp /usr/local/bin/rust-mcp "$@"

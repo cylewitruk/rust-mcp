@@ -20,11 +20,16 @@ fix:
 
 test:
   cargo --locked llvm-cov nextest \
+    --workspace \
     --lcov \
     --output-path ./target/lcov.info \
     --no-fail-fast \
     --all-targets \
-    --features integration-tests
+    --features integration-tests \
+    --exclude rust-mcp-stdio
+  cargo --locked nextest run \
+    -p rust-mcp-stdio \
+    --no-fail-fast
 
 test-live:
   RUST_MCP_LIVE_CARGO_REGISTRY_DIR=~/.cargo/registry \

@@ -129,11 +129,12 @@ async fn sync_seeded_demo_crates(
 ) -> Value {
     call_tool_payload(
         rust_mcp,
-        "index_sync_crates",
+        "index_crates",
         json!({
-            "query": "demo",
-            "page": 1,
-            "per_page": 10,
+            "crates": [
+                { "name": SEEDED_CRATE_NAME },
+                { "name": SEEDED_ALT_CRATE_NAME }
+            ],
             "include_dependencies": include_dependencies
         }),
     )
@@ -170,7 +171,7 @@ async fn seed_index_data(rust_mcp: &RustMcpTestContainer) {
     let sync_payload = sync_seeded_demo_crates(rust_mcp, true).await;
     assert!(
         sync_payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .is_some_and(|count| count >= 2),
         "expected at least two synced crates in fixture sync: {sync_payload}"

@@ -165,7 +165,7 @@ impl McpServer {
             .clone();
 
         let suggested_next_tools = if paginated.items.is_empty() {
-            vec!["crate_api".to_string(), "symbol_search".to_string()]
+            vec!["index_crates".to_string(), "crate_api".to_string(), "symbol_search".to_string()]
         } else {
             vec![
                 "crate_re_exports".to_string(),

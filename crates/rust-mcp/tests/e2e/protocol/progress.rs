@@ -32,19 +32,17 @@ async fn rust_mcp_container_emits_progress_notifications_for_progress_tokenized_
             request_id,
             "tools/call",
             json!({
-                "name": "index_sync_crates",
+                "name": "index_crates",
                 "_meta": {
                     "progressToken": progress_token
                 },
                 "arguments": {
-                    "query": SEEDED_CRATE_NAME,
-                    "page": 1,
-                    "per_page": 10,
+                    "crates": [{ "name": SEEDED_CRATE_NAME }],
                     "include_dependencies": false
                 }
             }),
         ),
-        "raw tools/call index.sync_crates request failed",
+        "raw tools/call index_crates request failed",
     )
     .await;
     assert!(

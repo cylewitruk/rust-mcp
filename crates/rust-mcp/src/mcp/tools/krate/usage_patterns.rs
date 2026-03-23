@@ -178,6 +178,7 @@ impl McpServer {
 
         let suggested_next_tools = if patterns.is_empty() {
             vec![
+                "index_crates".to_string(),
                 "crate_type_info".to_string(),
                 "symbol_search".to_string(),
                 "crate_api".to_string(),

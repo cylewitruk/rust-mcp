@@ -3,4 +3,5 @@
 
 pub mod protocol;
 pub mod schemas;
+pub mod tools;
 pub mod types;

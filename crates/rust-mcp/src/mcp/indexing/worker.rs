@@ -11,11 +11,10 @@ use crate::db::indexing::{
 };
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
 use crate::mcp::indexing::discovery::collect_local_versions_for_crate;
-use crate::mcp::indexing::handlers::{IndexSyncCratesRequest, SyncCrateOutcome};
+use crate::mcp::indexing::handlers::SyncCrateOutcome;
 use crate::mcp::indexing::local_cache::LocalCacheRefreshOutcome;
 use crate::mcp::indexing::rustdoc_json::RustdocJsonRefreshOutcome;
 use crate::mcp::indexing::security::SecuritySyncOutcome;
-use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::tools::docs::DocsRefreshOutcome;
 use crate::mcp::utils::{sync_page, sync_per_page};
@@ -29,8 +28,6 @@ enum RefreshJobOutcome {
     LocalCache(LocalCacheRefreshOutcome),
     Docs(DocsRefreshOutcome),
     Security(SecuritySyncOutcome),
-    /// `index_sync_crates` ("all") — outcome is already handled internally.
-    AllSync,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -39,7 +36,6 @@ struct RefreshJobPayload {
     query: Option<String>,
     page: Option<u32>,
     per_page: Option<u32>,
-    include_dependencies: Option<bool>,
     local_versions: Option<Vec<String>>,
     locally_present_only: Option<bool>,
 }
@@ -156,19 +152,9 @@ pub async fn run_refresh_worker(state: AppState) {
                 .await
                 .map(RefreshJobOutcome::CrateSync),
             "all" => server
-                .handle_index_sync_crates(
-                    IndexSyncCratesRequest {
-                        query: payload.query,
-                        page: payload.page,
-                        per_page: payload.per_page,
-                        include_dependencies: payload
-                            .include_dependencies
-                            .or(Some(job.include_dependencies)),
-                    },
-                    ToolCallContext::no_op(),
-                )
+                .sync_single_crate(&job.crate_name, job.include_dependencies)
                 .await
-                .map(|_| RefreshJobOutcome::AllSync),
+                .map(RefreshJobOutcome::CrateSync),
             "security" => {
                 let page = sync_page(payload.page);
                 let per_page = sync_per_page(payload.per_page);
@@ -256,7 +242,7 @@ pub async fn run_refresh_worker(state: AppState) {
                 // enqueue source and rustdoc enrichment (locally-present only)
                 // at lower priority. enqueue_or_get_refresh_job_id is
                 // idempotent — safe to call unconditionally.
-                if job.scope == "crate" || job.scope == "crate_deep_refresh" {
+                if job.scope == "crate" || job.scope == "crate_deep_refresh" || job.scope == "all" {
                     let local_versions = match payload.local_versions {
                         Some(ref versions) if !versions.is_empty() => versions.clone(),
                         _ => {
@@ -375,7 +361,6 @@ fn emit_outcome_counters(outcome: &RefreshJobOutcome) {
             counter!("rust_mcp_security_advisories_written_total")
                 .increment(o.advisories_written as u64);
         }
-        RefreshJobOutcome::AllSync => {}
     }
 }
 

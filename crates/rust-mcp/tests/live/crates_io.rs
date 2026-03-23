@@ -128,7 +128,7 @@ async fn live_fetch_readme_returns_none_for_nonexistent_version() -> Result<()> 
 // Full crate sync flow through MCP
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Sync `serde` through the full MCP `index_sync_crates` flow and verify that
+/// Sync `serde` through the full MCP `index_crates` flow and verify that
 /// the crate metadata, versions, and README are persisted correctly.
 #[tokio::test]
 async fn live_sync_serde_stores_metadata_and_readme() -> Result<()> {
@@ -137,21 +137,19 @@ async fn live_sync_serde_stores_metadata_and_readme() -> Result<()> {
     let response = context
         .mcp
         .call_tool(
-            "index_sync_crates",
+            "index_crates",
             json!({
-                "query": "serde",
-                "page": 1,
-                "per_page": 1,
+                "crates": [{ "name": "serde" }],
                 "include_dependencies": true
             }),
         )
         .await
-        .context("index_sync_crates for serde failed")?;
+        .context("index_crates for serde failed")?;
 
     let payload = common::structured_content(&response);
     assert!(
         payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .unwrap_or_default()
             >= 1,
@@ -215,21 +213,19 @@ async fn live_sync_crate_with_build_metadata_versions() -> Result<()> {
     let response = context
         .mcp
         .call_tool(
-            "index_sync_crates",
+            "index_crates",
             json!({
-                "query": "toml_datetime",
-                "page": 1,
-                "per_page": 1,
+                "crates": [{ "name": "toml_datetime" }],
                 "include_dependencies": false
             }),
         )
         .await
-        .context("index_sync_crates for toml_datetime failed")?;
+        .context("index_crates for toml_datetime failed")?;
 
     let payload = common::structured_content(&response);
     assert!(
         payload
-            .get("synced_crates")
+            .get("succeeded")
             .and_then(Value::as_u64)
             .unwrap_or_default()
             >= 1,

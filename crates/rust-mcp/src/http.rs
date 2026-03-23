@@ -1,7 +1,10 @@
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::http::header::{ACCEPT, WARNING};
+use axum::http::header::{
+    ACCEPT, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE, WARNING,
+};
 use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -33,6 +36,8 @@ pub fn router(state: AppState, config: Config, prometheus_handle: PrometheusHand
         .route("/metrics", get(metrics))
         .route("/schemas", get(list_tool_schemas))
         .route("/schemas/{tool_name}", get(get_tool_schema))
+        .route("/.well-known/mcp.json", get(mcp_server_card))
+        .route("/.well-known/mcp/server-card.json", get(mcp_server_card))
         .route("/.well-known/{*path}", get(oauth_not_supported))
         .nest("/mcp", mcp_router)
         .with_state(state)
@@ -129,6 +134,46 @@ struct StatusPayload<'a> {
 #[derive(Debug, Serialize)]
 struct ErrorPayload {
     error: String,
+}
+
+/// MCP Server Card per SEP-1649.
+///
+/// Served at both `/.well-known/mcp.json` (common convention) and
+/// `/.well-known/mcp/server-card.json` (SEP-1649 draft path).
+async fn mcp_server_card() -> impl IntoResponse {
+    let body = serde_json::json!({
+        "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+        "version": "1.0",
+        "protocolVersion": rust_mcp_types::protocol::SUPPORTED_MCP_PROTOCOL_VERSION,
+        "serverInfo": {
+            "name": "rust-mcp",
+            "title": "Rust MCP",
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "description": "Local-first Rust dependency intelligence server",
+        "transport": {
+            "type": "streamable-http",
+            "endpoint": "/mcp",
+        },
+        "capabilities": {
+            "tools": { "listChanged": false },
+        },
+        "authentication": {
+            "required": false,
+        },
+        "tools": rust_mcp_types::tools::ALL_TOOLS,
+    });
+
+    (
+        [
+            (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+            (ACCESS_CONTROL_ALLOW_METHODS, "GET"),
+            (ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type"),
+            (CACHE_CONTROL, "public, max-age=3600"),
+            (CONTENT_TYPE, "application/json"),
+        ],
+        Json(body),
+    )
 }
 
 async fn oauth_not_supported() -> impl IntoResponse {

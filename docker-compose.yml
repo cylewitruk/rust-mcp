@@ -6,6 +6,12 @@ services:
       dockerfile: Dockerfile
     container_name: rust-mcp-server
     restart: unless-stopped
+    labels:
+      # Docker MCP Gateway discovery labels.
+      # Allows `docker mcp gateway run` to auto-discover this server.
+      mcp.transport: "streamable-http"
+      mcp.port: "43173"
+      mcp.path: "/mcp"
     environment:
       # Entrypoint only (not read by the server binary)
       # ------------------------------------------------------------------------

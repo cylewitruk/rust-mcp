@@ -660,3 +660,79 @@ async fn crate_type_info_trait_impls_and_error_types_return_seeded_type_intellig
             })
     );
 }
+
+/// Verifies that `crate_type_info` handles rows where JSONB columns contain
+/// JSON `null` (as opposed to `[]`). This reproduces the bug where syn-indexed
+/// types used `..Default::default()` which set JSONB fields to
+/// `serde_json::Value::Null`.
+#[tokio::test]
+async fn crate_type_info_handles_json_null_in_where_clauses() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let source_file_id = rust_mcp_testing::fixtures::seed_source_file(
+        &context.state.db,
+        context
+            .fixture
+            .dependent
+            .version_id,
+        "src/null_test.rs",
+        Some("rust"),
+        "pub struct NullWhereType;",
+    )
+    .await
+    .expect("failed to seed source file");
+
+    // Insert a type row with explicit JSON null for where_clauses, auto_traits,
+    // and generic_params — reproducing the pre-fix `Default` behaviour.
+    sqlx::query(
+        "INSERT INTO crate_types (
+            crate_version_id, source_file_id, type_name, kind,
+            visibility, generic_params, fields, variants,
+            start_line, end_line, index_source,
+            where_clauses, auto_traits
+         ) VALUES (
+            $1, $2, 'NullWhereType', 'struct', 'public',
+            'null'::jsonb, '[]'::jsonb, '[]'::jsonb,
+            1, 1, 'syn',
+            'null'::jsonb, 'null'::jsonb
+         )",
+    )
+    .bind(
+        context
+            .fixture
+            .dependent
+            .version_id,
+    )
+    .bind(source_file_id)
+    .execute(&context.state.db)
+    .await
+    .expect("failed to seed type with null JSONB columns");
+
+    // This call previously failed with:
+    // "error occurred while decoding column 'where_clauses': invalid type: null"
+    let response = context
+        .mcp
+        .call_tool(
+            "crate_type_info",
+            json!({
+                "crate_name": "serde_json",
+                "type_name": "NullWhereType"
+            }),
+        )
+        .await
+        .expect("crate_type_info should handle null JSONB gracefully");
+    let payload = common::structured_content(&response);
+
+    let type_def = payload
+        .get("type_definition")
+        .and_then(Value::as_object)
+        .expect("type_definition should be present");
+    assert_eq!(
+        type_def
+            .get("type_name")
+            .and_then(Value::as_str),
+        Some("NullWhereType")
+    );
+}

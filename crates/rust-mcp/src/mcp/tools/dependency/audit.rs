@@ -1,29 +1,14 @@
-use std::collections::BTreeMap;
-
 use rmcp::Json;
 pub use rust_mcp_types::types::dependency::{
     DependencyAuditDependency, DependencyAuditIssue, DependencyAuditIssueCategory,
     DependencyAuditRequest, DependencyAuditResponse, DependencyAuditSeverity,
 };
 use semver::{Version, VersionReq};
-use toml::Value;
 
+use super::manifest::parse_manifest;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
-
-#[derive(Debug, Clone)]
-struct ParsedDependency {
-    name: String,
-    requirement: Option<String>,
-}
-
-#[derive(Debug)]
-struct ParsedManifest {
-    package_name: Option<String>,
-    package_rust_version: Option<String>,
-    dependencies: Vec<ParsedDependency>,
-}
 
 fn parse_semver_for_matching(version: &str) -> Option<Version> {
     Version::parse(version)
@@ -51,132 +36,6 @@ fn parse_rust_version_floor(version: &str) -> Option<Version> {
         [major, minor, patch] => Version::parse(&format!("{major}.{minor}.{patch}")).ok(),
         _ => None,
     }
-}
-
-fn parse_requirement(value: &Value) -> Option<String> {
-    if let Some(req) = value.as_str() {
-        let trimmed = req.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-
-    let table = value.as_table()?;
-    let version = table
-        .get("version")?
-        .as_str()?;
-    let trimmed = version.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-}
-
-fn collect_dependency_table(
-    table: Option<&toml::map::Map<String, Value>>,
-) -> Vec<ParsedDependency> {
-    let mut out = Vec::<ParsedDependency>::new();
-    let Some(table) = table else {
-        return out;
-    };
-
-    for (name, spec) in table {
-        let trimmed_name = name.trim();
-        if trimmed_name.is_empty() {
-            continue;
-        }
-
-        out.push(ParsedDependency {
-            name: trimmed_name.to_string(),
-            requirement: parse_requirement(spec),
-        });
-    }
-
-    out
-}
-
-fn parse_manifest(manifest: &str) -> Result<ParsedManifest, String> {
-    let parsed =
-        toml::from_str::<Value>(manifest).map_err(|e| format!("invalid Cargo.toml: {e}"))?;
-
-    let package_name = parsed
-        .get("package")
-        .and_then(Value::as_table)
-        .and_then(|table| table.get("name"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string);
-
-    let package_rust_version = parsed
-        .get("package")
-        .and_then(Value::as_table)
-        .and_then(|table| table.get("rust-version"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string);
-
-    let mut merged = BTreeMap::<String, ParsedDependency>::new();
-
-    let root = parsed.as_table();
-    let mut root_deps = Vec::<ParsedDependency>::new();
-    if let Some(root) = root {
-        root_deps.extend(collect_dependency_table(
-            root.get("dependencies")
-                .and_then(Value::as_table),
-        ));
-        root_deps.extend(collect_dependency_table(
-            root.get("dev-dependencies")
-                .and_then(Value::as_table),
-        ));
-        root_deps.extend(collect_dependency_table(
-            root.get("build-dependencies")
-                .and_then(Value::as_table),
-        ));
-
-        if let Some(targets) = root
-            .get("target")
-            .and_then(Value::as_table)
-        {
-            for target_value in targets.values() {
-                let Some(target_table) = target_value.as_table() else {
-                    continue;
-                };
-                root_deps.extend(collect_dependency_table(
-                    target_table
-                        .get("dependencies")
-                        .and_then(Value::as_table),
-                ));
-                root_deps.extend(collect_dependency_table(
-                    target_table
-                        .get("dev-dependencies")
-                        .and_then(Value::as_table),
-                ));
-                root_deps.extend(collect_dependency_table(
-                    target_table
-                        .get("build-dependencies")
-                        .and_then(Value::as_table),
-                ));
-            }
-        }
-    }
-
-    for dep in root_deps {
-        let key = dep.name.to_ascii_lowercase();
-        match merged.get(&key) {
-            None => {
-                merged.insert(key, dep);
-            }
-            Some(existing) if existing.requirement.is_none() && dep.requirement.is_some() => {
-                merged.insert(key, dep);
-            }
-            _ => {}
-        }
-    }
-
-    Ok(ParsedManifest {
-        package_name,
-        package_rust_version,
-        dependencies: merged.into_values().collect(),
-    })
 }
 
 fn evaluate_confidence(
@@ -235,7 +94,7 @@ impl McpServer {
         let mut unresolved_count = 0usize;
         let mut no_requirement_count = 0usize;
 
-        for dep in parsed_manifest.dependencies {
+        for dep in &parsed_manifest.dependencies {
             let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &dep.name)
                 .await
                 .map_err(|e| format!("dependency lookup failed for {}: {e}", dep.name))?;
@@ -253,10 +112,10 @@ impl McpServer {
                     status_markers: vec!["not_indexed".to_string()],
                 });
                 issues.push(DependencyAuditIssue {
-                    dependency_name: dep.name,
+                    dependency_name: dep.name.clone(),
                     category: DependencyAuditIssueCategory::Unresolved,
                     severity: DependencyAuditSeverity::Medium,
-                    message: "dependency not found in local index; run index_sync_crates or \
+                    message: "dependency not found in local index; run index_crates or \
                               index_refresh"
                         .to_string(),
                     selected_version: None,
@@ -403,8 +262,8 @@ impl McpServer {
             }
 
             dependencies.push(DependencyAuditDependency {
-                dependency_name: dep.name,
-                requirement: dep.requirement,
+                dependency_name: dep.name.clone(),
+                requirement: dep.requirement.clone(),
                 selected_version: selected
                     .as_ref()
                     .map(|row| row.version.clone()),
@@ -468,7 +327,8 @@ impl McpServer {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_manifest, parse_rust_version_floor, parse_semver_for_matching};
+    use super::{parse_rust_version_floor, parse_semver_for_matching};
+    use crate::mcp::tools::dependency::manifest::parse_manifest;
 
     #[test]
     fn parse_manifest_collects_root_and_target_dependencies() {

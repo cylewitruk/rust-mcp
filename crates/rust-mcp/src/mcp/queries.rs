@@ -103,7 +103,7 @@ impl McpServer {
             .map_err(|e| format!("latest version lookup failed for {crate_name}: {e}"))?
             .ok_or_else(|| {
                 format!(
-                    "crate '{}' has no indexed versions yet; run index_sync_crates first",
+                    "crate '{}' has no indexed versions yet; run index_crates first",
                     crate_row.name
                 )
             })?;
@@ -123,7 +123,7 @@ impl McpServer {
                 .map_err(|e| format!("latest version relookup failed for {crate_name}: {e}"))?
                 .ok_or_else(|| {
                     format!(
-                        "crate '{}' has no indexed versions yet; run index_sync_crates first",
+                        "crate '{}' has no indexed versions yet; run index_crates first",
                         crate_row.name
                     )
                 })?

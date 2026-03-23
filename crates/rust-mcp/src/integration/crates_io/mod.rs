@@ -14,23 +14,6 @@ use crate::state::{AppState, OutboundSource};
 const README_MAX_CHARS: usize = 1_000_000;
 
 #[derive(Debug, Deserialize)]
-pub struct CratesIoSearchResponse {
-    pub crates: Vec<CratesIoSearchCrate>,
-    pub meta: CratesIoSearchMeta,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CratesIoSearchMeta {
-    pub total: u64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CratesIoSearchCrate {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct CratesIoCrateDetailResponse {
     #[serde(rename = "crate")]
     pub krate: CratesIoCrateRecord,
@@ -154,14 +137,6 @@ impl<'a> CratesIoClient<'a> {
             .json::<T>()
             .await
             .map_err(|e| format!("failed to decode JSON response from {url}: {e}"))
-    }
-
-    pub async fn search_crates(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<CratesIoSearchResponse, String> {
-        self.get_json("api/v1/crates", params)
-            .await
     }
 
     pub async fn fetch_crate_detail(

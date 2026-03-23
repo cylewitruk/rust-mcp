@@ -34,7 +34,7 @@ crates/rust-mcp/
       query_cache.rs            # short-lived result memoization
       models.rs                 # shared model types
       indexing/
-        handlers.rs             # index_sync_crates / index_status / index_refresh
+        handlers.rs             # index_crates / index_status / index_refresh
         worker.rs               # durable refresh worker loop
         freshness.rs
         local_cache.rs
@@ -69,7 +69,7 @@ crates/rust-mcp/
 
 ## MCP Tool Inventory (Current)
 
-- Core/index: `ping`, `schema_get`, `index_sync_crates`, `index_status`, `index_refresh`
+- Core/index: `ping`, `schema_get`, `index_crates`, `index_status`, `index_refresh`
 - Crate: `crate_search`, `crate_intel`, `crate_features`, `crate_api_diff`, `crate_api`, `crate_type_info`, `crate_trait_impls`, `crate_re_exports`, `crate_import_path`, `crate_error_types`, `crate_derive_macros`, `crate_compare`, `crate_compatibility`, `crate_compatibility_matrix`, `crate_migration_path`, `crate_license_check`, `crate_alternatives`, `crate_versions`, `crate_graph`, `crate_hotspots`, `crate_usage_patterns`
 - Dependency: `dependency_audit`, `dependency_resolve`, `dependency_feature_impact`
 - Source/symbol/docs: `source_search`, `source_read`, `source_context`, `symbol_search`, `docs_search`

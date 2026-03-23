@@ -8,8 +8,8 @@ pub use rust_mcp_types::types::dependency::{
 };
 use semver::{Version, VersionReq};
 use serde_json::Value as JsonValue;
-use toml::Value;
 
+use super::manifest::parse_manifest;
 use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
@@ -36,92 +36,18 @@ fn parse_semver_for_matching(version: &str) -> Option<Version> {
         .or_else(|| Version::parse(version.trim_start_matches('v')).ok())
 }
 
-fn parse_requirement(value: &Value) -> Option<String> {
-    if let Some(req) = value.as_str() {
-        let trimmed = req.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-
-    let table = value.as_table()?;
-    let version = table
-        .get("version")?
-        .as_str()?;
-    let trimmed = version.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-}
-
 fn collect_manifest_dependencies(
     manifest: &str,
 ) -> Result<Vec<DependencyResolveInputDependency>, String> {
-    let parsed =
-        toml::from_str::<Value>(manifest).map_err(|e| format!("invalid Cargo.toml: {e}"))?;
-
-    let mut out = Vec::<DependencyResolveInputDependency>::new();
-    let Some(root) = parsed.as_table() else {
-        return Ok(out);
-    };
-
-    let mut add_deps_from = |table: Option<&toml::map::Map<String, Value>>| {
-        let Some(table) = table else {
-            return;
-        };
-
-        for (name, spec) in table {
-            let trimmed_name = name.trim();
-            if trimmed_name.is_empty() {
-                continue;
-            }
-
-            out.push(DependencyResolveInputDependency {
-                name: trimmed_name.to_string(),
-                version_req: parse_requirement(spec),
-            });
-        }
-    };
-
-    add_deps_from(
-        root.get("dependencies")
-            .and_then(Value::as_table),
-    );
-    add_deps_from(
-        root.get("dev-dependencies")
-            .and_then(Value::as_table),
-    );
-    add_deps_from(
-        root.get("build-dependencies")
-            .and_then(Value::as_table),
-    );
-
-    if let Some(targets) = root
-        .get("target")
-        .and_then(Value::as_table)
-    {
-        for target_value in targets.values() {
-            let Some(target_table) = target_value.as_table() else {
-                continue;
-            };
-
-            add_deps_from(
-                target_table
-                    .get("dependencies")
-                    .and_then(Value::as_table),
-            );
-            add_deps_from(
-                target_table
-                    .get("dev-dependencies")
-                    .and_then(Value::as_table),
-            );
-            add_deps_from(
-                target_table
-                    .get("build-dependencies")
-                    .and_then(Value::as_table),
-            );
-        }
-    }
-
-    Ok(out)
+    let parsed = parse_manifest(manifest)?;
+    Ok(parsed
+        .dependencies
+        .into_iter()
+        .map(|dep| DependencyResolveInputDependency {
+            name: dep.name,
+            version_req: dep.requirement,
+        })
+        .collect())
 }
 
 fn normalize_inputs(
@@ -305,8 +231,7 @@ impl McpServer {
                 conflicts.push(DependencyResolveConflict {
                     dependency_name: dependency.name.clone(),
                     requirement: dependency.version_req.clone(),
-                    message: "dependency is not present in local index; run index_sync_crates \
-                              first"
+                    message: "dependency is not present in local index; run index_crates first"
                         .to_string(),
                 });
                 continue;

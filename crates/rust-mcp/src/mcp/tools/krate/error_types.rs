@@ -388,7 +388,7 @@ impl McpServer {
             .clone();
 
         let suggested_next_tools = if error_types.is_empty() {
-            vec!["crate_api".to_string(), "crate_type_info".to_string()]
+            vec!["index_crates".to_string(), "crate_api".to_string(), "crate_type_info".to_string()]
         } else {
             vec![
                 "crate_type_info".to_string(),

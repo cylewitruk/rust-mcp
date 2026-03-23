@@ -265,7 +265,7 @@ async fn rust_mcp_container_supports_tools_list_after_initialize() {
     let expected_names = [
         "ping",
         "schema_get",
-        "index_sync_crates",
+        "index_crates",
         "index_status",
         "index_refresh",
         "crate_search",
