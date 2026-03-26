@@ -54,7 +54,7 @@ pub async fn mark_versions_locally_present(
              END
          FROM crates c
          WHERE c.id = cv.crate_id
-           AND c.name = $1
+           AND c.name_lower = LOWER($1)
            AND (cv.locally_present IS DISTINCT FROM (cv.version = ANY($2::TEXT[]))
                 OR (cv.version = ANY($2::TEXT[]) AND cv.source_origin <> 1))",
     )
@@ -164,7 +164,7 @@ pub async fn fetch_local_cache_version_keys(
             cv.id AS crate_version_id
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
-         WHERE ($1::TEXT IS NULL OR c.name = $1)
+         WHERE ($1::TEXT IS NULL OR c.name_lower = LOWER($1))
            AND ($2::BOOL IS FALSE OR cv.locally_present = TRUE)",
     )
     .bind(crate_name)
@@ -198,7 +198,7 @@ pub async fn fetch_rustdoc_sync_candidates(
             cv.id AS crate_version_id
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
-         WHERE ($1::TEXT IS NULL OR c.name = $1)
+         WHERE ($1::TEXT IS NULL OR c.name_lower = LOWER($1))
            AND ($4::BOOL IS FALSE OR cv.locally_present = TRUE)
            AND ($5::BOOL IS FALSE OR (
                cv.rustdoc_enriched_at IS NULL
@@ -810,7 +810,7 @@ pub async fn enqueue_or_get_refresh_job_id(
     if let Some(existing_id) = sqlx::query_scalar::<_, i64>(
         "SELECT id
          FROM refresh_jobs
-         WHERE crate_name = $1 AND scope = $2 AND status IN ('pending', 'running')
+         WHERE crate_name_lower = LOWER($1) AND scope = $2 AND status IN ('pending', 'running')
          ORDER BY id ASC
          LIMIT 1",
     )
@@ -1226,7 +1226,7 @@ pub async fn mark_crate_refresh_error(
         "UPDATE crates
          SET last_refresh_error = $1,
              updated_at = NOW()
-         WHERE name = $2",
+         WHERE name_lower = LOWER($2)",
     )
     .bind(error_message)
     .bind(crate_name)

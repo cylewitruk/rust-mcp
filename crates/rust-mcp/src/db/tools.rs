@@ -223,9 +223,9 @@ pub async fn search_docs_pages(
     if let Some(crate_filter) = params.crate_name {
         qb.push(if has_where { "AND " } else { "WHERE " });
         has_where = true;
-        qb.push("c.name = ");
+        qb.push("c.name_lower = LOWER(");
         qb.push_bind(crate_filter);
-        qb.push(' ');
+        qb.push(") ");
     }
     if let Some(version_filter) = params.version {
         qb.push(if has_where { "AND " } else { "WHERE " });
@@ -278,7 +278,7 @@ pub async fn fetch_crate_core_by_name(
             keywords,
             updated_at::TEXT AS updated_at
          FROM crates
-         WHERE name = $1",
+         WHERE name_lower = LOWER($1)",
     )
     .bind(crate_name)
     .fetch_optional(db)
@@ -501,7 +501,7 @@ pub async fn fetch_source_read_for_crate_version_path(
          FROM source_files sf
          JOIN crate_versions cv ON cv.id = sf.crate_version_id
          JOIN crates c ON c.id = cv.crate_id
-         WHERE c.name = $1 AND cv.id = $2 AND sf.path = $3
+         WHERE c.name_lower = LOWER($1) AND cv.id = $2 AND sf.path = $3
          LIMIT 1",
     )
     .bind(crate_name)
@@ -525,7 +525,7 @@ pub async fn fetch_source_read_latest_for_crate_path(
          FROM source_files sf
          JOIN crate_versions cv ON cv.id = sf.crate_version_id
          JOIN crates c ON c.id = cv.crate_id
-         WHERE c.name = $1 AND sf.path = $2
+         WHERE c.name_lower = LOWER($1) AND sf.path = $2
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT 1",
     )
@@ -1304,10 +1304,12 @@ pub async fn fetch_dependency_crate_by_name(
     db: &PgPool,
     crate_name: &str,
 ) -> Result<Option<DependencyCrateRow>, sqlx::Error> {
-    sqlx::query_as::<_, DependencyCrateRow>("SELECT id, name FROM crates WHERE name = $1 LIMIT 1")
-        .bind(crate_name)
-        .fetch_optional(db)
-        .await
+    sqlx::query_as::<_, DependencyCrateRow>(
+        "SELECT id, name FROM crates WHERE name_lower = LOWER($1) LIMIT 1",
+    )
+    .bind(crate_name)
+    .fetch_optional(db)
+    .await
 }
 
 /// Lists indexed versions for a crate id in newest-first order.
@@ -1646,9 +1648,9 @@ pub async fn list_searchable_crate_versions(
 
     let mut has_where = false;
     if let Some(cn) = crate_name {
-        qb.push("WHERE c.name = ");
+        qb.push("WHERE c.name_lower = LOWER(");
         qb.push_bind(cn);
-        qb.push(' ');
+        qb.push(") ");
         has_where = true;
     }
     if let Some(v) = version {
@@ -1830,9 +1832,9 @@ fn push_symbol_search_where_clause<'a>(
     if let Some(crate_filter) = filters.crate_name {
         qb.push(if has_where { "AND " } else { "WHERE " });
         has_where = true;
-        qb.push("c.name = ");
+        qb.push("c.name_lower = LOWER(");
         qb.push_bind(crate_filter);
-        qb.push(' ');
+        qb.push(") ");
     }
 
     if let Some(version_filter) = filters.version {
