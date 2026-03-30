@@ -9,7 +9,7 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    build_crate_freshness_sources, normalize_optional, normalize_required, sync_page,
+    build_crate_freshness_sources, doc_summary, normalize_optional, normalize_required, sync_page,
 };
 
 impl McpServer {
@@ -21,6 +21,9 @@ impl McpServer {
     ) -> Result<Json<CrateDeprecatedResponse>, String> {
         let crate_name = normalize_required(request.crate_name, "crate_name")?;
         let requested_version = normalize_optional(request.version);
+        let include_docs = request
+            .include_docs
+            .unwrap_or(false);
         let page = sync_page(request.page);
         let requested_limit = request
             .limit
@@ -68,6 +71,13 @@ impl McpServer {
                 deprecated_since: row.deprecated_since,
                 deprecated_note: row.deprecated_note,
                 canonical_path: row.canonical_path,
+                docs: if include_docs {
+                    row.docs
+                        .as_deref()
+                        .map(|d| doc_summary(d).to_string())
+                } else {
+                    None
+                },
                 index_source: row.index_source,
             })
             .collect::<Vec<_>>();

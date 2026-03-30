@@ -19,8 +19,8 @@ use crate::mcp::models::{
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    CursorToken, build_crate_freshness_sources, decode_cursor, encode_cursor, normalize_optional,
-    normalize_required, resolve_pagination, sync_page, trait_impls_limit,
+    CursorToken, build_crate_freshness_sources, decode_cursor, doc_summary, encode_cursor,
+    normalize_optional, normalize_required, resolve_pagination, sync_page, trait_impls_limit,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -216,6 +216,9 @@ impl McpServer {
         let requested_version = normalize_optional(request.version);
         let trait_name = normalize_optional(request.trait_name);
         let type_name = normalize_optional(request.type_name);
+        let include_docs = request
+            .include_docs
+            .unwrap_or(false);
         let cursor = normalize_optional(request.cursor);
         let page = sync_page(request.page);
         let requested_limit = trait_impls_limit(request.limit);
@@ -298,6 +301,13 @@ impl McpServer {
                 generic_params: parse_generic_param_rendered(&row.generics),
                 where_clauses: parse_string_list(&row.where_clauses),
                 methods: parse_impl_methods(&row.methods),
+                docs: if include_docs {
+                    row.docs
+                        .as_deref()
+                        .map(|d| doc_summary(d).to_string())
+                } else {
+                    None
+                },
                 source_path: row.source_path,
                 start_line: row.start_line,
                 end_line: row.end_line,

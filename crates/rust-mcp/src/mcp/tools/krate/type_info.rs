@@ -235,6 +235,9 @@ impl McpServer {
         let include_trait_impls = request
             .include_trait_impls
             .unwrap_or(true);
+        let include_docs = request
+            .include_docs
+            .unwrap_or(false);
 
         let ctx = self
             .fetch_crate_context(&crate_name, &tcx)
@@ -281,6 +284,7 @@ impl McpServer {
             deprecated_note: row.deprecated_note,
             is_non_exhaustive: row.is_non_exhaustive,
             auto_traits: parse_string_list(&row.auto_traits),
+            docs: if include_docs { row.docs } else { None },
             source_path: row.source_path,
             start_line: row.start_line,
             end_line: row.end_line,

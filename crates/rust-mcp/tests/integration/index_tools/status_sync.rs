@@ -1,4 +1,4 @@
-use super::{Value, common, json, mock_index_sync_context};
+use super::{Value, common, json, mock_index_sync_context, run_refresh_worker_for_tests};
 
 #[tokio::test]
 async fn index_status_reports_seeded_coverage_counts() {
@@ -88,6 +88,10 @@ async fn index_crates_writes_versions_features_and_dependencies_from_mock_api() 
     let context = mock_index_sync_context()
         .await
         .expect("failed to build mock index sync context");
+
+    // Spawn the refresh worker so enrichment jobs enqueued by index_crates
+    // are processed promptly instead of hitting the 45 s on-demand timeout.
+    let _worker = tokio::spawn(run_refresh_worker_for_tests(context.state.clone()));
 
     let response = context
         .mcp

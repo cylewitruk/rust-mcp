@@ -48,6 +48,13 @@ impl PostgresTestContainer {
         let connection_string =
             format!("postgres://postgres:postgres@{host}:{port}/postgres?sslmode=disable");
 
+        // The container may accept TCP connections before Postgres is fully
+        // ready to speak the wire protocol. Issue a trivial query in a retry
+        // loop so callers never see spurious protocol-level errors.
+        wait_until_pg_ready(&connection_string, 20, Duration::from_millis(500))
+            .await
+            .context("Postgres container did not become query-ready in time")?;
+
         Ok(Self { container, connection_string })
     }
 
@@ -88,4 +95,42 @@ async fn retry_port_lookup(
         }
     }
     Err(last_err.unwrap())
+}
+
+async fn wait_until_pg_ready(
+    connection_string: &str,
+    max_attempts: u32,
+    delay: Duration,
+) -> Result<()> {
+    use sqlx::postgres::PgPoolOptions;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(connection_string)
+        .await
+        .context("initial PG pool connect failed")?;
+
+    for attempt in 1..=max_attempts {
+        match sqlx::query_scalar::<_, i32>("SELECT 1")
+            .fetch_one(&pool)
+            .await
+        {
+            Ok(_) => {
+                pool.close().await;
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!(
+                    "[testcontainers] PG readiness probe attempt {attempt}/{max_attempts} failed: \
+                     {err}"
+                );
+                if attempt < max_attempts {
+                    sleep(delay).await;
+                }
+            }
+        }
+    }
+    pool.close().await;
+    anyhow::bail!("Postgres not query-ready after {max_attempts} attempts");
 }

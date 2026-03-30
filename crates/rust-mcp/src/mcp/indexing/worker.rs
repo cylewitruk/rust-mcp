@@ -9,6 +9,7 @@ use crate::db::indexing::{
     fetch_refresh_job_scope_pending_counts, mark_crate_refresh_error,
     mark_refresh_job_failed_or_requeued, mark_refresh_job_finished, mark_versions_locally_present,
 };
+use crate::db::tools::delete_query_cache_for_crate;
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
 use crate::mcp::indexing::discovery::collect_local_versions_for_crate;
 use crate::mcp::indexing::handlers::SyncCrateOutcome;
@@ -236,6 +237,29 @@ pub async fn run_refresh_worker(state: AppState) {
                 state
                     .indexing_coordinator
                     .signal_completion(job.id, JobOutcome::Completed);
+
+                // Invalidate cached query results for this crate so that
+                // subsequent tool calls reflect the freshly-indexed data.
+                let crate_for_invalidation = optional_job_crate_name(&job.crate_name, None);
+                if let Some(ref name) = crate_for_invalidation {
+                    match delete_query_cache_for_crate(&state.db, name).await {
+                        Ok(n) if n > 0 => {
+                            info!(
+                                crate_name = %name,
+                                invalidated = n,
+                                "invalidated stale query cache entries"
+                            );
+                        }
+                        Err(error) => {
+                            warn!(
+                                crate_name = %name,
+                                %error,
+                                "failed to invalidate query cache"
+                            );
+                        }
+                        _ => {}
+                    }
+                }
 
                 // After a successful crate-metadata job, mark which versions
                 // are locally present in the cargo registry, then proactively

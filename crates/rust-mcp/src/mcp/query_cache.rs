@@ -34,4 +34,11 @@ impl McpServer {
 
         Ok(())
     }
+
+    /// Invalidates all cached query results for the given crate name.
+    pub async fn query_cache_invalidate_crate(&self, crate_name: &str) -> Result<u64, String> {
+        tools::delete_query_cache_for_crate(&self.state.db, crate_name)
+            .await
+            .map_err(|e| format!("query cache invalidation failed for {crate_name}: {e}"))
+    }
 }

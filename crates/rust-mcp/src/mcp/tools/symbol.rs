@@ -8,7 +8,7 @@ use crate::db::tools;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    CursorToken, decode_cursor, encode_cursor, normalize_optional, normalize_required,
+    CursorToken, decode_cursor, doc_summary, encode_cursor, normalize_optional, normalize_required,
     resolve_pagination, symbol_search_limit, sync_page,
 };
 
@@ -65,6 +65,9 @@ impl McpServer {
             .unwrap_or(false);
         let collapse_by_canonical = request
             .collapse_by_canonical
+            .unwrap_or(false);
+        let include_docs = request
+            .include_docs
             .unwrap_or(false);
         let cursor = normalize_optional(request.cursor);
         let page = sync_page(request.page);
@@ -147,6 +150,13 @@ impl McpServer {
                 kind: row.kind,
                 signature: row.signature,
                 visibility: row.visibility,
+                docs: if include_docs {
+                    row.docs
+                        .as_deref()
+                        .map(|d| doc_summary(d).to_string())
+                } else {
+                    None
+                },
                 start_line: row.start_line,
                 end_line: row.end_line,
                 index_source: row.index_source,
@@ -387,6 +397,7 @@ mod tests {
                 kind: Some("trait".to_string()),
                 include_all_versions: Some(true),
                 collapse_by_canonical: Some(false),
+                include_docs: None,
                 cursor: None,
                 page: Some(1),
                 limit: Some(50),
@@ -406,6 +417,7 @@ mod tests {
                 kind: Some("trait".to_string()),
                 include_all_versions: Some(true),
                 collapse_by_canonical: Some(true),
+                include_docs: None,
                 cursor: None,
                 page: Some(1),
                 limit: Some(50),

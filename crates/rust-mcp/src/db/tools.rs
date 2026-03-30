@@ -31,7 +31,8 @@ pub async fn has_source_files_for_version(
     crate_version_id: i64,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM source_files WHERE crate_version_id = $1)",
+        "SELECT EXISTS(SELECT 1 FROM source_files WHERE crate_version_id = $1 AND path NOT LIKE \
+         'rustdoc-json/%')",
     )
     .bind(crate_version_id)
     .fetch_one(db)
@@ -86,6 +87,22 @@ pub async fn insert_query_cache_event(
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// Deletes all query cache entries whose key contains the given crate name.
+///
+/// Cache keys are serialized JSON structs containing a `"crate_name"` field.
+/// This performs a pattern match to remove all entries for the specified crate.
+pub async fn delete_query_cache_for_crate(
+    db: &PgPool,
+    crate_name: &str,
+) -> Result<u64, sqlx::Error> {
+    let pattern = format!("%\"crate_name\":\"{}\"%", crate_name);
+    let result = sqlx::query("DELETE FROM query_cache WHERE key LIKE $1")
+        .bind(&pattern)
+        .execute(db)
+        .await?;
+    Ok(result.rows_affected())
 }
 
 /// Upserts a query cache entry with the requested TTL.
@@ -581,6 +598,7 @@ pub async fn list_public_api_symbols_for_version(
                 s.kind,
                 s.signature,
                 s.visibility,
+                s.docs,
                 sf.path AS source_path,
                 s.start_line,
                 s.end_line,
@@ -616,6 +634,7 @@ pub async fn list_public_api_symbols_for_version(
                 s.kind,
                 s.signature,
                 s.visibility,
+                s.docs,
                 sf.path AS source_path,
                 s.start_line,
                 s.end_line,
@@ -1492,6 +1511,7 @@ pub async fn list_crate_impl_rows_for_filters(
             ci.blanket_type,
             COALESCE(NULLIF(ci.generics, 'null'::jsonb), '[]'::jsonb) AS generics,
             COALESCE(NULLIF(ci.where_clauses, 'null'::jsonb), '[]'::jsonb) AS where_clauses,
+            ci.docs,
             sf.path AS source_path,
             ci.start_line,
             ci.end_line,
@@ -1565,6 +1585,7 @@ pub async fn fetch_crate_type_info_row(
             ct.deprecated_note,
             ct.is_non_exhaustive,
             COALESCE(NULLIF(ct.auto_traits, 'null'::jsonb), '[]'::jsonb) AS auto_traits,
+            ct.docs,
             sf.path AS source_path,
             ct.start_line,
             ct.end_line,
@@ -1916,6 +1937,7 @@ pub async fn search_symbol_hits(
             s.kind,
             s.signature,
             s.visibility,
+            s.docs,
             s.start_line,
             s.end_line,
             s.index_source,
@@ -1934,6 +1956,7 @@ pub async fn search_symbol_hits(
             s.kind,
             s.signature,
             s.visibility,
+            s.docs,
             s.start_line,
             s.end_line,
             s.index_source,
@@ -2001,6 +2024,7 @@ pub async fn list_deprecated_items(
              s.deprecated_since,
              s.deprecated_note,
              s.canonical_path,
+             s.docs,
              s.index_source
          FROM symbols s
          WHERE s.crate_version_id = $1
@@ -2012,6 +2036,7 @@ pub async fn list_deprecated_items(
              ct.deprecated_since,
              ct.deprecated_note,
              ct.canonical_path,
+             ct.docs,
              ct.index_source
          FROM crate_types ct
          WHERE ct.crate_version_id = $1

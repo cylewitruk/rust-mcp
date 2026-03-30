@@ -9,6 +9,7 @@ mod dependency_tools;
 mod docs_tools;
 mod index_tools;
 mod postgres;
+mod query_cache;
 mod session;
 mod source_tools;
 mod symbol_tools;

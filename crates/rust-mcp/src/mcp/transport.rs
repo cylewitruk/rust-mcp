@@ -15,10 +15,8 @@ pub fn streamable_http_service(
     config: &Config,
 ) -> StreamableHttpService<McpServer, DbSessionManager> {
     let service_state = state.clone();
-    let mut http_config = StreamableHttpServerConfig {
-        stateful_mode: true,
-        ..Default::default()
-    };
+    let mut http_config = StreamableHttpServerConfig::default();
+    http_config.stateful_mode = true;
 
     if config.mcp_sse_keep_alive_secs == 0 {
         http_config.sse_keep_alive = None;

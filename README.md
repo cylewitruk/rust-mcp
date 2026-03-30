@@ -12,6 +12,7 @@ Local-first Rust dependency intelligence [MCP](https://modelcontextprotocol.io/)
 - **On-demand indexing** of any published crate via `index_crates`
 - **Security advisories** from OSV cross-referenced in `crate_intel` and `dependency_audit`
 - **Streamable HTTP transport** at `/mcp` with an optional stdio adapter for clients that need it
+- **385+ tests** including unit, integration/e2e & live tests
 
 ## Quick Start
 

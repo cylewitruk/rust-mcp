@@ -199,6 +199,15 @@ pub fn feature_impact_heavy_threshold(value: Option<u32>) -> u32 {
         .clamp(1, 100)
 }
 
+/// Returns the first paragraph of a doc string (everything before the first
+/// blank line). If the input has no blank line the entire string is returned.
+/// The result is trimmed of leading/trailing whitespace.
+pub fn doc_summary(docs: &str) -> &str {
+    docs.split_once("\n\n")
+        .map_or(docs, |(first, _)| first)
+        .trim()
+}
+
 /// Clamps a readme character limit (default 25000, range 500..=200000).
 pub fn readme_limit(value: Option<u32>) -> usize {
     value

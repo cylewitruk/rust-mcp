@@ -651,6 +651,8 @@ pub mod symbol {
         pub include_all_versions: Option<bool>,
         /// Collapse duplicate paths.
         pub collapse_by_canonical: Option<bool>,
+        /// Include doc comments (first paragraph summary) in each hit.
+        pub include_docs: Option<bool>,
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
@@ -720,6 +722,9 @@ pub mod symbol {
         pub signature: Option<String>,
         /// Optional visibility label.
         pub visibility: Option<String>,
+        /// Doc comment (first paragraph summary when `include_docs` is true).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub docs: Option<String>,
         /// Source start line.
         pub start_line: i32,
         /// Source end line.
@@ -1536,6 +1541,8 @@ pub mod krate {
         /// Glob filter for path or symbol name (e.g. `*connection*`).
         pub path_glob: Option<String>,
         pub kinds: Option<Vec<String>>,
+        /// Include doc comments (first paragraph summary) for each symbol.
+        pub include_docs: Option<bool>,
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
@@ -1582,6 +1589,9 @@ pub mod krate {
         pub kind: String,
         pub signature: Option<String>,
         pub visibility: Option<String>,
+        /// Doc comment (first paragraph summary when `include_docs` is true).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub docs: Option<String>,
         pub source_path: String,
         pub start_line: i32,
         pub end_line: i32,
@@ -2335,6 +2345,8 @@ pub mod krate {
         pub version: Option<String>,
         pub trait_name: Option<String>,
         pub type_name: Option<String>,
+        /// Include doc comments (first paragraph summary) for each impl.
+        pub include_docs: Option<bool>,
         /// Paging cursor.
         pub cursor: Option<String>,
         /// Page (1-based).
@@ -2390,6 +2402,9 @@ pub mod krate {
         pub generic_params: Vec<String>,
         pub where_clauses: Vec<String>,
         pub methods: Vec<CrateImplMethod>,
+        /// Doc comment (first paragraph summary when `include_docs` is true).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub docs: Option<String>,
         pub source_path: String,
         pub start_line: i32,
         pub end_line: i32,
@@ -2403,6 +2418,8 @@ pub mod krate {
         pub version: Option<String>,
         pub include_methods: Option<bool>,
         pub include_trait_impls: Option<bool>,
+        /// Include full doc comments for the type definition.
+        pub include_docs: Option<bool>,
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -2444,6 +2461,9 @@ pub mod krate {
         pub deprecated_note: Option<String>,
         pub is_non_exhaustive: bool,
         pub auto_traits: Vec<String>,
+        /// Full doc comment (when `include_docs` is true).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub docs: Option<String>,
         pub source_path: String,
         pub start_line: i32,
         pub end_line: i32,
@@ -2494,6 +2514,8 @@ pub mod krate {
         pub crate_name: String,
         /// Version (default: latest).
         pub version: Option<String>,
+        /// Include doc comments (first paragraph summary) for each item.
+        pub include_docs: Option<bool>,
         /// Max results (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
@@ -2552,6 +2574,9 @@ pub mod krate {
         pub deprecated_note: Option<String>,
         /// Canonical import path.
         pub canonical_path: Option<String>,
+        /// Doc comment (first paragraph summary when `include_docs` is true).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub docs: Option<String>,
         /// Index source.
         pub index_source: String,
     }

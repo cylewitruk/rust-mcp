@@ -37,17 +37,17 @@ test-live:
       -p rust-mcp \
       --features live-tests \
       --test live \
-      --no-fail-fast
+      --no-fail-fast \
+      --test-threads 1
 
 test-e2e:
-  docker build -t rust-mcp:test-e2e -f Dockerfile .
+  docker build -t rust-mcp:test-e2e --build-arg PROFILE=dev -f Dockerfile .
   RUST_MCP_TEST_IMAGE_TAG=test-e2e \
     cargo --locked nextest run \
       -p rust-mcp \
       --test e2e_http \
       --no-fail-fast \
-      --features e2e-tests \
-      --test-threads 1
+      --features e2e-tests
 
 run:
   cargo --locked run -p rust-mcp

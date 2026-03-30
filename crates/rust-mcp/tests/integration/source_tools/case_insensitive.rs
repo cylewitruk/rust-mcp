@@ -23,17 +23,9 @@ async fn seed_mixed_case_crate(ctx: &common::SeededMcpContext) {
     .await
     .expect("seed source file");
 
-    seed_symbol(
-        &ctx.state.db,
-        seeded.version_id,
-        sf_id,
-        "new",
-        "function",
-        1,
-        1,
-    )
-    .await
-    .expect("seed symbol");
+    seed_symbol(&ctx.state.db, seeded.version_id, sf_id, "new", "function", 1, 1)
+        .await
+        .expect("seed symbol");
 
     write_fixture_source_to_registry(
         &ctx.registry_dir,

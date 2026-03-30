@@ -256,6 +256,8 @@ pub struct SymbolSearchRow {
     pub signature: Option<String>,
     /// Optional rendered visibility marker.
     pub visibility: Option<String>,
+    /// Optional doc comment from rustdoc.
+    pub docs: Option<String>,
     /// 1-based source start line.
     pub start_line: i32,
     /// 1-based source end line.
@@ -365,6 +367,8 @@ pub struct CrateTypeInfoRow {
     pub is_non_exhaustive: bool,
     /// Auto traits implemented by the type.
     pub auto_traits: Json<Vec<String>>,
+    /// Optional doc comment from rustdoc.
+    pub docs: Option<String>,
     /// Source path where the type was indexed from.
     pub source_path: String,
     /// 1-based start line in the source path.
@@ -402,6 +406,8 @@ pub struct CrateImplLookupRow {
     pub generics: Json<Vec<GenericParamEntry>>,
     /// Rendered where-clause predicates for the impl.
     pub where_clauses: Json<Vec<String>>,
+    /// Optional doc comment from rustdoc.
+    pub docs: Option<String>,
     /// Source path where the impl was indexed from.
     pub source_path: String,
     /// 1-based start line in the source path.
@@ -862,6 +868,7 @@ pub struct ApiSurfaceRow {
     pub kind: String,
     pub signature: Option<String>,
     pub visibility: Option<String>,
+    pub docs: Option<String>,
     pub source_path: String,
     pub start_line: i32,
     pub end_line: i32,
@@ -1118,6 +1125,7 @@ pub struct DeprecatedItemRow {
     pub deprecated_since: Option<String>,
     pub deprecated_note: Option<String>,
     pub canonical_path: Option<String>,
+    pub docs: Option<String>,
     pub index_source: String,
 }
 

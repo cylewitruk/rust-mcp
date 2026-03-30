@@ -9,8 +9,9 @@ use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
 use crate::mcp::utils::{
-    CursorToken, build_crate_freshness_sources, crate_api_limit, decode_cursor, encode_cursor,
-    normalize_optional, normalize_required, path_glob_to_like, resolve_pagination, sync_page,
+    CursorToken, build_crate_freshness_sources, crate_api_limit, decode_cursor, doc_summary,
+    encode_cursor, normalize_optional, normalize_required, path_glob_to_like, resolve_pagination,
+    sync_page,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,6 +79,9 @@ impl McpServer {
         let requested_version = normalize_optional(request.version);
         let path_glob = normalize_optional(request.path_glob);
         let kinds = allowed_kind_filters(normalize_kind_filters(request.kinds));
+        let include_docs = request
+            .include_docs
+            .unwrap_or(false);
         let cursor = normalize_optional(request.cursor);
         let page = sync_page(request.page);
         let requested_limit = crate_api_limit(request.limit);
@@ -163,6 +167,13 @@ impl McpServer {
                 kind: row.kind,
                 signature: row.signature,
                 visibility: row.visibility,
+                docs: if include_docs {
+                    row.docs
+                        .as_deref()
+                        .map(|d| doc_summary(d).to_string())
+                } else {
+                    None
+                },
                 source_path: row.source_path,
                 start_line: row.start_line,
                 end_line: row.end_line,

@@ -1,6 +1,8 @@
 ARG RUST_VERSION=1.93
+ARG PROFILE=release
 FROM rust:${RUST_VERSION}-alpine AS build
 
+ARG PROFILE
 ENV CARGO_TARGET_DIR=/app/target
 ENV CARGO_INCREMENTAL=0
 ENV RUSTFLAGS="-C strip=symbols"
@@ -32,8 +34,9 @@ COPY ./migrations ./migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --locked && \
-    install -D /app/target/release/rust-mcp /out/rust-mcp
+    OUT_DIR=$([ "$PROFILE" = "dev" ] && echo "debug" || echo "$PROFILE") && \
+    cargo build --profile "$PROFILE" --locked && \
+    install -D /app/target/"$OUT_DIR"/rust-mcp /out/rust-mcp
 
 # Final runtime image
 FROM alpine:3.23 AS runtime

@@ -269,8 +269,8 @@ async fn live_source_read_downloads_and_indexes_on_demand() -> Result<()> {
                 "end_line": 10
             }),
         )
-        .await
-        .context("source_read for itoa src/lib.rs failed")?;
+        .await;
+    let read_response = read_response.context("source_read for itoa src/lib.rs failed")?;
     let read_payload = common::structured_content(&read_response);
 
     assert_eq!(
