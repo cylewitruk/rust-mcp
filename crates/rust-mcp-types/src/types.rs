@@ -155,9 +155,10 @@ pub mod index {
     /// Request payload for `index_crates`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexCratesRequest {
-        /// Crates to index.
+        /// Crates to index, e.g. `[{"name": "serde"}, {"name": "tokio",
+        /// "version": "1.40.0"}]`.
         pub crates: Vec<IndexCrateEntry>,
-        /// Also fetch dependency metadata.
+        /// Also fetch and index dependency metadata (default: false).
         pub include_dependencies: Option<bool>,
     }
 
@@ -214,19 +215,20 @@ pub mod index {
     /// Request payload for `index_refresh`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct IndexRefreshRequest {
-        /// Refresh scope.
+        /// Refresh scope: `"crate"`, `"all"`, `"security"`, `"docs"`,
+        /// `"local_cache"`, or `"rustdoc_json"` (default: `"all"`).
         pub scope: Option<IndexRefreshScope>,
-        /// Filter by crate.
+        /// Filter refresh to a specific crate, e.g. `"serde"`.
         pub crate_name: Option<String>,
-        /// Search query for candidates.
+        /// Search query to select candidate crates for refresh.
         pub query: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Page size.
+        /// Page size for candidate selection (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub per_page: Option<u32>,
-        /// Also sync dependency metadata.
+        /// Also sync dependency metadata (default: false).
         pub include_dependencies: Option<bool>,
     }
 
@@ -422,22 +424,23 @@ pub mod source {
     /// Request payload for `source_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceSearchRequest {
-        /// Text or regex pattern.
+        /// Text or regex pattern to search for, e.g. `"async fn connect"`.
         pub query: String,
-        /// Filter by crate.
+        /// Filter by crate name, e.g. `"tokio"`.
         pub crate_name: Option<String>,
-        /// Filter by version.
+        /// Filter by semver version, e.g. `"1.40.0"`.
         pub version: Option<String>,
-        /// Path glob filter.
+        /// Path glob filter, e.g. `"src/net/*"`.
         pub path_glob: Option<String>,
-        /// Matching mode.
+        /// Matching mode: `"text"` (substring) or `"regex"` (default:
+        /// `"text"`).
         pub mode: Option<SourceSearchMode>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results.
+        /// Max results per page (default: 20).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -502,16 +505,16 @@ pub mod source {
     /// Request payload for `source_read`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceReadRequest {
-        /// Crate name.
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
-        /// Version (default: latest).
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
-        /// Source path.
+        /// Source file path within the crate, e.g. `"src/de/mod.rs"`.
         pub path: String,
-        /// Start line (inclusive).
+        /// Start line (inclusive, 1-based).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub start_line: Option<u32>,
-        /// End line (inclusive).
+        /// End line (inclusive, 1-based).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub end_line: Option<u32>,
     }
@@ -546,16 +549,17 @@ pub mod source {
     /// Request payload for `source_context`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceContextRequest {
-        /// Crate name.
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
-        /// Version (default: latest).
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
-        /// Source path.
+        /// Source file path within the crate, e.g. `"src/runtime/mod.rs"`.
         pub path: String,
-        /// Anchor line.
+        /// Anchor line number (1-based) for context extraction.
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub line: Option<u32>,
-        /// Symbol name to resolve anchor.
+        /// Symbol name to resolve the anchor line automatically, e.g.
+        /// `"Runtime"`.
         pub symbol_name: Option<String>,
     }
 
@@ -639,26 +643,27 @@ pub mod symbol {
     /// Request payload for `symbol_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SymbolSearchRequest {
-        /// Query string.
+        /// Symbol name or substring to search for, e.g. `"HashMap"`.
         pub query: String,
-        /// Filter by crate.
+        /// Filter by crate name, e.g. `"std"`.
         pub crate_name: Option<String>,
-        /// Filter by version.
+        /// Filter by semver version, e.g. `"1.80.0"`.
         pub version: Option<String>,
-        /// Filter by kind.
+        /// Filter by symbol kind, e.g. `"struct"`, `"fn"`, `"trait"`, `"enum"`.
         pub kind: Option<String>,
-        /// Include all versions.
+        /// Include results from all indexed versions, not just latest (default:
+        /// false).
         pub include_all_versions: Option<bool>,
-        /// Collapse duplicate paths.
+        /// Collapse entries with duplicate canonical paths (default: true).
         pub collapse_by_canonical: Option<bool>,
         /// Include doc comments (first paragraph summary) in each hit.
         pub include_docs: Option<bool>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results.
+        /// Max results per page (default: 20).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -744,20 +749,20 @@ pub mod docs {
     /// Request payload for `docs_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DocsSearchRequest {
-        /// Query string.
+        /// Search query for docs.rs page content, e.g. `"async runtime"`.
         pub query: String,
-        /// Filter by crate.
+        /// Filter by crate name, e.g. `"tokio"`.
         pub crate_name: Option<String>,
-        /// Filter by version.
+        /// Filter by semver version, e.g. `"1.40.0"`.
         pub version: Option<String>,
-        /// Path prefix filter.
+        /// Filter by docs path prefix, e.g. `"tokio/runtime"`.
         pub path_prefix: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results.
+        /// Max results per page (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -828,7 +833,7 @@ pub mod dependency {
     /// Request payload for `dependency_audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditRequest {
-        /// Cargo.toml manifest content.
+        /// Full text content of a Cargo.toml manifest file.
         pub cargo_toml: String,
     }
 
@@ -936,29 +941,33 @@ pub mod dependency {
         pub latest_version: Option<String>,
     }
 
-    /// Request payload for `dependency_resolve`.
+    /// Request payload for `dependency_resolve`. Provide either `dependencies`
+    /// or `cargo_toml` (or both with `additions`).
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveRequest {
-        /// Dependency inputs.
+        /// Explicit dependency list to resolve, e.g. `[{"name": "serde",
+        /// "version_req": "^1"}]`.
         pub dependencies: Option<Vec<DependencyResolveInputDependency>>,
-        /// Cargo.toml manifest text to extract deps from.
+        /// Full text content of a Cargo.toml manifest to extract dependencies
+        /// from.
         #[serde(default)]
         pub cargo_toml: Option<String>,
-        /// Extra dependencies over manifest inputs.
+        /// Additional dependencies to resolve alongside manifest inputs.
         pub additions: Option<Vec<DependencyResolveInputDependency>>,
-        /// Check feature unification.
+        /// Also analyze feature unification across resolved dependencies
+        /// (default: false).
         pub check_features: Option<bool>,
-        /// Expansion depth limit.
+        /// Max transitive dependency expansion depth (default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
-    /// Dependency input.
+    /// A single dependency input for `dependency_resolve`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyResolveInputDependency {
-        /// Crate name.
+        /// Crate name, e.g. `"serde"`.
         pub name: String,
-        /// Semver requirement.
+        /// Semver version requirement, e.g. `"^1.0"` (default: any).
         pub version_req: Option<String>,
     }
 
@@ -1034,13 +1043,15 @@ pub mod dependency {
     /// Request payload for `dependency_feature_impact`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyFeatureImpactRequest {
-        /// Crate name.
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
-        /// Version (default: latest).
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
-        /// Features to evaluate.
+        /// Feature flags to evaluate impact for, e.g. `["rt-multi-thread",
+        /// "macros"]`.
         pub features: Vec<String>,
-        /// Heavy feature threshold.
+        /// Dependency count threshold to classify a feature as "heavy"
+        /// (default: 5).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub heavy_threshold: Option<u32>,
     }
@@ -1122,20 +1133,21 @@ pub mod krate {
     /// Request payload for `crate_search`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateSearchRequest {
-        /// Search query.
+        /// Free-text search query, e.g. `"json parser"`.
         pub query: Option<String>,
-        /// Category filter.
+        /// Filter by crates.io category, e.g. `"web-programming"`.
         pub category: Option<String>,
-        /// Keyword filter.
+        /// Filter by crates.io keyword, e.g. `"async"`.
         pub keyword: Option<String>,
-        /// Sort mode.
+        /// Sort mode: `"relevance"`, `"downloads"`, or `"recent"` (default:
+        /// `"relevance"`).
         pub sort: Option<CrateSearchSort>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results.
+        /// Max results per page (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1215,17 +1227,17 @@ pub mod krate {
     /// Request payload for `crate_intel`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelRequest {
-        /// Crate name.
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
-        /// Version (default: latest).
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
-        /// Max version history entries.
+        /// Max version history entries to return (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub versions_limit: Option<u32>,
-        /// Max dependents entries.
+        /// Max dependent crate entries to return (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub dependents_limit: Option<u32>,
-        /// Max readme characters.
+        /// Max readme content characters to include (default: 2000, 0 to omit).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub readme_max_chars: Option<u32>,
     }
@@ -1427,14 +1439,14 @@ pub mod krate {
     /// Request payload for `crate_versions`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateVersionsRequest {
-        /// Crate name.
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results.
+        /// Max results per page (default: 20).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1507,57 +1519,88 @@ pub mod krate {
         pub markers: Vec<String>,
     }
 
+    /// A method defined within an impl block or trait definition.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateImplMethod {
+        /// Method name, e.g. `"serialize"`.
         pub name: String,
+        /// Rendered method signature, e.g. `"fn serialize<S>(&self, serializer:
+        /// S) -> Result<S::Ok, S::Error>"`.
         pub signature: Option<String>,
     }
 
+    /// An associated type declared in a trait definition.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitAssociatedType {
+        /// Associated type name, e.g. `"Item"`.
         pub name: String,
+        /// Trait bounds on the associated type, e.g. `["Display", "Send"]`.
         pub bounds: Vec<String>,
+        /// Default type value, if any, e.g. `"()"`.
         pub default: Option<String>,
     }
 
+    /// Full trait definition metadata including methods, associated types, and
+    /// supertraits.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitDefinition {
+        /// Trait name, e.g. `"Iterator"`.
         pub trait_name: String,
+        /// Whether this is an auto trait (e.g. `Send`, `Sync`).
         pub is_auto: bool,
+        /// Whether the trait is declared `unsafe`.
         pub is_unsafe: bool,
+        /// Whether the trait is dyn-compatible (object-safe).
         pub is_dyn_compatible: bool,
+        /// Supertrait bounds, e.g. `["Clone", "Debug"]`.
         pub supertraits: Vec<String>,
+        /// Methods that implementors must provide.
         pub required_methods: Vec<CrateImplMethod>,
+        /// Methods with default implementations.
         pub provided_methods: Vec<CrateImplMethod>,
+        /// Associated types declared in the trait.
         pub associated_types: Vec<CrateTraitAssociatedType>,
+        /// Generic type parameters, e.g. `["T: Display"]`.
         pub generic_params: Vec<String>,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
     }
 
+    /// Request payload for `crate_api`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiRequest {
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
-        /// Glob filter for path or symbol name (e.g. `*connection*`).
+        /// Glob filter for path or symbol name, e.g. `"*connection*"`.
         pub path_glob: Option<String>,
+        /// Filter by symbol kinds, e.g. `["fn", "struct", "trait"]`.
         pub kinds: Option<Vec<String>>,
         /// Include doc comments (first paragraph summary) for each symbol.
         pub include_docs: Option<bool>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_api`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the API symbols were read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Effective path glob filter applied.
         pub path_glob: Option<String>,
+        /// Effective kind filters applied.
         pub kinds: Vec<String>,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -1565,225 +1608,372 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of symbols returned in this page.
         pub count: usize,
+        /// Public API symbols matching the query.
         pub symbols: Vec<CrateApiSymbol>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One public API symbol returned by `crate_api`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiSymbol {
+        /// Symbol name, e.g. `"HashMap"`.
         pub name: String,
+        /// Symbol kind, e.g. `"struct"`, `"fn"`, `"trait"`.
         pub kind: String,
+        /// Rendered signature, e.g. `"pub fn new() -> HashMap<K, V>"`.
         pub signature: Option<String>,
+        /// Visibility label, e.g. `"pub"`, `"pub(crate)"`.
         pub visibility: Option<String>,
         /// Doc comment (first paragraph summary when `include_docs` is true).
         #[serde(skip_serializing_if = "Option::is_none")]
         pub docs: Option<String>,
+        /// Source file path where the symbol is defined.
         pub source_path: String,
+        /// Start line in the source file.
         pub start_line: i32,
+        /// End line in the source file.
         pub end_line: i32,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
     }
 
+    /// Request payload for `crate_api_diff`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiDiffRequest {
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
+        /// Source semver version to diff from, e.g. `"1.0.0"`.
         pub from_version: String,
+        /// Target semver version to diff to, e.g. `"1.0.204"`.
         pub to_version: String,
+        /// Max diff entries to return (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_api_diff`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiDiffResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Source version compared.
         pub from_version: String,
+        /// Target version compared.
         pub to_version: String,
+        /// Number of symbols added in the target version.
         pub added_count: usize,
+        /// Number of symbols removed in the target version.
         pub removed_count: usize,
+        /// Number of symbols with changed signatures or visibility.
         pub changed_count: usize,
+        /// Whether any change is classified as breaking.
         pub breaking_changes_detected: bool,
+        /// Individual API changes between the two versions.
         pub changes: Vec<CrateApiDiffChange>,
+        /// Whether the result was truncated by the limit.
         pub truncated: bool,
         /// GitHub release notes for versions in the diff range (newest first).
         #[serde(skip_serializing_if = "Vec::is_empty", default)]
         pub release_notes: Vec<GitHubReleaseNote>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One API change entry in a `crate_api_diff` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiDiffChange {
+        /// Symbol name that changed, e.g. `"Deserializer"`.
         pub name: String,
+        /// Symbol kind, e.g. `"fn"`, `"struct"`, `"trait"`.
         pub kind: String,
+        /// Type of change detected.
         pub change_type: CrateApiDiffChangeType,
+        /// Signature in the source version (for changed/removed symbols).
         pub from_signature: Option<String>,
+        /// Signature in the target version (for changed/added symbols).
         pub to_signature: Option<String>,
+        /// Visibility in the source version (for visibility changes).
         pub from_visibility: Option<String>,
+        /// Visibility in the target version (for visibility changes).
         pub to_visibility: Option<String>,
+        /// Whether this change is classified as a breaking change.
         pub breaking_change: bool,
     }
 
+    /// Type of API change between two crate versions.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum CrateApiDiffChangeType {
+        /// Symbol was added in the target version.
         Added,
+        /// Symbol was removed in the target version.
         Removed,
+        /// Symbol signature changed between versions.
         SignatureChanged,
+        /// Symbol visibility changed between versions.
         VisibilityChanged,
     }
 
+    /// Request payload for `crate_features`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateFeaturesRequest {
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
     }
 
+    /// Response payload for `crate_features`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateFeaturesResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the feature data was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Features enabled by default.
         pub default_features: Vec<String>,
+        /// Total number of feature flags.
         pub feature_count: usize,
+        /// Individual feature flag details.
         pub features: Vec<CrateFeatureFlag>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One feature flag entry returned by `crate_features`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateFeatureFlag {
+        /// Feature flag name, e.g. `"derive"`.
         pub name: String,
+        /// Whether this feature is enabled by default.
         pub is_default: bool,
+        /// Other feature flags enabled when this feature is activated.
         pub enables_features: Vec<String>,
+        /// Optional dependencies activated when this feature is enabled.
         pub enables_dependencies: Vec<String>,
+        /// Full transitive closure of enabled features.
         pub transitive_enables: Vec<String>,
     }
 
+    /// Direction for dependency graph traversal.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum CrateGraphDirection {
+        /// Traverse downstream dependencies (what this crate depends on).
         Dependencies,
+        /// Traverse upstream dependents (what depends on this crate).
         Dependents,
+        /// Traverse both directions.
         Both,
     }
 
+    /// Request payload for `crate_graph`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateGraphRequest {
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
+        /// Graph traversal direction (default: `"dependencies"`).
         pub direction: Option<CrateGraphDirection>,
+        /// Max traversal depth (default: 2).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub depth: Option<u32>,
     }
 
+    /// Response payload for `crate_graph`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateGraphResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the graph was built from.
         pub selected_version: String,
+        /// Effective traversal direction.
         pub direction: CrateGraphDirection,
+        /// Effective max traversal depth.
         pub depth: u32,
+        /// Total nodes in the graph.
         pub node_count: usize,
+        /// Total edges in the graph.
         pub edge_count: usize,
+        /// Crate nodes in the dependency graph.
         pub nodes: Vec<CrateGraphNode>,
+        /// Dependency edges between nodes.
         pub edges: Vec<CrateGraphEdge>,
+        /// Notes about cycle-safe traversal decisions.
         pub cycle_safe_traversal_notes: Vec<String>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// A crate node in the dependency graph.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateGraphNode {
+        /// Crate name.
         pub crate_name: String,
+        /// Latest indexed version of this crate.
         pub latest_version: Option<String>,
+        /// Minimum graph distance from the root crate.
         pub min_distance: u32,
+        /// Role in the graph, e.g. `"root"`, `"dependency"`, `"dependent"`.
         pub role: String,
     }
 
+    /// A dependency edge in the dependency graph.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateGraphEdge {
+        /// Source crate name.
         pub from_crate: String,
+        /// Source crate version.
         pub from_version: Option<String>,
+        /// Target crate name.
         pub to_crate: String,
+        /// Target crate version.
         pub to_version: Option<String>,
+        /// Semver version requirement, e.g. `"^1.0"`.
         pub requirement: String,
+        /// Dependency kind: `"normal"`, `"dev"`, or `"build"`.
         pub dependency_kind: String,
+        /// Whether this is an optional dependency.
         pub optional: bool,
+        /// Graph depth at which this edge was discovered.
         pub depth: u32,
     }
 
+    /// Request payload for `crate_hotspots`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateHotspotsRequest {
+        /// Crate name, e.g. `"ring"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"0.17.8"`.
         pub version: Option<String>,
+        /// Path glob filter for source files, e.g. `"src/crypto/*"`.
         pub path_glob: Option<String>,
+        /// Include `unsafe` block hotspots (default: true).
         pub include_unsafe: Option<bool>,
+        /// Include concurrency hotspots (default: true).
         pub include_concurrency: Option<bool>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Category of a detected hotspot.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum HotspotKind {
+        /// Unsafe code block or function.
         Unsafe,
+        /// Concurrency primitive usage (mutex, atomic, channel, etc.).
         Concurrency,
     }
 
+    /// Severity level of a detected hotspot.
     #[derive(Debug, Clone, Copy, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum HotspotSeverity {
+        /// Low-risk pattern.
         Low,
+        /// Medium-risk pattern.
         Medium,
+        /// High-risk pattern.
         High,
     }
 
+    /// Response payload for `crate_hotspots`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateHotspotsResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the hotspots were detected in.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Effective path glob filter applied.
         pub path_glob: Option<String>,
+        /// Whether unsafe hotspots were included.
         pub include_unsafe: bool,
+        /// Whether concurrency hotspots were included.
         pub include_concurrency: bool,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -1791,84 +1981,139 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of source files scanned.
         pub scanned_files: usize,
+        /// Number of hotspots returned in this page.
         pub count: usize,
+        /// Detected hotspot hits.
         pub hotspots: Vec<CrateHotspotHit>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One hotspot hit in the `crate_hotspots` response.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateHotspotHit {
+        /// Source file path containing the hotspot.
         pub path: String,
+        /// Line number of the hotspot.
         pub line: u32,
+        /// Hotspot category (unsafe or concurrency).
         pub kind: HotspotKind,
+        /// Detected pattern, e.g. `"unsafe block"`, `"Mutex::lock"`.
         pub pattern: String,
+        /// Risk severity level.
         pub severity: HotspotSeverity,
+        /// Source code snippet around the hotspot.
         pub snippet: String,
     }
 
+    /// Request payload for `crate_license_check`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateLicenseCheckRequest {
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
+        /// SPDX license identifiers to allow, e.g. `["MIT", "Apache-2.0"]`.
         pub allow_licenses: Option<Vec<String>>,
+        /// SPDX license identifiers to deny, e.g. `["GPL-3.0"]`.
         pub deny_licenses: Option<Vec<String>>,
     }
 
+    /// Response payload for `crate_license_check`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateLicenseCheckResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the license was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// SPDX license expression from the crate manifest, e.g. `"MIT OR
+        /// Apache-2.0"`.
         pub license_expression: Option<String>,
+        /// Individual SPDX license identifiers parsed from the expression.
         pub matched_licenses: Vec<String>,
+        /// Effective allow-list used for evaluation.
         pub allow_licenses: Vec<String>,
+        /// Effective deny-list used for evaluation.
         pub deny_licenses: Vec<String>,
+        /// Policy evaluation result: `allowed`, `denied`, or `unknown`.
         pub policy_result: LicensePolicyResult,
+        /// Human-readable reasons for the policy result.
         pub policy_reasons: Vec<String>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// Request payload for `crate_usage_patterns`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateUsagePatternsRequest {
+        /// Crate name whose symbol to search for in dependents, e.g. `"serde"`.
         pub crate_name: String,
+        /// Symbol name to find usage examples of, e.g. `"Serialize"`.
         pub symbol_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 20).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_usage_patterns`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateUsagePatternsResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the usage search was scoped to.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Symbol name searched for.
         pub symbol_name: String,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -1876,58 +2121,88 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of usage patterns returned in this page.
         pub count: usize,
         /// Number of dependent crate versions whose source directories were
         /// scanned. Helps distinguish "no source available" from "symbol not
         /// found in dependents".
         pub scanned_dependents: usize,
+        /// Source snippets showing how the symbol is used in dependent crates.
         pub patterns: Vec<CrateUsagePattern>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One usage pattern found in a dependent crate's source code.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateUsagePattern {
+        /// Dependent crate name that uses the symbol.
         pub dependent_crate: String,
+        /// Version of the dependent crate.
         pub dependent_version: String,
+        /// Aggregated download count of the dependent crate.
         pub dependent_downloads: i64,
+        /// Source file path in the dependent crate.
         pub path: String,
+        /// Start line of the usage snippet.
         pub line_start: u32,
+        /// End line of the usage snippet.
         pub line_end: u32,
+        /// Source code snippet showing the usage.
         pub snippet: String,
     }
 
+    /// Request payload for `crate_re_exports`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateReExportsRequest {
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
+        /// Filter re-exports by module path prefix, e.g. `"tokio::io"`.
         pub path_prefix: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_re_exports`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateReExportsResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the re-export data was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Effective path prefix filter applied.
         pub path_prefix: Option<String>,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -1935,56 +2210,90 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of re-export entries returned.
         pub count: usize,
+        /// Re-export mapping entries.
         pub re_exports: Vec<CrateReExportEntry>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One re-export mapping entry.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateReExportEntry {
+        /// Canonical public path for the re-exported item, e.g.
+        /// `"tokio::io::AsyncRead"`.
         pub canonical_path: String,
+        /// Original internal definition path, e.g.
+        /// `"tokio::io::async_read::AsyncRead"`.
         pub original_definition_path: String,
+        /// Symbol kind, e.g. `"trait"`, `"struct"`.
         pub kind: String,
+        /// Visibility at the re-export site, e.g. `"pub"`.
         pub visibility: String,
+        /// Whether this is the shortest public import path.
         pub shortest_public_path: bool,
+        /// Source file where the re-export is declared.
         pub source_path: String,
+        /// Line number of the re-export declaration.
         pub source_line: u32,
     }
 
+    /// Request payload for `crate_import_path`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateImportPathRequest {
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
+        /// Symbol name to resolve the import path for, e.g. `"Deserialize"`.
         pub symbol_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
+        /// Filter by symbol kind, e.g. `"trait"`, `"struct"`, `"fn"`.
         pub kind: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 20).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_import_path`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateImportPathResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the import paths were resolved from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Symbol name searched for.
         pub symbol_name: String,
+        /// Effective kind filter applied.
         pub kind: Option<String>,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -1992,251 +2301,429 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of matches returned.
         pub count: usize,
+        /// Recommended shortest public import path, e.g.
+        /// `"serde::Deserialize"`.
         pub best_import_path: Option<String>,
+        /// All matching import paths for the symbol.
         pub matches: Vec<CrateImportPathMatch>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One import path match for a symbol.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateImportPathMatch {
+        /// Matched symbol name.
         pub symbol_name: String,
+        /// Symbol kind, e.g. `"trait"`, `"struct"`.
         pub kind: String,
+        /// Public import path, e.g. `"serde::Deserialize"`.
         pub import_path: String,
+        /// Internal definition path (may differ from import path due to
+        /// re-exports).
         pub definition_path: Option<String>,
+        /// Source file path where the symbol is defined.
         pub source_path: String,
+        /// Start line of the symbol definition.
         pub start_line: u32,
+        /// End line of the symbol definition.
         pub end_line: u32,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
+        /// Whether the symbol name matched exactly (vs. substring).
         pub exact_name_match: bool,
     }
 
+    /// Request payload for `crate_migration_path`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateMigrationPathRequest {
+        /// Crate name, e.g. `"axum"`.
         pub crate_name: String,
+        /// Source semver version to migrate from, e.g. `"0.6.0"`.
         pub from_version: String,
+        /// Target semver version to migrate to, e.g. `"0.7.0"`.
         pub to_version: String,
+        /// Max migration action entries to return (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_migration_path`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateMigrationPathResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Source version migrating from.
         pub from_version: String,
+        /// Target version migrating to.
         pub to_version: String,
+        /// Whether any breaking changes were detected.
         pub breaking_changes_detected: bool,
+        /// Number of symbols added in the target version.
         pub added_count: usize,
+        /// Number of symbols removed in the target version.
         pub removed_count: usize,
+        /// Number of symbols with changed signatures.
         pub changed_count: usize,
+        /// Actionable migration steps for the upgrade.
         pub migration_actions: Vec<CrateMigrationAction>,
         /// GitHub release notes for versions in the migration range (newest
         /// first).
         #[serde(skip_serializing_if = "Vec::is_empty", default)]
         pub release_notes: Vec<GitHubReleaseNote>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One migration action step in a `crate_migration_path` response.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateMigrationAction {
+        /// Action verb, e.g. `"replace"`, `"remove"`, `"update"`.
         pub action: String,
+        /// Human-readable rationale for the migration action.
         pub rationale: String,
+        /// Symbol name affected by this action.
         pub affected_symbol: String,
+        /// Symbol kind, e.g. `"fn"`, `"struct"`, `"trait"`.
         pub kind: String,
+        /// Signature in the source version (for changed/removed symbols).
         pub from_signature: Option<String>,
+        /// Signature in the target version (for changed/added symbols).
         pub to_signature: Option<String>,
     }
 
+    /// Request payload for `crate_compare`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompareRequest {
+        /// First crate name to compare, e.g. `"reqwest"`.
         pub left_crate: String,
+        /// Second crate name to compare, e.g. `"ureq"`.
         pub right_crate: String,
+        /// Semver version for the first crate (default: latest indexed).
         pub left_version: Option<String>,
+        /// Semver version for the second crate (default: latest indexed).
         pub right_version: Option<String>,
     }
 
+    /// Response payload for `crate_compare`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompareResponse {
+        /// Metrics and metadata for the first crate.
         pub left: CrateCompareSide,
+        /// Metrics and metadata for the second crate.
         pub right: CrateCompareSide,
+        /// Recommended crate choice (crate name or `null` if no clear winner).
         pub recommendation: Option<String>,
+        /// Reasons supporting the recommendation.
         pub recommendation_reasons: Vec<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// Metrics for one side of a `crate_compare` result.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompareSide {
+        /// Crate name.
         pub crate_name: String,
+        /// Version used for comparison.
         pub selected_version: String,
+        /// Latest indexed version.
         pub latest_version: String,
+        /// Minimum Rust version for the selected version.
         pub selected_rust_version: Option<String>,
+        /// Publication timestamp for the selected version.
         pub selected_published_at: Option<String>,
+        /// SPDX license expression.
         pub license_expression: Option<String>,
+        /// Aggregated download count.
         pub total_downloads: i64,
+        /// Number of crates that depend on this crate.
         pub dependent_crate_count: i64,
+        /// Number of dependencies.
         pub dependency_count: i64,
+        /// Number of feature flags.
         pub feature_count: i64,
+        /// Number of security advisories.
         pub advisory_count: i64,
+        /// Whether the selected version is yanked.
         pub yanked: bool,
+        /// Computed maintenance health score (0.0 - 1.0).
         pub maintenance_score: f64,
     }
 
+    /// Request payload for `crate_compatibility`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompatibilityRequest {
+        /// First crate name, e.g. `"tokio"`.
         pub left_crate: String,
+        /// Semver version for the first crate (default: latest indexed).
         pub left_version: Option<String>,
+        /// Second crate name, e.g. `"async-std"`.
         pub right_crate: String,
+        /// Semver version for the second crate (default: latest indexed).
         pub right_version: Option<String>,
+        /// Also analyze feature unification between the two crates (default:
+        /// false).
         pub check_features: Option<bool>,
     }
 
+    /// Request payload for `crate_compatibility_matrix`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompatibilityMatrixRequest {
+        /// First crate name, e.g. `"tokio"`.
         pub left_crate: String,
+        /// Second crate name, e.g. `"hyper"`.
         pub right_crate: String,
+        /// Specific versions of the first crate to test, e.g. `["1.38.0",
+        /// "1.40.0"]`.
         pub left_versions: Option<Vec<String>>,
+        /// Specific versions of the second crate to test, e.g. `["1.4.0",
+        /// "1.5.0"]`.
         pub right_versions: Option<Vec<String>>,
+        /// Also analyze feature unification for each pair (default: false).
         pub check_features: Option<bool>,
+        /// Max versions to test per crate when no explicit list given (default:
+        /// 5).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub version_limit: Option<u32>,
+        /// Max total version pairs to test (default: 25).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub max_pairs: Option<u32>,
     }
 
+    /// Response payload for `crate_compatibility`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompatibilityResponse {
+        /// First crate name.
         pub left_crate: String,
+        /// Version tested for the first crate.
         pub left_version: Option<String>,
+        /// Second crate name.
         pub right_crate: String,
+        /// Version tested for the second crate.
         pub right_version: Option<String>,
+        /// Whether the two crates can coexist without dependency conflicts.
         pub resolvable: bool,
+        /// Resolved dependency versions when compatible.
         pub resolved_versions: Vec<DependencyResolveResolvedVersion>,
+        /// Conflicts preventing compatibility.
         pub conflicts: Vec<DependencyResolveConflict>,
+        /// Whether feature unification was analyzed.
         pub check_features: bool,
+        /// Feature unification summary (when `check_features` was true).
         pub feature_unification_summary: Option<DependencyResolveFeatureSummary>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// Response payload for `crate_compatibility_matrix`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompatibilityMatrixResponse {
+        /// First crate name.
         pub left_crate: String,
+        /// Second crate name.
         pub right_crate: String,
+        /// Whether feature unification was analyzed.
         pub check_features: bool,
+        /// Total number of version pairs tested.
         pub pairs_tested: usize,
+        /// Version pairs that resolved without conflicts.
         pub compatible_pairs: Vec<CrateCompatibilityMatrixEntry>,
+        /// Version pairs that had dependency conflicts.
         pub incompatible_pairs: Vec<CrateCompatibilityMatrixEntry>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One version-pair entry in the compatibility matrix.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateCompatibilityMatrixEntry {
+        /// Version of the first crate tested.
         pub left_version: String,
+        /// Version of the second crate tested.
         pub right_version: String,
+        /// Whether this pair resolved without conflicts.
         pub resolvable: bool,
+        /// Conflict messages (empty when compatible).
         pub conflict_messages: Vec<String>,
     }
 
+    /// Request payload for `crate_derive_macros`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeriveMacrosRequest {
+        /// Crate name, e.g. `"serde_derive"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
     }
 
+    /// Response payload for `crate_derive_macros`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeriveMacrosResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the macro data was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Derive macros exported by the crate.
         pub derive_macros: Vec<CrateDeriveMacroEntry>,
+        /// Attribute macros exported by the crate.
         pub attribute_macros: Vec<CrateAttributeMacroEntry>,
+        /// Function-like procedural macros exported by the crate.
         pub function_like_macros: Vec<CrateFunctionLikeMacroEntry>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One derive macro exported by a crate.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeriveMacroEntry {
+        /// Derive macro name, e.g. `"Serialize"`.
         pub name: String,
+        /// Helper attributes accepted by this derive, e.g. `["serde"]`.
         pub accepted_attributes: Vec<String>,
+        /// Example usage pattern, e.g. `"#[derive(Serialize)]"`.
         pub usage_pattern: String,
+        /// Source file path where the macro is defined.
         pub source_path: String,
+        /// Source line where the macro is defined.
         pub source_line: i32,
     }
 
+    /// One attribute macro exported by a crate.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateAttributeMacroEntry {
+        /// Attribute macro name, e.g. `"tokio::main"`.
         pub name: String,
+        /// Example usage pattern, e.g. `"#[tokio::main]"`.
         pub usage_pattern: String,
+        /// Rendered macro signature, if available.
         pub signature_pattern: Option<String>,
+        /// Source file path where the macro is defined.
         pub source_path: String,
+        /// Source line where the macro is defined.
         pub source_line: i32,
     }
 
+    /// One function-like procedural macro exported by a crate.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateFunctionLikeMacroEntry {
+        /// Macro name, e.g. `"html!"`.
         pub name: String,
+        /// Example usage pattern, e.g. `"html! { <div>...</div> }"`.
         pub usage_pattern: String,
+        /// Rendered macro signature, if available.
         pub signature_pattern: Option<String>,
+        /// Source file path where the macro is defined.
         pub source_path: String,
+        /// Source line where the macro is defined.
         pub source_line: i32,
     }
 
+    /// Request payload for `crate_error_types`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateErrorTypesRequest {
+        /// Crate name, e.g. `"anyhow"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.86"`.
         pub version: Option<String>,
+        /// Filter by error type name, e.g. `"Error"`.
         pub type_name: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_error_types`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateErrorTypesResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the error types were read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Effective type name filter applied.
         pub type_name: Option<String>,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -2244,56 +2731,89 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of error types returned.
         pub count: usize,
+        /// Error type entries found in the crate.
         pub error_types: Vec<CrateErrorTypeEntry>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One error type entry with conversion and usage metadata.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateErrorTypeEntry {
+        /// Error type name, e.g. `"Error"`.
         pub type_name: String,
+        /// Type kind, e.g. `"enum"`, `"struct"`.
         pub kind: String,
+        /// Enum variant names (for enum error types).
         pub variants: Vec<String>,
+        /// Struct field names (for struct error types).
         pub fields: Vec<String>,
+        /// `Display` format patterns from the impl.
         pub display_patterns: Vec<String>,
+        /// Types this error converts from via `From` impls, e.g.
+        /// `["std::io::Error"]`.
         pub from_conversions: Vec<String>,
+        /// Functions that return this error type in their signature.
         pub returned_by: Vec<String>,
+        /// Source file path where the error type is defined.
         pub source_path: String,
+        /// Source line where the error type is defined.
         pub source_line: i32,
     }
 
+    /// Request payload for `crate_alternatives`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateAlternativesRequest {
+        /// Crate name to find alternatives for, e.g. `"reqwest"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"0.12.5"`.
         pub version: Option<String>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
+        /// SPDX license identifiers to allow, e.g. `["MIT", "Apache-2.0"]`.
         pub allow_licenses: Option<Vec<String>>,
+        /// SPDX license identifiers to deny, e.g. `["GPL-3.0"]`.
         pub deny_licenses: Option<Vec<String>>,
     }
 
+    /// Response payload for `crate_alternatives`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateAlternativesResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version used for category/keyword matching.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -2301,67 +2821,108 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of alternatives returned.
         pub count: usize,
+        /// Effective allow-list used for license evaluation.
         pub allow_licenses: Vec<String>,
+        /// Effective deny-list used for license evaluation.
         pub deny_licenses: Vec<String>,
+        /// Ranked alternative crate suggestions.
         pub alternatives: Vec<CrateAlternativeHit>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One alternative crate suggestion.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateAlternativeHit {
+        /// Alternative crate name.
         pub crate_name: String,
+        /// Latest indexed version.
         pub latest_version: Option<String>,
+        /// Crate description.
         pub description: Option<String>,
+        /// Category labels.
         pub categories: Vec<String>,
+        /// Keyword labels.
         pub keywords: Vec<String>,
+        /// Aggregated download count.
         pub total_downloads: i64,
+        /// Number of dependent crates.
         pub dependent_crates: i64,
+        /// Number of security advisories.
         pub advisory_count: i64,
+        /// Whether the latest version is yanked.
         pub yanked: bool,
+        /// SPDX license expression.
         pub license_expression: Option<String>,
+        /// License policy evaluation result.
         pub policy_result: LicensePolicyResult,
+        /// Human-readable reasons for the policy result.
         pub policy_reasons: Vec<String>,
+        /// Computed relevance score (higher is better).
         pub score: f64,
+        /// Factors contributing to the ranking.
         pub rank_reasons: Vec<String>,
     }
 
+    /// Request payload for `crate_trait_impls`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitImplsRequest {
+        /// Crate name, e.g. `"serde"`.
         pub crate_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
+        /// Filter by trait name, e.g. `"Serialize"`.
         pub trait_name: Option<String>,
+        /// Filter by implementing type name, e.g. `"HashMap"`.
         pub type_name: Option<String>,
         /// Include doc comments (first paragraph summary) for each impl.
         pub include_docs: Option<bool>,
-        /// Paging cursor.
+        /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
-        /// Page (1-based).
+        /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
+        /// Max results per page (default: 50).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
 
+    /// Response payload for `crate_trait_impls`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitImplsResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the impl data was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Effective trait name filter applied.
         pub trait_name: Option<String>,
+        /// Effective type name filter applied.
         pub type_name: Option<String>,
         /// Current cursor.
         pub cursor: Option<String>,
@@ -2369,141 +2930,243 @@ pub mod krate {
         pub next_cursor: Option<String>,
         /// Page.
         pub page: u32,
+        /// Effective results-per-page limit.
         pub limit: u32,
         /// More results available.
         pub has_more: bool,
         /// Truncated by pagination.
         pub truncated: bool,
+        /// Number of impl relations returned.
         pub count: usize,
+        /// Trait implementation relationships found.
         pub impls: Vec<CrateTraitImplRelation>,
+        /// Full trait definitions for traits referenced in `impls`.
         pub trait_definitions: Vec<CrateTraitDefinition>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// One trait implementation relationship.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitImplRelation {
+        /// Implementing type name, e.g. `"Vec"`.
         pub type_name: String,
+        /// Rendered type name with generics, e.g. `"Vec<T>"`.
         pub type_name_display: Option<String>,
+        /// Trait being implemented (null for inherent impls).
         pub trait_name: Option<String>,
+        /// Rendered trait name with generics.
         pub trait_name_display: Option<String>,
+        /// Impl kind label, e.g. `"direct"`, `"blanket"`, `"auto"`.
         pub impl_kind: String,
+        /// Whether this is a blanket impl (e.g. `impl<T: Display> ToString for
+        /// T`).
         pub blanket_impl: bool,
+        /// Whether this is a compiler-synthesized impl.
         pub synthetic_impl: bool,
+        /// Whether this is a negative impl (e.g. `impl !Send for Type`).
         pub negative_impl: bool,
+        /// Blanket type parameter when `blanket_impl` is true, e.g. `"T"`.
         pub blanket_type: Option<String>,
+        /// Generic type parameters on the impl block.
         pub generic_params: Vec<String>,
+        /// Where clauses on the impl block.
         pub where_clauses: Vec<String>,
+        /// Methods provided by this impl.
         pub methods: Vec<CrateImplMethod>,
         /// Doc comment (first paragraph summary when `include_docs` is true).
         #[serde(skip_serializing_if = "Option::is_none")]
         pub docs: Option<String>,
+        /// Source file path where the impl is defined.
         pub source_path: String,
+        /// Start line of the impl block.
         pub start_line: i32,
+        /// End line of the impl block.
         pub end_line: i32,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
     }
 
+    /// Request payload for `crate_type_info`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeInfoRequest {
+        /// Crate name, e.g. `"tokio"`.
         pub crate_name: String,
+        /// Type name to look up, e.g. `"Runtime"`.
         pub type_name: String,
+        /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
+        /// Include inherent methods in the response (default: true).
         pub include_methods: Option<bool>,
+        /// Include trait implementations in the response (default: true).
         pub include_trait_impls: Option<bool>,
         /// Include full doc comments for the type definition.
         pub include_docs: Option<bool>,
     }
 
+    /// Response payload for `crate_type_info`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeInfoResponse {
+        /// Resolved crate name.
         pub crate_name: String,
+        /// Version the type info was read from.
         pub selected_version: String,
+        /// Latest indexed version of the crate.
         pub latest_version: String,
+        /// Type name queried.
         pub type_name: String,
+        /// Whether inherent methods were included.
         pub include_methods: bool,
+        /// Whether trait impls were included.
         pub include_trait_impls: bool,
+        /// Type definition metadata (null if type not found).
         pub type_definition: Option<CrateTypeDefinition>,
+        /// Inherent methods (non-trait `impl` methods).
         pub inherent_methods: Vec<CrateImplMethod>,
+        /// Trait implementations for this type.
         pub trait_impls: Vec<CrateTraitImpl>,
+        /// Full trait definitions for traits referenced in `trait_impls`.
         pub trait_definitions: Vec<CrateTraitDefinition>,
+        /// Type conversions (`From`/`Into`/`TryFrom`/`TryInto` impls).
         pub conversions: Vec<CrateTypeConversion>,
+        /// Freshness check done.
         pub freshness_check_performed: bool,
+        /// Freshness result.
         pub freshness_check_result: String,
+        /// Refresh enqueued.
         pub refresh_enqueued: bool,
+        /// Refresh job ID.
         pub refresh_job_id: Option<String>,
+        /// Freshness sources.
         pub freshness: Vec<ResponseFreshnessSource>,
+        /// Confidence level.
         pub confidence: String,
+        /// Confidence details.
         pub confidence_assessment: ConfidenceAssessment,
+        /// Suggested next tools.
         pub suggested_next_tools: Vec<String>,
+        /// Data origin.
         pub provenance: String,
     }
 
+    /// Full type definition metadata returned by `crate_type_info`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeDefinition {
+        /// Type name, e.g. `"Runtime"`.
         pub type_name: String,
+        /// Type kind, e.g. `"struct"`, `"enum"`, `"union"`, `"type_alias"`.
         pub kind: String,
+        /// Visibility label, e.g. `"pub"`.
         pub visibility: Option<String>,
+        /// Canonical public path, e.g. `"tokio::runtime::Runtime"`.
         pub canonical_path: Option<String>,
+        /// Internal definition path (may differ from canonical due to
+        /// re-exports).
         pub definition_path: Option<String>,
+        /// Generic type parameters, e.g. `["T: Send"]`.
         pub generic_params: Vec<String>,
+        /// Where clause constraints.
         pub where_clauses: Vec<String>,
+        /// Struct fields (for structs).
         pub fields: Vec<CrateTypeField>,
+        /// Enum variants (for enums).
         pub variants: Vec<CrateTypeVariant>,
+        /// Version since which the type is deprecated.
         pub deprecated_since: Option<String>,
+        /// Deprecation note or replacement suggestion.
         pub deprecated_note: Option<String>,
+        /// Whether the type is marked `#[non_exhaustive]`.
         pub is_non_exhaustive: bool,
+        /// Auto traits implemented (e.g. `["Send", "Sync"]`).
         pub auto_traits: Vec<String>,
         /// Full doc comment (when `include_docs` is true).
         #[serde(skip_serializing_if = "Option::is_none")]
         pub docs: Option<String>,
+        /// Source file path where the type is defined.
         pub source_path: String,
+        /// Start line of the type definition.
         pub start_line: i32,
+        /// End line of the type definition.
         pub end_line: i32,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
     }
 
+    /// A field in a struct or enum variant.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeField {
+        /// Field name (null for tuple struct fields).
         pub name: Option<String>,
+        /// Field type expression, e.g. `"String"`, `"Vec<u8>"`.
         pub field_type: String,
     }
 
+    /// An enum variant with its fields.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeVariant {
+        /// Variant name, e.g. `"Ok"`, `"Err"`.
         pub name: String,
+        /// Fields within this variant.
         pub fields: Vec<CrateTypeField>,
     }
 
+    /// A trait implementation for a specific type (used in `crate_type_info`).
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitImpl {
+        /// Trait being implemented (null for inherent impls).
         pub trait_name: Option<String>,
+        /// Rendered trait name with generics.
         pub trait_name_display: Option<String>,
+        /// Impl kind label, e.g. `"direct"`, `"blanket"`, `"auto"`.
         pub impl_kind: String,
+        /// Whether this is a blanket impl.
         pub blanket_impl: bool,
+        /// Whether this is a compiler-synthesized impl.
         pub synthetic_impl: bool,
+        /// Whether this is a negative impl.
         pub negative_impl: bool,
+        /// Blanket type parameter when `blanket_impl` is true.
         pub blanket_type: Option<String>,
+        /// Generic type parameters on the impl block.
         pub generic_params: Vec<String>,
+        /// Where clauses on the impl block.
         pub where_clauses: Vec<String>,
+        /// Methods provided by this impl.
         pub methods: Vec<CrateImplMethod>,
+        /// Source file path where the impl is defined.
         pub source_path: String,
+        /// Start line of the impl block.
         pub start_line: i32,
+        /// End line of the impl block.
         pub end_line: i32,
+        /// Data source label (e.g. `"rustdoc_json"`, `"local_cache"`).
         pub index_source: String,
     }
 
+    /// A type conversion relationship (From/Into/TryFrom/TryInto).
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeConversion {
+        /// Conversion trait name, e.g. `"From"`, `"TryInto"`.
         pub trait_name: String,
+        /// Source type in the conversion.
         pub source_type: Option<String>,
+        /// Target type in the conversion.
         pub target_type: Option<String>,
     }
 

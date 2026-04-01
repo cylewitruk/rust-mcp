@@ -30,8 +30,14 @@ Canonical path resolution determines the shortest public import path for each sy
 
 - [ ] Standardize freshness reporting across all tools.
   - Most crate tools include `freshness` arrays. However, `symbol_search`, `source_search`, and `docs_search` responses lack them entirely. Create a shared helper to build freshness arrays consistently.
-- [ ] Expand tool descriptions with usage hints.
-  - Current descriptions are concise (1-2 lines) but don't include "call this when..." guidance. Agents with 35 tools need stronger signal about when to use each.
+- [x] ~~Expand tool descriptions with usage hints.~~
+  - ~~Current descriptions are concise (1-2 lines) but don't include "call this when..." guidance. Agents with 35 tools need stronger signal about when to use each.~~
+  - All 35 tool descriptions now include `Required:` / `Optional:` parameter summaries with types. Field-level doc comments enriched with examples across all request types.
+- [ ] Add `source_tree` tool for browsing indexed crate file structure.
+  - Agents frequently need to discover what files exist in a crate before reading them, but `source_search` only finds content matches — there's no way to browse structure without falling back to filesystem `find`/`ls` on `~/.cargo/registry`.
+  - **Request**: `crate_name` (required), `version` (optional), `path` (optional, default: crate root), `depth` (optional, default: 2 — levels below `path`), `include_docs` (optional, default: false — first paragraph of module-level `//!` doc comments).
+  - **Response**: tree of `{name, kind: "file"|"dir", doc_summary?, children?}` entries, plus `total_depth` (deepest nesting under `path` so the client knows how much it's not seeing), `file_count`, `dir_count`.
+  - Depth 2 at root expands root + `src/` + `src/*/`, which covers the common case without flooding.
 - [ ] Fix N+1 query pattern in `crate_error_types`.
   - Fetches return signatures in nested per-error-type loops with per-row queries. Refactor to batch queries using `WHERE id = ANY($1::BIGINT[])`.
 - [ ] Allow `source_context` to accept a fully-qualified type path.
