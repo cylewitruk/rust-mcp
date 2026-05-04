@@ -154,7 +154,7 @@ async fn rust_mcp_container_initialized_notification_returns_accepted_without_js
 }
 
 #[tokio::test]
-async fn rust_mcp_container_requires_initialized_notification_before_tool_calls() {
+async fn rust_mcp_container_allows_tool_calls_after_initialize_before_initialized_notification() {
     let rust_mcp = start_ready_rust_mcp().await;
 
     let pre_initialize = rust_mcp
@@ -179,10 +179,13 @@ async fn rust_mcp_container_requires_initialized_notification_before_tool_calls(
 
     let before_initialized_notification = rust_mcp
         .call_tool("ping", json!({ "message": "pre-notification" }))
-        .await;
+        .await
+        .expect("MCP tools/call ping failed after initialize but before notifications/initialized");
     assert!(
-        before_initialized_notification.is_err(),
-        "tools/call ping unexpectedly succeeded before notifications/initialized: \
+        before_initialized_notification
+            .get("result")
+            .is_some(),
+        "tools/call ping should succeed after initialize even before notifications/initialized: \
          {before_initialized_notification:?}"
     );
 

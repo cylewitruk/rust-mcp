@@ -1,5 +1,6 @@
 //! Reusable database fixture helpers for rust-mcp integration tests.
 
+use std::fmt::Write as _;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -189,7 +190,7 @@ pub async fn seed_crate_version(
     published_at: Option<&str>,
 ) -> Result<i64> {
     let checksum_input = format!("{crate_id}:{version}");
-    let checksum = format!("{:x}", Sha256::digest(checksum_input.as_bytes()));
+    let checksum = sha256_hex(checksum_input.as_bytes());
 
     let version_id =
         db::upsert_crate_version(pool, crate_id, version, total_downloads, published_at, checksum)
@@ -257,13 +258,21 @@ pub async fn seed_source_file(
     language: Option<&str>,
     content: &str,
 ) -> Result<i64> {
-    let sha256 = format!("{:x}", Sha256::digest(content.as_bytes()));
+    let sha256 = sha256_hex(content.as_bytes());
     let file_size = i64::try_from(content.len())?;
 
     let source_file_id =
         db::upsert_source_file(pool, crate_version_id, path, sha256, file_size, language).await?;
 
     Ok(source_file_id)
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    let mut output = String::with_capacity(64);
+    for byte in Sha256::digest(input) {
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 /// Inserts a symbol row and returns its id.
