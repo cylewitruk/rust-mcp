@@ -4,6 +4,7 @@ use std::io::Read as _;
 use flate2::read::GzDecoder;
 use tracing::debug;
 
+use crate::db::indexing::RUSTDOC_SOURCE_PATH_PREFIX;
 use crate::state::{AppState, OutboundSource};
 
 const MAX_EXTRACTED_DOCS_CONTENT_CHARS: usize = 1_000_000;
@@ -310,7 +311,7 @@ pub fn discover_docs_paths(
 
 /// Returns the synthetic source-files path used for docs.rs rustdoc payloads.
 pub fn docs_rs_rustdoc_synthetic_path(crate_name: &str, version: &str) -> String {
-    format!("rustdoc-json/docs.rs/{crate_name}-{version}.json")
+    format!("{RUSTDOC_SOURCE_PATH_PREFIX}docs.rs/{crate_name}-{version}.json")
 }
 
 /// Decodes a docs.rs rustdoc payload that may be plain UTF-8 or gzip.

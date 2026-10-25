@@ -14,7 +14,8 @@ use serde_json::json;
 use sha2::{Digest as _, Sha256};
 
 use crate::db::indexing::{
-    fetch_rustdoc_sync_candidates, mark_version_rustdoc_attempted, mark_version_rustdoc_enriched,
+    RUSTDOC_SOURCE_PATH_PREFIX, RustdocCandidateFilter, fetch_rustdoc_sync_candidates,
+    mark_version_rustdoc_attempted, mark_version_rustdoc_enriched,
     replace_crate_version_index_rows, upsert_source_file_unconditional,
 };
 use crate::db::models::{
@@ -214,7 +215,7 @@ fn synthetic_rustdoc_path(root_dir: &Path, file_path: &Path) -> String {
         })
         .unwrap_or_else(|| "unknown.json".to_string());
 
-    format!("rustdoc-json/{relative}")
+    format!("{RUSTDOC_SOURCE_PATH_PREFIX}{relative}")
 }
 
 /// Extracts the `format_version` field from raw rustdoc JSON content without
@@ -1670,20 +1671,21 @@ impl McpServer {
     /// Fetches and indexes rustdoc JSON from docs.rs for synced crate versions.
     /// Syncs rustdoc JSON symbols for indexed crate versions.
     ///
-    /// When `locally_present_only` is `true`, only crate versions flagged as
-    /// present in the user's cargo registry are processed.
+    /// `filter` selects the crate versions; `page`/`per_page` page through
+    /// them.
     pub async fn sync_rustdoc_json_cache(
         &self,
-        crate_name: Option<String>,
+        filter: RustdocCandidateFilter<'_>,
         page: Option<u32>,
         per_page: Option<u32>,
-        locally_present_only: bool,
-        skip_enriched: bool,
-        retry_cooldown_seconds: Option<i64>,
     ) -> Result<RustdocJsonRefreshOutcome, String> {
-        let crate_filter = match crate_name {
-            Some(value) => Some(normalize_required(value, "crate_name")?),
-            None => None,
+        let crate_filter = filter
+            .crate_name
+            .map(|value| normalize_required(value.to_string(), "crate_name"))
+            .transpose()?;
+        let filter = RustdocCandidateFilter {
+            crate_name: crate_filter.as_deref(),
+            ..filter
         };
         let page = sync_page(page);
         let per_page = sync_per_page(per_page);
@@ -1693,12 +1695,9 @@ impl McpServer {
 
         let mut candidates = fetch_rustdoc_sync_candidates(
             &self.state.db,
-            crate_filter.as_deref(),
+            &filter,
             i64::from(per_page),
             i64::from(offset),
-            locally_present_only,
-            skip_enriched,
-            retry_cooldown_seconds,
         )
         .await
         .map_err(|e| format!("rustdoc JSON sync failed to load crate versions: {e}"))?;

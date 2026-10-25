@@ -1,4 +1,7 @@
-use super::{Value, common, json, mock_index_sync_context, run_refresh_worker_for_tests};
+use super::{
+    PINNED_SOURCE_CRATE, PINNED_SOURCE_OLDEST_VERSION, Value, common, json,
+    mock_index_sync_context, pinned_source_versions, run_refresh_worker_for_tests,
+};
 
 #[tokio::test]
 async fn index_status_reports_seeded_coverage_counts() {
@@ -215,12 +218,160 @@ async fn index_refresh_crate_scope_uses_mock_sync_pipeline() {
         result
             .get("synced_versions")
             .and_then(Value::as_u64),
-        Some(1)
+        Some(2),
+        "the mock serves demo_crate 1.2.3 and 1.1.0"
     );
     assert_eq!(
         result
             .get("synced_dependencies")
             .and_then(Value::as_u64),
         Some(1)
+    );
+}
+
+#[tokio::test]
+async fn index_crates_honors_pinned_version() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("failed to build mock index sync context");
+    let _worker = tokio::spawn(run_refresh_worker_for_tests(context.state.clone()));
+
+    let response = context
+        .mcp
+        .call_tool(
+            "index_crates",
+            json!({
+                "crates": [{ "name": "demo_crate", "version": "1.1.0" }],
+                "include_dependencies": false
+            }),
+        )
+        .await
+        .expect("index_crates call failed");
+    let payload = common::structured_content(&response);
+    assert_eq!(
+        payload
+            .get("succeeded")
+            .and_then(Value::as_u64),
+        Some(1),
+        "{payload}"
+    );
+    assert_eq!(
+        payload
+            .pointer("/results/0/version")
+            .and_then(Value::as_str),
+        Some("1.1.0")
+    );
+
+    let attempted = sqlx::query_scalar::<_, bool>(
+        "SELECT cv.rustdoc_last_attempt_at IS NOT NULL
+         FROM crate_versions cv
+         JOIN crates c ON c.id = cv.crate_id
+         WHERE c.name = 'demo_crate' AND cv.version = '1.1.0'",
+    )
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to load pinned version row");
+    assert!(attempted, "rustdoc enrichment should target the pinned version");
+}
+
+#[tokio::test]
+async fn index_crates_reports_unknown_pinned_version() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("failed to build mock index sync context");
+    let _worker = tokio::spawn(run_refresh_worker_for_tests(context.state.clone()));
+
+    let response = context
+        .mcp
+        .call_tool(
+            "index_crates",
+            json!({
+                "crates": [{ "name": "demo_crate", "version": "9.9.9" }],
+                "include_dependencies": false
+            }),
+        )
+        .await
+        .expect("index_crates call failed");
+    let payload = common::structured_content(&response);
+    assert_eq!(
+        payload
+            .get("failed")
+            .and_then(Value::as_u64),
+        Some(1),
+        "{payload}"
+    );
+    let error = payload
+        .pointer("/results/0/error")
+        .and_then(Value::as_str)
+        .expect("unknown version should report an error");
+    assert!(error.contains("9.9.9"), "{error}");
+}
+
+/// A pinned release older than the newest 25 cached versions must still get
+/// its own source indexed.
+#[tokio::test]
+async fn index_crates_indexes_source_for_old_pinned_version() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("failed to build mock index sync context");
+    let _worker = tokio::spawn(run_refresh_worker_for_tests(context.state.clone()));
+
+    let cache_dir = context
+        .state
+        .config
+        .crate_source_cache_dir
+        .clone();
+    let source_dirs = pinned_source_versions()
+        .into_iter()
+        .map(|version| {
+            let dir = cache_dir.join(format!("{PINNED_SOURCE_CRATE}-{version}"));
+            std::fs::create_dir_all(dir.join("src")).expect("create source dir");
+            std::fs::write(
+                dir.join("src/lib.rs"),
+                format!("pub const RELEASE: &str = \"{version}\";\n"),
+            )
+            .expect("write source file");
+            dir
+        })
+        .collect::<Vec<_>>();
+
+    let response = context
+        .mcp
+        .call_tool(
+            "index_crates",
+            json!({
+                "crates": [{ "name": PINNED_SOURCE_CRATE, "version": PINNED_SOURCE_OLDEST_VERSION }],
+                "include_dependencies": false
+            }),
+        )
+        .await;
+    let read = context
+        .mcp
+        .call_tool(
+            "source_read",
+            json!({
+                "crate_name": PINNED_SOURCE_CRATE,
+                "version": PINNED_SOURCE_OLDEST_VERSION,
+                "path": "src/lib.rs"
+            }),
+        )
+        .await;
+    for dir in source_dirs {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    let payload_response = response.expect("index_crates call failed");
+    let payload = common::structured_content(&payload_response);
+    assert_eq!(
+        payload
+            .get("succeeded")
+            .and_then(Value::as_u64),
+        Some(1),
+        "{payload}"
+    );
+    let read = read.expect("pinned version source should be readable");
+    assert!(
+        common::first_content_text(&read).contains(PINNED_SOURCE_OLDEST_VERSION),
+        "expected the pinned release's own source: {read}"
     );
 }

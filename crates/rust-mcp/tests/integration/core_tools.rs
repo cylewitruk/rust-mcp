@@ -1,5 +1,6 @@
 //! Integration tests for namespace-free MCP tools.
 
+use rust_mcp_types::tools as tool_descriptors;
 use serde_json::{Value, json};
 
 use super::common;
@@ -77,4 +78,68 @@ async fn stateless_call_with_encoded_tool_name_passes_header_validation() {
 
     assert!(!error.contains("-32020"), "Mcp-Name header was rejected: {error}");
     assert!(error.contains("ツール"), "expected an unknown-tool error: {error}");
+}
+
+/// Agents commonly send `crate` instead of `crate_name`.
+#[tokio::test]
+async fn crate_is_accepted_as_alias_for_crate_name() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let response = context
+        .mcp
+        .call_tool(
+            "source_read",
+            json!({"crate": "serde_json", "version": "1.0.145", "path": "src/lib.rs"}),
+        )
+        .await
+        .expect("source_read with `crate` alias should succeed");
+    assert!(common::first_content_text(&response).contains("from_str"));
+}
+
+#[tokio::test]
+async fn invalid_arguments_report_expected_parameters() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let error = context
+        .mcp
+        .call_tool("source_read", json!({"crate_nam": "serde_json"}))
+        .await
+        .expect_err("missing required arguments should fail")
+        .to_string();
+
+    assert!(
+        error.contains("Parameters for `source_read`: crate_name (required), path (required)"),
+        "expected a schema-derived parameter summary: {error}"
+    );
+}
+
+/// Served descriptions must be the shared descriptors, not divergent copies.
+#[tokio::test]
+async fn tool_descriptions_match_shared_descriptors() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let tools_list = context
+        .mcp
+        .rpc_call("tools/list", json!({}))
+        .await
+        .expect("tools/list");
+    let tools = tools_list
+        .pointer("/result/tools")
+        .and_then(Value::as_array)
+        .expect("tools array");
+
+    assert_eq!(tools.len(), tool_descriptors::ALL_TOOLS.len());
+    for descriptor in tool_descriptors::ALL_TOOLS {
+        let served = tools
+            .iter()
+            .find(|tool| tool.get("name") == Some(&json!(descriptor.name)))
+            .unwrap_or_else(|| panic!("tool `{}` not served", descriptor.name));
+        assert_eq!(served.get("description"), Some(&json!(descriptor.description)));
+    }
 }

@@ -115,12 +115,15 @@ impl McpServer {
             _ => None,
         };
 
-        let (readme, readme_truncated) = truncate_optional_text(
-            resolution
-                .selected_version
-                .readme,
-            readme_max_chars,
-        );
+        let (readme, readme_truncated) = match readme_max_chars {
+            Some(max_chars) => truncate_optional_text(
+                resolution
+                    .selected_version
+                    .readme,
+                max_chars,
+            ),
+            None => (None, false),
+        };
 
         let version_history = version_history_rows
             .into_iter()

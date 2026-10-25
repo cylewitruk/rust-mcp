@@ -87,7 +87,8 @@ pub const CRATE_TYPE_INFO: ToolDescriptor = ToolDescriptor {
 
 pub const CRATE_TRAIT_IMPLS: ToolDescriptor = ToolDescriptor {
     name: "crate_trait_impls",
-    description: "Return trait/type implementation relationships with optional filters.",
+    description: "Return trait/type implementation relationships. Requires trait_name or \
+                  type_name.",
 };
 
 pub const CRATE_RE_EXPORTS: ToolDescriptor = ToolDescriptor {
@@ -172,8 +173,8 @@ pub const CRATE_USAGE_PATTERNS: ToolDescriptor = ToolDescriptor {
 
 pub const DEPENDENCY_AUDIT: ToolDescriptor = ToolDescriptor {
     name: "dependency_audit",
-    description: "Audit a Cargo.toml for yanked versions, advisories, outdated deps, and MSRV \
-                  conflicts.",
+    description: "Audit Cargo.toml contents (the file text, not a path) for yanked versions, \
+                  advisories, outdated deps, and MSRV conflicts.",
 };
 
 pub const DEPENDENCY_RESOLVE: ToolDescriptor = ToolDescriptor {
@@ -203,8 +204,8 @@ pub const SOURCE_READ: ToolDescriptor = ToolDescriptor {
 
 pub const SOURCE_CONTEXT: ToolDescriptor = ToolDescriptor {
     name: "source_context",
-    description: "Return semantic context around a source location: module path, imports, \
-                  containing impl, nearby types.",
+    description: "Return semantic context (module path, imports, containing impl, nearby types) \
+                  around a source location. Requires line or symbol_name.",
 };
 
 // ---------------------------------------------------------------------------
@@ -302,5 +303,44 @@ mod tests {
             descriptor_names, schema_names,
             "tool descriptors and schemas must list the same tools"
         );
+    }
+
+    /// The agent skill's tool reference must document exactly the served tools.
+    #[test]
+    fn skill_tool_reference_covers_all_tools() {
+        use std::fs;
+        use std::path::Path;
+
+        let reference_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/rust-mcp/tools");
+        let mut documented = Vec::new();
+        for entry in fs::read_dir(&reference_dir).expect("skill tool reference directory") {
+            let content = fs::read_to_string(
+                entry
+                    .expect("reference entry")
+                    .path(),
+            )
+            .expect("readable reference file");
+            documented.extend(
+                content
+                    .lines()
+                    .filter_map(|line| {
+                        line.strip_prefix("## `")?
+                            .strip_suffix('`')
+                            .map(str::to_string)
+                    }),
+            );
+        }
+
+        let unique: BTreeSet<_> = documented
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let served: BTreeSet<_> = ALL_TOOLS
+            .iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(unique.len(), documented.len(), "a tool is documented more than once");
+        assert_eq!(unique, served, "skills/rust-mcp/tools/*.md is out of sync with ALL_TOOLS");
     }
 }

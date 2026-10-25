@@ -7,14 +7,16 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext as RmcpToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation,
-    ListToolsResult, PaginatedRequestParams, RequestMetaObject, ServerCapabilities, ServerConfig,
-    Tool,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    ErrorData, Implementation, ListToolsResult, PaginatedRequestParams, RequestMetaObject,
+    ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_router};
+use rust_mcp_types::tools as tool_descriptors;
 use rust_mcp_types::types::common::PingRequest;
 use rust_mcp_types::types::schema::{ToolSchemasRequest, ToolSchemasResponse};
+use serde_json::Value;
 use tracing::warn;
 
 use super::indexing::handlers::{
@@ -103,6 +105,9 @@ impl McpServer {
         let result = future.await;
         let latency_ms = started.elapsed().as_millis() as i64;
         let success_label = if result.is_ok() { "true" } else { "false" };
+        if let Err(error) = &result {
+            warn!(tool_name, %error, "tool call failed");
+        }
 
         counter!(
             "rust_mcp_tool_invocations_total",
@@ -130,7 +135,7 @@ impl McpServer {
 impl McpServer {
     #[tool(
         name = "ping",
-        description = "Check MCP connectivity and DB readiness.\n\nOptional: message (string)",
+        description = tool_descriptors::PING.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn ping(&self, Parameters(request): Parameters<PingRequest>) -> String {
@@ -151,8 +156,7 @@ impl McpServer {
 
     #[tool(
         name = "schema_get",
-        description = "Return request/response JSON Schemas for one or all MCP \
-                       tools.\n\nOptional: tool_name (string)",
+        description = tool_descriptors::SCHEMA_GET.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn schema_get(
@@ -169,9 +173,7 @@ impl McpServer {
 
     #[tool(
         name = "index_crates",
-        description = "Fetch and index crates from crates.io. Call when a crate is not yet \
-                       indexed (low confidence / empty results).\n\nRequired: crates (array of \
-                       {name: string, version?: string})\nOptional: include_dependencies (bool)",
+        description = tool_descriptors::INDEX_CRATES.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_crates(
@@ -187,7 +189,7 @@ impl McpServer {
 
     #[tool(
         name = "index_status",
-        description = "Return index freshness, coverage, and queue state. No parameters required.",
+        description = tool_descriptors::INDEX_STATUS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_status(
@@ -202,9 +204,7 @@ impl McpServer {
 
     #[tool(
         name = "index_refresh",
-        description = "Trigger index refresh for a scope and return job status.\n\nOptional: \
-                       scope (string), crate_name (string), query (string), page (int), per_page \
-                       (int), include_dependencies (bool)",
+        description = tool_descriptors::INDEX_REFRESH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn index_refresh(
@@ -220,9 +220,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_search",
-        description = "Search indexed crates by name, category, keyword, or \
-                       description.\n\nOptional: query (string), category (string), keyword \
-                       (string), sort (string), cursor (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_SEARCH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_search(
@@ -238,9 +236,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_intel",
-        description = "Start here for any crate. Dense intelligence: versions, deps, dependents, \
-                       advisories.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       versions_limit (int), dependents_limit (int), readme_max_chars (int)",
+        description = tool_descriptors::CRATE_INTEL.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_intel(
@@ -256,8 +252,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_features",
-        description = "Return feature flags, defaults, and transitive enables for a crate \
-                       version.\n\nRequired: crate_name (string)\nOptional: version (string)",
+        description = tool_descriptors::CRATE_FEATURES.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_features(
@@ -273,9 +268,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_api_diff",
-        description = "Compare public API symbols between two crate versions: added, removed, \
-                       changed.\n\nRequired: crate_name (string), from_version (string), \
-                       to_version (string)\nOptional: limit (int)",
+        description = tool_descriptors::CRATE_API_DIFF.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_api_diff(
@@ -291,10 +284,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_api",
-        description = "Return public API symbols for a crate version with optional kind/path \
-                       filters.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       path_glob (string), kinds (array of string), include_docs (bool), cursor \
-                       (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_API.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_api(
@@ -310,10 +300,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_type_info",
-        description = "Return type definition metadata and impl details for a crate \
-                       type.\n\nRequired: crate_name (string), type_name (string)\nOptional: \
-                       version (string), include_methods (bool), include_trait_impls (bool), \
-                       include_docs (bool)",
+        description = tool_descriptors::CRATE_TYPE_INFO.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_type_info(
@@ -329,10 +316,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_trait_impls",
-        description = "Return trait/type implementation relationships with optional \
-                       filters.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       trait_name (string), type_name (string), include_docs (bool), cursor \
-                       (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_TRAIT_IMPLS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_trait_impls(
@@ -348,9 +332,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_re_exports",
-        description = "Return public re-export mappings to canonical import paths.\n\nRequired: \
-                       crate_name (string)\nOptional: version (string), path_prefix (string), \
-                       cursor (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_RE_EXPORTS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_re_exports(
@@ -366,9 +348,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_import_path",
-        description = "Resolve public import paths for a crate symbol.\n\nRequired: crate_name \
-                       (string), symbol_name (string)\nOptional: version (string), kind (string), \
-                       cursor (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_IMPORT_PATH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_import_path(
@@ -384,9 +364,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_error_types",
-        description = "Return error-type metadata, conversion impls, and functions returning each \
-                       error.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       type_name (string), cursor (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_ERROR_TYPES.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_error_types(
@@ -402,9 +380,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_deprecated",
-        description = "Return deprecated symbols with notes and suggested \
-                       replacements.\n\nRequired: crate_name (string)\nOptional: version \
-                       (string), include_docs (bool), limit (int), page (int)",
+        description = tool_descriptors::CRATE_DEPRECATED.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_deprecated(
@@ -420,8 +396,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_derive_macros",
-        description = "Return proc-macro exports (derive, attribute, function-like) for a \
-                       crate.\n\nRequired: crate_name (string)\nOptional: version (string)",
+        description = tool_descriptors::CRATE_DERIVE_MACROS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_derive_macros(
@@ -437,9 +412,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_compare",
-        description = "Compare two crates on adoption, risk, and maintenance \
-                       signals.\n\nRequired: left_crate (string), right_crate (string)\nOptional: \
-                       left_version (string), right_version (string)",
+        description = tool_descriptors::CRATE_COMPARE.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compare(
@@ -455,9 +428,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_compatibility",
-        description = "Check pairwise dependency compatibility between two crates.\n\nRequired: \
-                       left_crate (string), right_crate (string)\nOptional: left_version \
-                       (string), right_version (string), check_features (bool)",
+        description = tool_descriptors::CRATE_COMPATIBILITY.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compatibility(
@@ -472,10 +443,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_compatibility_matrix",
-        description = "Evaluate compatibility across multiple version pairs between two \
-                       crates.\n\nRequired: left_crate (string), right_crate (string)\nOptional: \
-                       left_versions (array of string), right_versions (array of string), \
-                       check_features (bool), version_limit (int), max_pairs (int)",
+        description = tool_descriptors::CRATE_COMPATIBILITY_MATRIX.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_compatibility_matrix(
@@ -493,9 +461,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_migration_path",
-        description = "Summarize migration actions for a crate upgrade from API diff breaking \
-                       changes.\n\nRequired: crate_name (string), from_version (string), \
-                       to_version (string)\nOptional: limit (int)",
+        description = tool_descriptors::CRATE_MIGRATION_PATH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_migration_path(
@@ -511,9 +477,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_license_check",
-        description = "Return license metadata and evaluate optional allow/deny policy \
-                       lists.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       allow_licenses (array of string), deny_licenses (array of string)",
+        description = tool_descriptors::CRATE_LICENSE_CHECK.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_license_check(
@@ -529,10 +493,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_alternatives",
-        description = "Suggest ranked alternative crates by taxonomy overlap and adoption \
-                       signals.\n\nRequired: crate_name (string)\nOptional: version (string), \
-                       cursor (string), page (int), limit (int), allow_licenses (array of \
-                       string), deny_licenses (array of string)",
+        description = tool_descriptors::CRATE_ALTERNATIVES.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_alternatives(
@@ -548,9 +509,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_versions",
-        description = "Return crate version timeline with yanked/security/adoption \
-                       markers.\n\nRequired: crate_name (string)\nOptional: cursor (string), page \
-                       (int), limit (int)",
+        description = tool_descriptors::CRATE_VERSIONS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_versions(
@@ -566,9 +525,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_graph",
-        description = "Return depth-bounded dependency/dependent graph for a crate.\n\nRequired: \
-                       crate_name (string)\nOptional: version (string), direction (string), depth \
-                       (int)",
+        description = tool_descriptors::CRATE_GRAPH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_graph(
@@ -584,10 +541,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_hotspots",
-        description = "Detect unsafe and concurrency hotspots in crate source.\n\nRequired: \
-                       crate_name (string)\nOptional: version (string), path_glob (string), \
-                       include_unsafe (bool), include_concurrency (bool), cursor (string), page \
-                       (int), limit (int)",
+        description = tool_descriptors::CRATE_HOTSPOTS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_hotspots(
@@ -603,9 +557,7 @@ impl McpServer {
 
     #[tool(
         name = "dependency_audit",
-        description = "Audit a Cargo.toml for yanked versions, advisories, outdated deps, and \
-                       MSRV conflicts.\n\nRequired: cargo_toml (string — full Cargo.toml file \
-                       content)",
+        description = tool_descriptors::DEPENDENCY_AUDIT.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_audit(
@@ -620,11 +572,7 @@ impl McpServer {
 
     #[tool(
         name = "dependency_resolve",
-        description = "Simulate dependency resolution and report resolvable versions or \
-                       conflicts. Provide dependencies, cargo_toml, or both.\n\nOptional: \
-                       dependencies (array of {name: string, version_req?: string}), cargo_toml \
-                       (string), additions (array of {name, version_req?}), check_features \
-                       (bool), limit (int)",
+        description = tool_descriptors::DEPENDENCY_RESOLVE.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_resolve(
@@ -639,9 +587,7 @@ impl McpServer {
 
     #[tool(
         name = "dependency_feature_impact",
-        description = "Estimate additional dependency surface from selected feature \
-                       flags.\n\nRequired: crate_name (string), features (array of \
-                       string)\nOptional: version (string), heavy_threshold (int)",
+        description = tool_descriptors::DEPENDENCY_FEATURE_IMPACT.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn dependency_feature_impact(
@@ -660,10 +606,7 @@ impl McpServer {
 
     #[tool(
         name = "source_search",
-        description = "Search indexed source files by text/regex with optional crate/version/path \
-                       filters.\n\nRequired: query (string)\nOptional: crate_name (string), \
-                       version (string), path_glob (string), mode (string), cursor (string), page \
-                       (int), limit (int)",
+        description = tool_descriptors::SOURCE_SEARCH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_search(
@@ -679,9 +622,7 @@ impl McpServer {
 
     #[tool(
         name = "source_read",
-        description = "Read a line range from an indexed crate source file.\n\nRequired: \
-                       crate_name (string), path (string)\nOptional: version (string), start_line \
-                       (int), end_line (int)",
+        description = tool_descriptors::SOURCE_READ.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_read(
@@ -697,9 +638,7 @@ impl McpServer {
 
     #[tool(
         name = "source_context",
-        description = "Return semantic context around a source location: module path, imports, \
-                       containing impl, nearby types.\n\nRequired: crate_name (string), path \
-                       (string)\nOptional: version (string), line (int), symbol_name (string)",
+        description = tool_descriptors::SOURCE_CONTEXT.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn source_context(
@@ -715,11 +654,7 @@ impl McpServer {
 
     #[tool(
         name = "symbol_search",
-        description = "Search indexed symbols by name with optional crate/version/kind \
-                       filters.\n\nRequired: query (string)\nOptional: crate_name (string), \
-                       version (string), kind (string), include_all_versions (bool), \
-                       collapse_by_canonical (bool), include_docs (bool), cursor (string), page \
-                       (int), limit (int)",
+        description = tool_descriptors::SYMBOL_SEARCH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn symbol_search(
@@ -734,10 +669,7 @@ impl McpServer {
 
     #[tool(
         name = "docs_search",
-        description = "Search indexed docs.rs pages by query with optional crate/version/path \
-                       filters.\n\nRequired: query (string)\nOptional: crate_name (string), \
-                       version (string), path_prefix (string), cursor (string), page (int), limit \
-                       (int)",
+        description = tool_descriptors::DOCS_SEARCH.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn docs_search(
@@ -752,9 +684,7 @@ impl McpServer {
 
     #[tool(
         name = "crate_usage_patterns",
-        description = "Return source snippets from dependent crates that use a target \
-                       symbol.\n\nRequired: crate_name (string), symbol_name (string)\nOptional: \
-                       version (string), cursor (string), page (int), limit (int)",
+        description = tool_descriptors::CRATE_USAGE_PATTERNS.description,
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn crate_usage_patterns(
@@ -767,6 +697,75 @@ impl McpServer {
         self.instrument_tool("crate_usage_patterns", self.handle_crate_usage_patterns(request, tcx))
             .await
     }
+}
+
+/// Prefix rmcp gives in-band tool results for argument deserialization
+/// failures.
+const ARGUMENT_ERROR_PREFIX: &str = "failed to deserialize parameters:";
+
+impl McpServer {
+    /// Appends the tool's expected parameters to an argument-deserialization
+    /// error result; other results pass through unchanged.
+    fn with_argument_hint(&self, tool_name: &str, mut result: CallToolResult) -> CallToolResult {
+        let Some(message) = result
+            .content
+            .first()
+            .and_then(|content| content.as_text())
+            .map(|text| text.text.clone())
+            .filter(|text| {
+                result.is_error == Some(true) && text.starts_with(ARGUMENT_ERROR_PREFIX)
+            })
+        else {
+            return result;
+        };
+        let Some(tool) = self
+            .tool_router
+            .get(tool_name)
+        else {
+            return result;
+        };
+        result.content = vec![ContentBlock::text(format!(
+            "{message}\n\nParameters for `{tool_name}`: {}",
+            parameter_summary(tool)
+        ))];
+        result
+    }
+}
+
+/// Summarizes a tool's parameters from its input schema, required ones first,
+/// e.g. `crate_name (required), path (required), version`.
+fn parameter_summary(tool: &Tool) -> String {
+    let required: Vec<&str> = tool
+        .input_schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut names: Vec<&str> = tool
+        .input_schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .keys()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort_by_key(|name| !required.contains(name));
+
+    names
+        .iter()
+        .map(|name| {
+            if required.contains(name) { format!("{name} (required)") } else { (*name).to_string() }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl ServerHandler for McpServer {
@@ -804,23 +803,26 @@ impl ServerHandler for McpServer {
         let tool_name = request.name.clone();
         async move {
             let tcc = RmcpToolCallContext::new(self, request, context);
+            // Enrich argument errors with the expected parameters, or name the
+            // unknown tool, so the client LLM can self-correct.
             match self
                 .tool_router
                 .call(tcc)
                 .await
             {
-                Ok(result) => Ok(result),
-                Err(err) if err.code == ErrorCode::INVALID_PARAMS => {
-                    // Enrich deserialization errors with the tool's description
-                    // so the client LLM can self-correct.
-                    let hint = self
-                        .tool_router
-                        .get(&tool_name)
-                        .and_then(|tool| tool.description.as_deref())
-                        .unwrap_or("(no description available)");
-
+                Ok(CallToolResponse::Complete(result)) => Ok(self
+                    .with_argument_hint(&tool_name, result)
+                    .into()),
+                Ok(response) => Ok(response),
+                Err(err)
+                    if err.code == ErrorCode::INVALID_PARAMS
+                        && self
+                            .tool_router
+                            .get(&tool_name)
+                            .is_none() =>
+                {
                     Err(ErrorData::invalid_params(
-                        format!("{}\n\nTool description for `{tool_name}`:\n{hint}", err.message,),
+                        format!("{}\n\nUnknown tool `{tool_name}`.", err.message),
                         err.data,
                     ))
                 }

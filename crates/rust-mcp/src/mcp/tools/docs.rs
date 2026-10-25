@@ -102,12 +102,12 @@ impl McpServer {
 
         let candidates = indexing::fetch_rustdoc_sync_candidates(
             &self.state.db,
-            crate_filter.as_deref(),
+            &indexing::RustdocCandidateFilter {
+                crate_name: crate_filter.as_deref(),
+                ..Default::default()
+            },
             i64::from(per_page),
             i64::from(offset),
-            false,
-            false,
-            None,
         )
         .await
         .map_err(|e| format!("docs sync failed to load crate versions: {e}"))?;

@@ -5,9 +5,10 @@ use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
 use crate::db::indexing::{
-    claim_next_refresh_job, enqueue_or_get_refresh_job_id, fetch_refresh_job_gauge_counts,
-    fetch_refresh_job_scope_pending_counts, mark_crate_refresh_error,
-    mark_refresh_job_failed_or_requeued, mark_refresh_job_finished, mark_versions_locally_present,
+    RustdocCandidateFilter, claim_next_refresh_job, enqueue_or_get_refresh_job_id,
+    fetch_refresh_job_gauge_counts, fetch_refresh_job_scope_pending_counts,
+    mark_crate_refresh_error, mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
+    mark_versions_locally_present,
 };
 use crate::db::tools::delete_query_cache_for_crate;
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
@@ -188,6 +189,7 @@ pub async fn run_refresh_worker(state: AppState) {
             "local_cache" => server
                 .sync_local_source_cache(
                     optional_job_crate_name(&job.crate_name, payload.crate_name),
+                    None,
                     payload.query,
                     payload.page,
                     payload.per_page,
@@ -195,21 +197,24 @@ pub async fn run_refresh_worker(state: AppState) {
                 )
                 .await
                 .map(RefreshJobOutcome::LocalCache),
-            "rustdoc_json" => server
-                .sync_rustdoc_json_cache(
-                    optional_job_crate_name(&job.crate_name, payload.crate_name),
-                    payload.page,
-                    payload.per_page,
+            "rustdoc_json" => {
+                let crate_name = optional_job_crate_name(&job.crate_name, payload.crate_name);
+                let filter = RustdocCandidateFilter {
+                    crate_name: crate_name.as_deref(),
                     locally_present_only,
-                    true,
-                    Some(
+                    skip_enriched: true,
+                    retry_cooldown_seconds: Some(
                         state
                             .config
                             .rustdoc_retry_cooldown_secs as i64,
                     ),
-                )
-                .await
-                .map(RefreshJobOutcome::RustdocJson),
+                    ..Default::default()
+                };
+                server
+                    .sync_rustdoc_json_cache(filter, payload.page, payload.per_page)
+                    .await
+                    .map(RefreshJobOutcome::RustdocJson)
+            }
             other => {
                 Err(format!("unsupported refresh scope '{}' for crate '{}'", other, job.crate_name))
             }

@@ -6,6 +6,7 @@ This file is the agent-facing source of truth, alongside:
 
 - `README.md` for end users
 - `docs/ROADMAP.md` for future work
+- `skills/rust-mcp/` for the agent skill shipped to users
 
 ## Project Summary
 
@@ -127,6 +128,12 @@ cargo --locked nextest run -p rust-mcp --features e2e-tests --test e2e_http <fil
 - Core runtime is HTTP-only; stdio support should live in a separate adapter binary.
 - Refresh worker and startup rustdoc sync are spawned from `app.rs`.
 - Docker entrypoint boots embedded PostgreSQL and can apply outbound host allowlisting.
+
+## Agent Skill
+
+- `skills/rust-mcp/` documents tools for agents: `SKILL.md` routes to `workflows/*.md` (multi-tool recipes) and `tools/*.md` (one `` ## `tool_name` `` section per tool).
+- When adding, renaming or changing a tool's parameters or behavior, update the skill; `skill_tool_reference_covers_all_tools` fails if a tool is missing or unknown.
+- Tool descriptions live once in `rust-mcp-types/src/tools.rs`. Keep them to one line and add only constraints the input schema cannot express; parameter docs belong in the request struct's field doc comments.
 
 ## Docs Policy
 

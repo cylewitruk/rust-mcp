@@ -148,7 +148,8 @@ pub mod index {
     pub struct IndexCrateEntry {
         /// Crate name (e.g. `serde`).
         pub name: String,
-        /// Version to index (default: latest).
+        /// Exact version to also enrich (source + rustdoc); the entry fails if
+        /// it does not exist (default: latest).
         pub version: Option<String>,
     }
 
@@ -158,7 +159,7 @@ pub mod index {
         /// Crates to index, e.g. `[{"name": "serde"}, {"name": "tokio",
         /// "version": "1.40.0"}]`.
         pub crates: Vec<IndexCrateEntry>,
-        /// Also fetch and index dependency metadata (default: false).
+        /// Also fetch and index dependency metadata (default: true).
         pub include_dependencies: Option<bool>,
     }
 
@@ -219,16 +220,17 @@ pub mod index {
         /// `"local_cache"`, or `"rustdoc_json"` (default: `"all"`).
         pub scope: Option<IndexRefreshScope>,
         /// Filter refresh to a specific crate, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: Option<String>,
         /// Search query to select candidate crates for refresh.
         pub query: Option<String>,
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Page size for candidate selection (default: 10).
+        /// Page size for candidate selection (default: 25).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub per_page: Option<u32>,
-        /// Also sync dependency metadata (default: false).
+        /// Also sync dependency metadata (default: true).
         pub include_dependencies: Option<bool>,
     }
 
@@ -427,6 +429,7 @@ pub mod source {
         /// Text or regex pattern to search for, e.g. `"async fn connect"`.
         pub query: String,
         /// Filter by crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: Option<String>,
         /// Filter by semver version, e.g. `"1.40.0"`.
         pub version: Option<String>,
@@ -506,6 +509,7 @@ pub mod source {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceReadRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
@@ -550,12 +554,14 @@ pub mod source {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SourceContextRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
         /// Source file path within the crate, e.g. `"src/runtime/mod.rs"`.
         pub path: String,
-        /// Anchor line number (1-based) for context extraction.
+        /// Anchor line number (1-based). One of `line` or `symbol_name` is
+        /// required.
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub line: Option<u32>,
         /// Symbol name to resolve the anchor line automatically, e.g.
@@ -646,6 +652,7 @@ pub mod symbol {
         /// Symbol name or substring to search for, e.g. `"HashMap"`.
         pub query: String,
         /// Filter by crate name, e.g. `"std"`.
+        #[serde(alias = "crate")]
         pub crate_name: Option<String>,
         /// Filter by semver version, e.g. `"1.80.0"`.
         pub version: Option<String>,
@@ -654,7 +661,7 @@ pub mod symbol {
         /// Include results from all indexed versions, not just latest (default:
         /// false).
         pub include_all_versions: Option<bool>,
-        /// Collapse entries with duplicate canonical paths (default: true).
+        /// Collapse entries with duplicate canonical paths (default: false).
         pub collapse_by_canonical: Option<bool>,
         /// Include doc comments (first paragraph summary) in each hit.
         pub include_docs: Option<bool>,
@@ -663,7 +670,7 @@ pub mod symbol {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 20).
+        /// Max results per page (default: 25).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -752,6 +759,7 @@ pub mod docs {
         /// Search query for docs.rs page content, e.g. `"async runtime"`.
         pub query: String,
         /// Filter by crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: Option<String>,
         /// Filter by semver version, e.g. `"1.40.0"`.
         pub version: Option<String>,
@@ -762,7 +770,7 @@ pub mod docs {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 10).
+        /// Max results per page (default: 25).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -833,7 +841,10 @@ pub mod dependency {
     /// Request payload for `dependency_audit`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyAuditRequest {
-        /// Full text content of a Cargo.toml manifest file.
+        /// Full text content of a Cargo.toml manifest file. Each declared
+        /// requirement is checked against the highest indexed matching
+        /// version; Cargo.lock, `workspace = true` inheritance and
+        /// `package` renames are not resolved.
         pub cargo_toml: String,
     }
 
@@ -952,12 +963,13 @@ pub mod dependency {
         /// from.
         #[serde(default)]
         pub cargo_toml: Option<String>,
-        /// Additional dependencies to resolve alongside manifest inputs.
+        /// Additional or what-if dependencies; a requirement here overrides the
+        /// manifest's requirement for the same crate.
         pub additions: Option<Vec<DependencyResolveInputDependency>>,
-        /// Also analyze feature unification across resolved dependencies
-        /// (default: false).
+        /// Also count referenced feature flags and optional dependencies (an
+        /// estimate, not Cargo's feature resolution; default: false).
         pub check_features: Option<bool>,
-        /// Max transitive dependency expansion depth (default: 1).
+        /// Max input dependencies to evaluate (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1044,6 +1056,7 @@ pub mod dependency {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct DependencyFeatureImpactRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
@@ -1228,16 +1241,18 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateIntelRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
-        /// Max version history entries to return (default: 10).
+        /// Max version history entries to return (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub versions_limit: Option<u32>,
-        /// Max dependent crate entries to return (default: 10).
+        /// Max dependent crate entries to return (default: 25).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub dependents_limit: Option<u32>,
-        /// Max readme content characters to include (default: 2000, 0 to omit).
+        /// Max readme characters to include (default: 25000, minimum 500; 0
+        /// omits the readme).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub readme_max_chars: Option<u32>,
     }
@@ -1440,13 +1455,14 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateVersionsRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Paging cursor from a previous response's `next_cursor`.
         pub cursor: Option<String>,
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 20).
+        /// Max results per page (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1570,6 +1586,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
@@ -1584,7 +1601,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 50).
+        /// Max results per page (default: 200).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1666,12 +1683,13 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateApiDiffRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Source semver version to diff from, e.g. `"1.0.0"`.
         pub from_version: String,
         /// Target semver version to diff to, e.g. `"1.0.204"`.
         pub to_version: String,
-        /// Max diff entries to return (default: 100).
+        /// Max diff entries to return (default: 500).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -1759,6 +1777,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateFeaturesRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
@@ -1830,12 +1849,13 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateGraphRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
         /// Graph traversal direction (default: `"dependencies"`).
         pub direction: Option<CrateGraphDirection>,
-        /// Max traversal depth (default: 2).
+        /// Max traversal depth (default: 1, max: 4).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub depth: Option<u32>,
     }
@@ -1919,6 +1939,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateHotspotsRequest {
         /// Crate name, e.g. `"ring"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"0.17.8"`.
         pub version: Option<String>,
@@ -1933,7 +1954,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 50).
+        /// Max results per page (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -2034,6 +2055,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateLicenseCheckRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
@@ -2089,6 +2111,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateUsagePatternsRequest {
         /// Crate name whose symbol to search for in dependents, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Symbol name to find usage examples of, e.g. `"Serialize"`.
         pub symbol_name: String,
@@ -2178,6 +2201,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateReExportsRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.40.0"`.
         pub version: Option<String>,
@@ -2188,7 +2212,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 50).
+        /// Max results per page (default: 200).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -2265,6 +2289,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateImportPathRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Symbol name to resolve the import path for, e.g. `"Deserialize"`.
         pub symbol_name: String,
@@ -2277,7 +2302,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 20).
+        /// Max results per page (default: 10).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -2362,12 +2387,13 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateMigrationPathRequest {
         /// Crate name, e.g. `"axum"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Source semver version to migrate from, e.g. `"0.6.0"`.
         pub from_version: String,
         /// Target semver version to migrate to, e.g. `"0.7.0"`.
         pub to_version: String,
-        /// Max migration action entries to return (default: 100).
+        /// Max migration action entries to return (default: 500).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -2610,6 +2636,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeriveMacrosRequest {
         /// Crate name, e.g. `"serde_derive"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
@@ -2699,6 +2726,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateErrorTypesRequest {
         /// Crate name, e.g. `"anyhow"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.86"`.
         pub version: Option<String>,
@@ -2709,7 +2737,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 50).
+        /// Max results per page (default: 100).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -2789,6 +2817,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateAlternativesRequest {
         /// Crate name to find alternatives for, e.g. `"reqwest"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"0.12.5"`.
         pub version: Option<String>,
@@ -2892,10 +2921,12 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTraitImplsRequest {
         /// Crate name, e.g. `"serde"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Semver version (default: latest indexed), e.g. `"1.0.204"`.
         pub version: Option<String>,
-        /// Filter by trait name, e.g. `"Serialize"`.
+        /// Filter by trait name, e.g. `"Serialize"`. One of `trait_name` or
+        /// `type_name` is required.
         pub trait_name: Option<String>,
         /// Filter by implementing type name, e.g. `"HashMap"`.
         pub type_name: Option<String>,
@@ -2906,7 +2937,7 @@ pub mod krate {
         /// Page number (1-based, default: 1).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub page: Option<u32>,
-        /// Max results per page (default: 50).
+        /// Max results per page (default: 200).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub limit: Option<u32>,
     }
@@ -3007,6 +3038,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateTypeInfoRequest {
         /// Crate name, e.g. `"tokio"`.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Type name to look up, e.g. `"Runtime"`.
         pub type_name: String,
@@ -3174,6 +3206,7 @@ pub mod krate {
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct CrateDeprecatedRequest {
         /// Crate name.
+        #[serde(alias = "crate")]
         pub crate_name: String,
         /// Version (default: latest).
         pub version: Option<String>,

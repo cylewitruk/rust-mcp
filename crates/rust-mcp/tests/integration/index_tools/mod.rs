@@ -467,7 +467,51 @@ async fn mock_search_crates() -> Json<Value> {
     }))
 }
 
+/// Crate whose oldest release sits outside the newest-25 source scan page.
+const PINNED_SOURCE_CRATE: &str = "pinned_source_crate";
+const PINNED_SOURCE_OLDEST_VERSION: &str = "0.9.0";
+
+/// Versions served for [`PINNED_SOURCE_CRATE`]: 25 releases newer than the
+/// oldest one.
+fn pinned_source_versions() -> Vec<String> {
+    std::iter::once(PINNED_SOURCE_OLDEST_VERSION.to_string())
+        .chain((0..25).map(|minor| format!("1.{minor}.0")))
+        .collect()
+}
+
+fn pinned_source_crate_detail() -> Value {
+    let versions = pinned_source_versions()
+        .into_iter()
+        .enumerate()
+        .map(|(index, version)| {
+            json!({
+                "num": version,
+                "created_at": format!("2025-01-{:02}T00:00:00Z", index + 1),
+                "updated_at": format!("2025-01-{:02}T00:00:00Z", index + 1),
+                "yanked": false,
+                "downloads": 10,
+                "checksum": "c".repeat(64),
+                "license": "MIT",
+                "features": {}
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "crate": {
+            "name": PINNED_SOURCE_CRATE,
+            "description": "Crate with many cached releases",
+            "max_version": "1.24.0"
+        },
+        "versions": versions,
+        "keywords": [],
+        "categories": []
+    })
+}
+
 async fn mock_crate_detail(Path(crate_name): Path<String>) -> impl IntoResponse {
+    if crate_name == PINNED_SOURCE_CRATE {
+        return (StatusCode::OK, Json(pinned_source_crate_detail())).into_response();
+    }
     if crate_name != "demo_crate" {
         return (
             StatusCode::NOT_FOUND,
@@ -501,6 +545,17 @@ async fn mock_crate_detail(Path(crate_name): Path<String>) -> impl IntoResponse 
                         "default": ["serde_support"],
                         "serde_support": ["dep:serde"]
                     }
+                },
+                {
+                    "num": "1.1.0",
+                    "created_at": "2025-06-01T00:00:00Z",
+                    "updated_at": "2025-06-01T00:00:00Z",
+                    "yanked": false,
+                    "downloads": 100,
+                    "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    "rust_version": "1.70",
+                    "license": "MIT OR Apache-2.0",
+                    "features": {}
                 }
             ],
             "keywords": [
@@ -532,6 +587,9 @@ async fn mock_crate_readme(
 async fn mock_crate_dependencies(
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if crate_name == PINNED_SOURCE_CRATE || (crate_name == "demo_crate" && version == "1.1.0") {
+        return (StatusCode::OK, Json(json!({ "dependencies": [] }))).into_response();
+    }
     if crate_name != "demo_crate" || version != "1.2.3" {
         return (StatusCode::NOT_FOUND, Json(json!({ "dependencies": [] }))).into_response();
     }

@@ -1,3 +1,4 @@
+use rust_mcp::db::indexing::{RustdocCandidateFilter, fetch_rustdoc_sync_candidates};
 use rust_mcp_testing::fixtures::{
     materialize_workspace_rustdoc_fixture_zst, materialize_workspace_rustdoc_fixtures_zst,
 };
@@ -741,14 +742,17 @@ async fn fetch_rustdoc_sync_candidates_excludes_enriched_versions() {
     .expect("failed to mark first version as enriched");
 
     // Query candidates with skip_enriched=true.
-    let candidates = rust_mcp::db::indexing::fetch_rustdoc_sync_candidates(
+    let candidates = fetch_rustdoc_sync_candidates(
         &context.state.db,
-        Some(&crate_name),
+        &RustdocCandidateFilter {
+            crate_name: Some(&crate_name),
+            locally_present_only: true,
+            skip_enriched: true,
+            retry_cooldown_seconds: Some(86400),
+            ..Default::default()
+        },
         100,
         0,
-        true,
-        true,
-        Some(86400),
     )
     .await
     .expect("failed to fetch rustdoc sync candidates");
@@ -763,14 +767,15 @@ async fn fetch_rustdoc_sync_candidates_excludes_enriched_versions() {
     assert_eq!(candidates[0].crate_version_id, version_ids[1]);
 
     // Query candidates with skip_enriched=false — both should be returned.
-    let all_candidates = rust_mcp::db::indexing::fetch_rustdoc_sync_candidates(
+    let all_candidates = fetch_rustdoc_sync_candidates(
         &context.state.db,
-        Some(&crate_name),
+        &RustdocCandidateFilter {
+            crate_name: Some(&crate_name),
+            locally_present_only: true,
+            ..Default::default()
+        },
         100,
         0,
-        true,
-        false,
-        None,
     )
     .await
     .expect("failed to fetch all rustdoc sync candidates");
@@ -781,4 +786,72 @@ async fn fetch_rustdoc_sync_candidates_excludes_enriched_versions() {
         "expected both versions with skip_enriched=false, got {} candidates",
         all_candidates.len()
     );
+}
+
+/// A source scan of an already rustdoc-enriched release must keep the
+/// rustdoc-derived index rows (they live under synthetic source paths that
+/// are absent from the source directory).
+#[tokio::test]
+async fn source_scan_preserves_rustdoc_index_rows() {
+    let (rustdoc_dir, crate_name, crate_version) = write_rustdoc_fixture_file();
+    let context = mock_index_sync_context_with_rustdoc_dir(Some(rustdoc_dir))
+        .await
+        .expect("failed to build rustdoc index context");
+    seed_crate_release(
+        &context.state.db,
+        &crate_name,
+        &crate_version,
+        42,
+        Some("2026-01-01T00:00:00Z"),
+    )
+    .await
+    .expect("failed to seed crate release");
+
+    context
+        .mcp
+        .call_tool("index_refresh", json!({"scope": "rustdoc_json", "crate_name": crate_name}))
+        .await
+        .expect("rustdoc enrichment failed");
+    let count_rows = |index_source: &'static str| {
+        let db = context.state.db.clone();
+        let (crate_name, crate_version) = (crate_name.clone(), crate_version.clone());
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*)::BIGINT
+                 FROM symbols s
+                 JOIN crate_versions cv ON cv.id = s.crate_version_id
+                 JOIN crates c ON c.id = cv.crate_id
+                 WHERE c.name = $1 AND cv.version = $2 AND s.index_source = $3",
+            )
+            .bind(crate_name)
+            .bind(crate_version)
+            .bind(index_source)
+            .fetch_one(&db)
+            .await
+            .expect("failed to count symbols")
+        }
+    };
+    let rustdoc_before = count_rows("rustdoc_json").await;
+    assert!(rustdoc_before >= 1, "fixture should produce rustdoc symbols");
+
+    let source_dir = context
+        .state
+        .config
+        .crate_source_cache_dir
+        .join(format!("{crate_name}-{crate_version}"));
+    std::fs::create_dir_all(source_dir.join("src")).expect("create source dir");
+    std::fs::write(source_dir.join("src/lib.rs"), "pub fn scanned_from_source() {}\n")
+        .expect("write source file");
+
+    let scan = context
+        .mcp
+        .call_tool("index_refresh", json!({"scope": "local_cache", "crate_name": crate_name}))
+        .await;
+    let rustdoc_after = count_rows("rustdoc_json").await;
+    let syn_after = count_rows("syn").await;
+    let _ = std::fs::remove_dir_all(&source_dir);
+
+    scan.expect("source scan failed");
+    assert_eq!(rustdoc_after, rustdoc_before, "source scan must not prune rustdoc rows");
+    assert!(syn_after >= 1, "source scan should index the release's source");
 }

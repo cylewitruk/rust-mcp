@@ -658,11 +658,13 @@ fn extract_rust_symbols(content: &str) -> Result<IndexedExtractionBatch, String>
 impl McpServer {
     /// Refreshes the local source file cache from the cargo registry directory.
     ///
-    /// When `locally_present_only` is `true`, only crate versions flagged as
-    /// present in the user's cargo registry are considered.
+    /// `version` restricts the refresh to one exact version. When
+    /// `locally_present_only` is `true`, only crate versions flagged as present
+    /// in the user's cargo registry are considered.
     pub async fn sync_local_source_cache(
         &self,
         crate_name: Option<String>,
+        version: Option<&str>,
         query: Option<String>,
         page: Option<u32>,
         per_page: Option<u32>,
@@ -686,6 +688,7 @@ impl McpServer {
         let version_rows = fetch_local_cache_version_keys(
             &self.state.db,
             requested_crate_name.as_deref(),
+            version,
             locally_present_only,
         )
         .await

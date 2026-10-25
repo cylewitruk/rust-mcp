@@ -154,6 +154,7 @@ pub async fn fetch_unenriched_crate_names(
 pub async fn fetch_local_cache_version_keys(
     db: &PgPool,
     crate_name: Option<&str>,
+    version: Option<&str>,
     locally_present_only: bool,
 ) -> Result<Vec<LocalCacheVersionKeyRow>, sqlx::Error> {
     sqlx::query_as::<_, LocalCacheVersionKeyRow>(
@@ -165,31 +166,42 @@ pub async fn fetch_local_cache_version_keys(
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
          WHERE ($1::TEXT IS NULL OR c.name_lower = LOWER($1))
-           AND ($2::BOOL IS FALSE OR cv.locally_present = TRUE)",
+           AND ($2::BOOL IS FALSE OR cv.locally_present = TRUE)
+           AND ($3::TEXT IS NULL OR cv.version = $3)",
     )
     .bind(crate_name)
     .bind(locally_present_only)
+    .bind(version)
     .fetch_all(db)
     .await
 }
 
-/// Loads crate versions eligible for rustdoc JSON refresh.
-///
-/// When `locally_present_only` is `true`, only versions flagged as present
-/// in the user's cargo registry are returned.
-///
-/// When `skip_enriched` is `true`, versions with `rustdoc_enriched_at` set
-/// are excluded. Versions whose last attempt is within
-/// `retry_cooldown_seconds` are also excluded; pass `None` to skip all
-/// previously-attempted versions regardless of age.
+/// Path prefix of the synthetic `source_files` rows that own rustdoc-derived
+/// index data; source scans never prune them.
+pub const RUSTDOC_SOURCE_PATH_PREFIX: &str = "rustdoc-json/";
+
+/// Selects crate versions for rustdoc JSON enrichment.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RustdocCandidateFilter<'a> {
+    /// Only this crate (case-insensitive).
+    pub crate_name: Option<&'a str>,
+    /// Only this exact version.
+    pub version: Option<&'a str>,
+    /// Only versions present in the local cargo registry.
+    pub locally_present_only: bool,
+    /// Skip versions already enriched or previously attempted.
+    pub skip_enriched: bool,
+    /// With `skip_enriched`, retry previously attempted versions once this many
+    /// seconds have passed; `None` never retries them.
+    pub retry_cooldown_seconds: Option<i64>,
+}
+
+/// Loads crate versions eligible for rustdoc JSON refresh, newest first.
 pub async fn fetch_rustdoc_sync_candidates(
     db: &PgPool,
-    crate_name: Option<&str>,
+    filter: &RustdocCandidateFilter<'_>,
     limit: i64,
     offset: i64,
-    locally_present_only: bool,
-    skip_enriched: bool,
-    retry_cooldown_seconds: Option<i64>,
 ) -> Result<Vec<RustdocSyncCandidateRow>, sqlx::Error> {
     sqlx::query_as::<_, RustdocSyncCandidateRow>(
         "SELECT
@@ -199,6 +211,7 @@ pub async fn fetch_rustdoc_sync_candidates(
          FROM crate_versions cv
          JOIN crates c ON c.id = cv.crate_id
          WHERE ($1::TEXT IS NULL OR c.name_lower = LOWER($1))
+           AND ($7::TEXT IS NULL OR cv.version = $7)
            AND ($4::BOOL IS FALSE OR cv.locally_present = TRUE)
            AND ($5::BOOL IS FALSE OR (
                cv.rustdoc_enriched_at IS NULL
@@ -210,12 +223,13 @@ pub async fn fetch_rustdoc_sync_candidates(
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT $2 OFFSET $3",
     )
-    .bind(crate_name)
+    .bind(filter.crate_name)
     .bind(limit)
     .bind(offset)
-    .bind(locally_present_only)
-    .bind(skip_enriched)
-    .bind(retry_cooldown_seconds)
+    .bind(filter.locally_present_only)
+    .bind(filter.skip_enriched)
+    .bind(filter.retry_cooldown_seconds)
+    .bind(filter.version)
     .fetch_all(db)
     .await
 }
@@ -1519,90 +1533,46 @@ pub async fn insert_indexed_extraction_batch(
     Ok(counts)
 }
 
-/// Deletes stale source-file-backed index rows for a crate version.
+/// Deletes stale source-file-backed index rows for a crate version: rows whose
+/// source file is not in `seen_paths`. Rustdoc-owned rows are never pruned.
 pub async fn prune_stale_source_file_index_rows(
     tx: &mut Transaction<'_, Postgres>,
     crate_version_id: i64,
     seen_paths: &[String],
 ) -> Result<(), sqlx::Error> {
-    if seen_paths.is_empty() {
-        sqlx::query(
-            "DELETE FROM symbols
+    let rustdoc_paths = format!("{RUSTDOC_SOURCE_PATH_PREFIX}%");
+    for query in [
+        "DELETE FROM symbols
+         WHERE crate_version_id = $1
+           AND source_file_id IN (
+             SELECT id FROM source_files
              WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id FROM source_files WHERE crate_version_id = $1
-               )",
-        )
-        .bind(crate_version_id)
-        .execute(&mut **tx)
-        .await?;
-
-        sqlx::query(
-            "DELETE FROM crate_types
+               AND NOT (path = ANY($2::TEXT[]))
+               AND path NOT LIKE $3
+           )",
+        "DELETE FROM crate_types
+         WHERE crate_version_id = $1
+           AND source_file_id IN (
+             SELECT id FROM source_files
              WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id FROM source_files WHERE crate_version_id = $1
-               )",
-        )
-        .bind(crate_version_id)
-        .execute(&mut **tx)
-        .await?;
-
-        sqlx::query(
-            "DELETE FROM crate_impls
+               AND NOT (path = ANY($2::TEXT[]))
+               AND path NOT LIKE $3
+           )",
+        "DELETE FROM crate_impls
+         WHERE crate_version_id = $1
+           AND source_file_id IN (
+             SELECT id FROM source_files
              WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id FROM source_files WHERE crate_version_id = $1
-               )",
-        )
-        .bind(crate_version_id)
-        .execute(&mut **tx)
-        .await?;
-    } else {
-        sqlx::query(
-            "DELETE FROM symbols
-             WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id
-                 FROM source_files
-                 WHERE crate_version_id = $1
-                   AND NOT (path = ANY($2::TEXT[]))
-               )",
-        )
-        .bind(crate_version_id)
-        .bind(seen_paths)
-        .execute(&mut **tx)
-        .await?;
-
-        sqlx::query(
-            "DELETE FROM crate_types
-             WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id
-                 FROM source_files
-                 WHERE crate_version_id = $1
-                   AND NOT (path = ANY($2::TEXT[]))
-               )",
-        )
-        .bind(crate_version_id)
-        .bind(seen_paths)
-        .execute(&mut **tx)
-        .await?;
-
-        sqlx::query(
-            "DELETE FROM crate_impls
-             WHERE crate_version_id = $1
-               AND source_file_id IN (
-                 SELECT id
-                 FROM source_files
-                 WHERE crate_version_id = $1
-                   AND NOT (path = ANY($2::TEXT[]))
-               )",
-        )
-        .bind(crate_version_id)
-        .bind(seen_paths)
-        .execute(&mut **tx)
-        .await?;
+               AND NOT (path = ANY($2::TEXT[]))
+               AND path NOT LIKE $3
+           )",
+    ] {
+        sqlx::query(query)
+            .bind(crate_version_id)
+            .bind(seen_paths)
+            .bind(&rustdoc_paths)
+            .execute(&mut **tx)
+            .await?;
     }
 
     Ok(())
@@ -1622,28 +1592,24 @@ pub async fn fetch_known_crate_names(db: &PgPool) -> Result<HashSet<String>, sql
         .collect())
 }
 
-/// Deletes stale source file rows for a crate version.
+/// Deletes stale source file rows for a crate version: files not in
+/// `seen_paths`. Rustdoc-owned files are never pruned.
 pub async fn prune_source_files_for_crate_version(
     tx: &mut Transaction<'_, Postgres>,
     crate_version_id: i64,
     seen_paths: &[String],
 ) -> Result<u64, sqlx::Error> {
-    let result = if seen_paths.is_empty() {
-        sqlx::query("DELETE FROM source_files WHERE crate_version_id = $1")
-            .bind(crate_version_id)
-            .execute(&mut **tx)
-            .await?
-    } else {
-        sqlx::query(
-            "DELETE FROM source_files
-             WHERE crate_version_id = $1
-               AND NOT (path = ANY($2::TEXT[]))",
-        )
-        .bind(crate_version_id)
-        .bind(seen_paths)
-        .execute(&mut **tx)
-        .await?
-    };
+    let result = sqlx::query(
+        "DELETE FROM source_files
+         WHERE crate_version_id = $1
+           AND NOT (path = ANY($2::TEXT[]))
+           AND path NOT LIKE $3",
+    )
+    .bind(crate_version_id)
+    .bind(seen_paths)
+    .bind(format!("{RUSTDOC_SOURCE_PATH_PREFIX}%"))
+    .execute(&mut **tx)
+    .await?;
 
     Ok(result.rows_affected())
 }

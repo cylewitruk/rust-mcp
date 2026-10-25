@@ -208,11 +208,17 @@ pub fn doc_summary(docs: &str) -> &str {
         .trim()
 }
 
-/// Clamps a readme character limit (default 25000, range 500..=200000).
-pub fn readme_limit(value: Option<u32>) -> usize {
-    value
-        .unwrap_or(25_000)
-        .clamp(500, 200_000) as usize
+/// Clamps a readme character limit (default 25000, range 500..=200000);
+/// `Some(0)` omits the readme (`None`).
+pub fn readme_limit(value: Option<u32>) -> Option<usize> {
+    match value {
+        Some(0) => None,
+        value => Some(
+            value
+                .unwrap_or(25_000)
+                .clamp(500, 200_000) as usize,
+        ),
+    }
 }
 
 /// Trims, deduplicates, and sorts a list of strings.
@@ -601,6 +607,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    // --- readme_limit ---
+
+    #[test]
+    fn readme_limit_zero_omits_readme() {
+        assert_eq!(readme_limit(Some(0)), None);
+        assert_eq!(readme_limit(None), Some(25_000));
+        assert_eq!(readme_limit(Some(10)), Some(500));
+    }
 
     // --- normalize_optional ---
 
@@ -1159,5 +1174,97 @@ mod tests {
                 .checked_at
                 .is_none()
         );
+    }
+
+    // --- documented defaults ---
+
+    /// Returns the schema description of `field` on request type `T`, with
+    /// whitespace normalized.
+    fn field_doc<T: rmcp::schemars::JsonSchema>(field: &str) -> String {
+        let schema = serde_json::to_value(rmcp::schemars::schema_for!(T)).expect("schema json");
+        schema
+            .pointer(&format!("/properties/{field}/description"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("{} has no documented `{field}`", std::any::type_name::<T>()))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Defaults stated in request docs (seen by agents in tool schemas) must
+    /// match the helpers that apply them.
+    #[test]
+    fn documented_defaults_match_handlers() {
+        use rust_mcp_types::types::dependency::{
+            DependencyFeatureImpactRequest, DependencyResolveRequest,
+        };
+        use rust_mcp_types::types::docs::DocsSearchRequest;
+        use rust_mcp_types::types::index::IndexRefreshRequest;
+        use rust_mcp_types::types::krate::{
+            CrateAlternativesRequest, CrateApiDiffRequest, CrateApiRequest,
+            CrateCompatibilityMatrixRequest, CrateErrorTypesRequest, CrateGraphRequest,
+            CrateHotspotsRequest, CrateImportPathRequest, CrateIntelRequest,
+            CrateMigrationPathRequest, CrateReExportsRequest, CrateSearchRequest,
+            CrateTraitImplsRequest, CrateUsagePatternsRequest, CrateVersionsRequest,
+        };
+        use rust_mcp_types::types::source::SourceSearchRequest;
+        use rust_mcp_types::types::symbol::SymbolSearchRequest;
+
+        let readme_default = readme_limit(None).expect("readme included by default");
+        let cases = [
+            (field_doc::<CrateApiRequest>("limit"), crate_api_limit(None).to_string()),
+            (field_doc::<CrateApiDiffRequest>("limit"), api_diff_limit(None).to_string()),
+            (field_doc::<CrateMigrationPathRequest>("limit"), api_diff_limit(None).to_string()),
+            (field_doc::<CrateVersionsRequest>("limit"), version_limit(None).to_string()),
+            (field_doc::<CrateIntelRequest>("versions_limit"), version_limit(None).to_string()),
+            (
+                field_doc::<CrateIntelRequest>("dependents_limit"),
+                dependents_limit(None).to_string(),
+            ),
+            (field_doc::<CrateIntelRequest>("readme_max_chars"), readme_default.to_string()),
+            (field_doc::<CrateHotspotsRequest>("limit"), hotspots_limit(None).to_string()),
+            (field_doc::<CrateReExportsRequest>("limit"), re_exports_limit(None).to_string()),
+            (field_doc::<CrateImportPathRequest>("limit"), import_path_limit(None).to_string()),
+            (field_doc::<CrateErrorTypesRequest>("limit"), error_types_limit(None).to_string()),
+            (field_doc::<CrateTraitImplsRequest>("limit"), trait_impls_limit(None).to_string()),
+            (field_doc::<CrateSearchRequest>("limit"), search_limit(None).to_string()),
+            (field_doc::<CrateAlternativesRequest>("limit"), alternatives_limit(None).to_string()),
+            (
+                field_doc::<CrateUsagePatternsRequest>("limit"),
+                usage_patterns_limit(None).to_string(),
+            ),
+            (
+                field_doc::<CrateCompatibilityMatrixRequest>("version_limit"),
+                compatibility_matrix_version_limit(None).to_string(),
+            ),
+            (
+                field_doc::<CrateCompatibilityMatrixRequest>("max_pairs"),
+                compatibility_matrix_max_pairs(None).to_string(),
+            ),
+            (field_doc::<CrateGraphRequest>("depth"), graph_depth(None).to_string()),
+            (field_doc::<SymbolSearchRequest>("limit"), symbol_search_limit(None).to_string()),
+            (field_doc::<DocsSearchRequest>("limit"), docs_search_limit(None).to_string()),
+            (field_doc::<SourceSearchRequest>("limit"), source_search_limit(None).to_string()),
+            (
+                field_doc::<DependencyResolveRequest>("limit"),
+                dependency_resolve_limit(None).to_string(),
+            ),
+            (
+                field_doc::<DependencyFeatureImpactRequest>("heavy_threshold"),
+                feature_impact_heavy_threshold(None).to_string(),
+            ),
+            (field_doc::<IndexRefreshRequest>("per_page"), sync_per_page(None).to_string()),
+        ];
+        for (doc, default) in cases {
+            let documented = doc
+                .split_once("default: ")
+                .map(|(_, rest)| {
+                    rest.chars()
+                        .take_while(char::is_ascii_digit)
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            assert_eq!(documented, default, "`{doc}` should state default {default}");
+        }
     }
 }

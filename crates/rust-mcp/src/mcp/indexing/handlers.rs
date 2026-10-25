@@ -9,10 +9,10 @@ use serde_json::Value;
 use tracing::{debug, info, warn};
 
 use crate::db::indexing::{
-    enqueue_or_get_refresh_job_id, fetch_index_coverage_counts, fetch_index_failures_by_scope,
-    fetch_index_freshness, fetch_index_operational_metrics_24h, fetch_index_queue_counts,
-    fetch_recent_refresh_job_errors, fetch_refresh_eta_stats, fetch_refresh_job_retry_distribution,
-    persist_crate_sync,
+    RustdocCandidateFilter, enqueue_or_get_refresh_job_id, fetch_index_coverage_counts,
+    fetch_index_failures_by_scope, fetch_index_freshness, fetch_index_operational_metrics_24h,
+    fetch_index_queue_counts, fetch_recent_refresh_job_errors, fetch_refresh_eta_stats,
+    fetch_refresh_job_retry_distribution, persist_crate_sync,
 };
 use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
 use crate::mcp::models::ResponseFreshnessSource;
@@ -197,6 +197,66 @@ impl McpServer {
         Ok(format!("refresh-job-{}", outcome.job_id))
     }
 
+    /// Indexes source and rustdoc for one requested version of an already
+    /// synced crate, returning the resolved version.
+    ///
+    /// Fails if the version does not exist; source and rustdoc enrichment are
+    /// best-effort (older releases have no docs.rs rustdoc JSON).
+    async fn index_crate_version(
+        &self,
+        crate_name: &str,
+        version: &str,
+        tcx: &ToolCallContext,
+    ) -> Result<String, String> {
+        let ctx = self
+            .fetch_crate_context(crate_name, tcx)
+            .await?;
+        let selected = self
+            .resolve_version_or_latest(&ctx, Some(version), tcx)
+            .await?
+            .selected_version;
+
+        tcx.notify_progress(&format!("Enriching {crate_name}@{}", selected.version))
+            .await;
+        let source = match self
+            .ensure_source_on_disk(crate_name, &selected.version, selected.id, tcx)
+            .await
+        {
+            Ok(()) => self
+                .sync_local_source_cache(
+                    Some(crate_name.to_string()),
+                    Some(&selected.version),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .await
+                .and_then(|outcome| {
+                    if outcome.errors.is_empty() { Ok(()) } else { Err(outcome.errors.join("; ")) }
+                }),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = source {
+            warn!(crate_name, version = %selected.version, %error, "pinned source enrichment failed");
+        }
+        let filter = RustdocCandidateFilter {
+            crate_name: Some(crate_name),
+            version: Some(&selected.version),
+            skip_enriched: true,
+            retry_cooldown_seconds: Some(0),
+            ..Default::default()
+        };
+        if let Err(error) = self
+            .sync_rustdoc_json_cache(filter, None, None)
+            .await
+        {
+            warn!(crate_name, version = %selected.version, %error, "pinned rustdoc enrichment failed");
+        }
+
+        Ok(selected.version)
+    }
+
     /// Handles the `index_crates` tool call.
     pub async fn handle_index_crates(
         &self,
@@ -218,25 +278,51 @@ impl McpServer {
         let mut results = Vec::with_capacity(total);
         let mut succeeded = 0_usize;
         let mut failed = 0_usize;
+        // Crates without a pinned version get their latest version enriched below.
+        let mut enriched_crates: Vec<String> = Vec::new();
 
         for entry in &request.crates {
             let crate_name = entry.name.trim();
             if crate_name.is_empty() {
                 continue;
             }
+            let pinned_version = entry
+                .version
+                .as_deref()
+                .map(str::trim)
+                .filter(|version| !version.is_empty());
 
             match self
                 .sync_single_crate(crate_name, include_dependencies)
                 .await
             {
                 Ok(outcome) => {
-                    succeeded += 1;
+                    let version = match pinned_version {
+                        Some(version) => self
+                            .index_crate_version(crate_name, version, &tcx)
+                            .await
+                            .map(Some),
+                        None => {
+                            enriched_crates.push(crate_name.to_string());
+                            Ok(outcome.selected_version)
+                        }
+                    };
+                    let (version, error) = match version {
+                        Ok(version) => {
+                            succeeded += 1;
+                            (version, None)
+                        }
+                        Err(error) => {
+                            failed += 1;
+                            (None, Some(error))
+                        }
+                    };
                     results.push(IndexCrateResult {
                         name: crate_name.to_string(),
-                        version: outcome.selected_version,
+                        version,
                         synced_versions: outcome.versions_synced,
                         synced_dependencies: outcome.dependencies_synced,
-                        error: None,
+                        error,
                     });
                 }
                 Err(error) => {
@@ -255,12 +341,6 @@ impl McpServer {
         // Enqueue source and symbol enrichment jobs for successfully
         // synced crates and wait for them inline so that subsequent
         // source_search / symbol_search calls find data immediately.
-        let enriched_crates: Vec<&str> = results
-            .iter()
-            .filter(|r| r.error.is_none())
-            .map(|r| r.name.as_str())
-            .collect();
-
         if !enriched_crates.is_empty() {
             tcx.notify_progress(&format!(
                 "Enriching {} crate(s) (source files & symbols)",
@@ -583,7 +663,14 @@ impl McpServer {
 
                 // 2. Local source cache
                 if let Err(e) = self
-                    .sync_local_source_cache(Some(crate_name.clone()), None, None, None, false)
+                    .sync_local_source_cache(
+                        Some(crate_name.clone()),
+                        None,
+                        None,
+                        None,
+                        None,
+                        false,
+                    )
                     .await
                 {
                     errors.push(format!("local_cache: {e}"));
@@ -592,11 +679,11 @@ impl McpServer {
                 // 3. Rustdoc JSON
                 if let Err(e) = self
                     .sync_rustdoc_json_cache(
-                        Some(crate_name.clone()),
+                        RustdocCandidateFilter {
+                            crate_name: Some(&crate_name),
+                            ..Default::default()
+                        },
                         None,
-                        None,
-                        false,
-                        false,
                         None,
                     )
                     .await
@@ -746,6 +833,7 @@ impl McpServer {
                 let outcome = self
                     .sync_local_source_cache(
                         request.crate_name,
+                        None,
                         request.query,
                         request.page,
                         request.per_page,
@@ -848,12 +936,12 @@ impl McpServer {
             IndexRefreshScope::RustdocJson => {
                 let outcome = self
                     .sync_rustdoc_json_cache(
-                        request.crate_name,
+                        RustdocCandidateFilter {
+                            crate_name: request.crate_name.as_deref(),
+                            ..Default::default()
+                        },
                         request.page,
                         request.per_page,
-                        false,
-                        false,
-                        None,
                     )
                     .await?;
 

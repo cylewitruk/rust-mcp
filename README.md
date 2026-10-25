@@ -78,6 +78,14 @@ The adapter forwards requests upstream on the stateless `2026-07-28` protocol, a
 
 For client-specific setup (VS Code Copilot Chat, Claude Code, Cursor, Gemini CLI, Codex, etc.), see [docs/CLIENT_CONFIGURATION.md](docs/CLIENT_CONFIGURATION.md).
 
+### Agent skill
+
+[`skills/rust-mcp`](skills/rust-mcp/SKILL.md) is an [Agent Skill](https://agentskills.io/specification) that teaches agents the multi-tool workflows (evaluate, find APIs, upgrade, choose, audit) and when to use each tool. Install it into a skill-aware client, e.g. for Claude Code:
+
+```bash
+ln -s "$PWD/skills/rust-mcp" ~/.claude/skills/rust-mcp
+```
+
 ## Tools
 
 <details>

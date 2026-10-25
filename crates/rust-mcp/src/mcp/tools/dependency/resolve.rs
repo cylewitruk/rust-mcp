@@ -50,6 +50,10 @@ fn collect_manifest_dependencies(
         .collect())
 }
 
+/// Merges explicit, manifest and addition inputs, deduplicated by crate name.
+///
+/// `additions` are what-if inputs: one with a requirement overrides an earlier
+/// entry for the same crate. Otherwise the first requirement seen wins.
 fn normalize_inputs(
     explicit_dependencies: Option<Vec<DependencyResolveInputDependency>>,
     manifest_dependencies: Vec<DependencyResolveInputDependency>,
@@ -111,10 +115,10 @@ fn normalize_inputs(
                 merged.insert(key, normalized);
             }
             Some(existing)
-                if existing.version_req.is_none()
-                    && normalized
-                        .version_req
-                        .is_some() =>
+                if normalized
+                    .version_req
+                    .is_some()
+                    && (normalized.source == "addition" || existing.version_req.is_none()) =>
             {
                 merged.insert(key, normalized);
             }
@@ -441,5 +445,49 @@ impl McpServer {
             provenance: "local_postgres_index(crates, crate_versions, dependency_edges)"
                 .to_string(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dep(name: &str, version_req: Option<&str>) -> DependencyResolveInputDependency {
+        DependencyResolveInputDependency {
+            name: name.to_string(),
+            version_req: version_req.map(str::to_string),
+        }
+    }
+
+    fn requirement_of(merged: &[NormalizedDependency], name: &str) -> Option<String> {
+        merged
+            .iter()
+            .find(|entry| entry.name == name)
+            .and_then(|entry| entry.version_req.clone())
+    }
+
+    #[test]
+    fn additions_override_manifest_requirements() {
+        let merged = normalize_inputs(
+            None,
+            vec![dep("foo", Some("1")), dep("bar", Some("0.3"))],
+            Some(vec![dep("foo", Some("2"))]),
+        );
+        assert_eq!(requirement_of(&merged, "foo").as_deref(), Some("2"));
+        assert_eq!(requirement_of(&merged, "bar").as_deref(), Some("0.3"));
+    }
+
+    #[test]
+    fn additions_without_requirement_keep_existing_requirement() {
+        let merged =
+            normalize_inputs(None, vec![dep("foo", Some("1"))], Some(vec![dep("foo", None)]));
+        assert_eq!(requirement_of(&merged, "foo").as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn first_requirement_wins_between_explicit_and_manifest() {
+        let merged =
+            normalize_inputs(Some(vec![dep("foo", Some("1"))]), vec![dep("foo", Some("2"))], None);
+        assert_eq!(requirement_of(&merged, "foo").as_deref(), Some("1"));
     }
 }
