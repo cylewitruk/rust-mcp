@@ -233,9 +233,15 @@ fn extract_format_version(content: &str) -> Option<u64> {
 /// older than our compiled `rustdoc-types` crate by patching known schema
 /// differences into a `serde_json::Value` tree, then converting to `Crate`.
 ///
+/// Supported range is 54 (the oldest format seen from docs.rs in practice)
+/// through `rustdoc_types::FORMAT_VERSION`; 55, 56 and 58–60 were additive.
+///
 /// Known patches:
 /// - **56 → 57**: `ExternalCrate::path` (a `PathBuf`) was added as a required
 ///   field.  We inject `"path": ""` into each entry.
+/// - **58..=60 → 61**: `Stability::level` changed from an internally tagged,
+///   flattened enum (`{"level": "stable", "since": ..}`) to an externally
+///   tagged one (`{"level": {"stable": {"since": ..}}}`).
 fn try_compat_deserialize(content: &str) -> Option<RustdocCrate> {
     let mut doc: serde_json::Value = serde_json::from_str(content).ok()?;
 
@@ -262,7 +268,35 @@ fn try_compat_deserialize(content: &str) -> Option<RustdocCrate> {
         }
     }
 
-    // Future format_version patches go here (if fv < 58 { ... }).
+    // Patch: 58..=60 → 61 — nest flattened `since` under `level.stable`.
+    if (58..61).contains(&fv)
+        && let Some(index) = doc
+            .get_mut("index")
+            .and_then(serde_json::Value::as_object_mut)
+    {
+        for item in index.values_mut() {
+            for key in ["stability", "const_stability"] {
+                if let Some(stability) = item
+                    .get_mut(key)
+                    .and_then(serde_json::Value::as_object_mut)
+                    && stability
+                        .get("level")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("stable")
+                {
+                    let since = stability
+                        .remove("since")
+                        .unwrap_or(serde_json::Value::Null);
+                    stability.insert(
+                        "level".to_string(),
+                        serde_json::json!({ "stable": { "since": since } }),
+                    );
+                }
+            }
+        }
+    }
+
+    // Future format_version patches go here (if fv < 62 { ... }).
 
     serde_json::from_value(doc).ok()
 }
@@ -1493,7 +1527,7 @@ fn partition_trait_items(
                     "default": default,
                 }));
             }
-            ItemEnum::AssocConst { type_, value } => {
+            ItemEnum::AssocConst { type_, value, .. } => {
                 required.push(json!({
                     "name": name,
                     "signature": format!("const {}: {}", name, render_type(type_, krate)),
@@ -1864,8 +1898,8 @@ mod tests {
 
     use rustdoc_types::{
         Abi, Deprecation, Function, FunctionHeader, FunctionSignature, Generics, Id, Impl, Item,
-        ItemEnum, ItemKind, ItemSummary, Module, Path, Span, Struct, StructKind, Target, Trait,
-        Type as RustdocType, Use, Visibility as RustdocVisibility,
+        ItemEnum, ItemKind, ItemSummary, Module, Path, Span, Stability, StabilityLevel, Struct,
+        StructKind, Target, Trait, Type as RustdocType, Use, Visibility as RustdocVisibility,
     };
 
     use super::*;
@@ -1887,6 +1921,8 @@ mod tests {
             links: HashMap::new(),
             attrs: vec![],
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner,
         }
     }
@@ -1983,6 +2019,7 @@ mod tests {
                         abi: Abi::Rust,
                     },
                     has_body: true,
+                    default_unstable: None,
                 }),
             ),
         );
@@ -2044,6 +2081,7 @@ mod tests {
                         abi: Abi::Rust,
                     },
                     has_body: true,
+                    default_unstable: None,
                 }),
             ),
         );
@@ -2096,6 +2134,7 @@ mod tests {
                         abi: Abi::Rust,
                     },
                     has_body: false,
+                    default_unstable: None,
                 }),
             ),
         );
@@ -2121,6 +2160,7 @@ mod tests {
                         abi: Abi::Rust,
                     },
                     has_body: true,
+                    default_unstable: None,
                 }),
             ),
         );
@@ -2174,6 +2214,7 @@ mod tests {
                         abi: Abi::Rust,
                     },
                     has_body: true,
+                    default_unstable: None,
                 }),
             ),
         );
@@ -2189,7 +2230,7 @@ mod tests {
                 triple: "x86_64-unknown-linux-gnu".into(),
                 target_features: vec![],
             },
-            format_version: 57,
+            format_version: rustdoc_types::FORMAT_VERSION,
         }
     }
 
@@ -2404,7 +2445,7 @@ mod tests {
                 triple: "x86_64-unknown-linux-gnu".into(),
                 target_features: vec![],
             },
-            format_version: 57,
+            format_version: rustdoc_types::FORMAT_VERSION,
         };
 
         let result = extract_all(&krate);
@@ -2556,7 +2597,7 @@ mod tests {
                 triple: "x86_64-unknown-linux-gnu".into(),
                 target_features: vec![],
             },
-            format_version: 57,
+            format_version: rustdoc_types::FORMAT_VERSION,
         };
 
         let result = extract_all(&krate);
@@ -2771,7 +2812,7 @@ mod tests {
                 triple: "x86_64-unknown-linux-gnu".into(),
                 target_features: vec![],
             },
-            format_version: 57,
+            format_version: rustdoc_types::FORMAT_VERSION,
         };
 
         let result = extract_all(&krate);
@@ -2937,6 +2978,38 @@ mod tests {
         assert_eq!(krate.external_crates[&2].name, "serde");
         // Patched `path` should be the default empty PathBuf.
         assert_eq!(krate.external_crates[&1].path, PathBuf::new());
+    }
+
+    #[test]
+    fn try_compat_deserialize_recovers_v60_stability() {
+        let mut krate = build_fixture_crate();
+        let root = krate.root;
+        krate
+            .index
+            .get_mut(&root)
+            .expect("root item")
+            .stability = Some(Box::new(Stability {
+            feature: "rust1".into(),
+            level: StabilityLevel::Stable { since: Some("1.0.0".into()) },
+        }));
+
+        let mut doc: serde_json::Value =
+            serde_json::to_value(&krate).expect("fixture should serialize");
+
+        // Downgrade to v60: flatten `level.stable.since` into the stability object.
+        doc["format_version"] = serde_json::json!(60);
+        doc["index"][root.0.to_string()]["stability"] =
+            serde_json::json!({ "feature": "rust1", "level": "stable", "since": "1.0.0" });
+        let v60_json = serde_json::to_string(&doc).expect("fixture should re-serialize");
+
+        assert!(
+            serde_json::from_str::<RustdocCrate>(&v60_json).is_err(),
+            "v60 stability should not deserialize with strict v61 types"
+        );
+
+        let patched = try_compat_deserialize(&v60_json)
+            .expect("try_compat_deserialize should recover v60 payload");
+        assert_eq!(patched.index[&root].stability, krate.index[&root].stability);
     }
 
     #[test]

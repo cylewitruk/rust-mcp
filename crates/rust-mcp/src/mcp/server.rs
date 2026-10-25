@@ -6,8 +6,8 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext as RmcpToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ErrorCode, ErrorData, Implementation, ListToolsResult,
-    Meta, PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation, ListToolsResult,
+    PaginatedRequestParams, RequestMetaObject, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_router};
@@ -147,7 +147,7 @@ impl McpServer {
     )]
     async fn schema_get(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<ToolSchemasRequest>,
     ) -> Result<Json<ToolSchemasResponse>, String> {
@@ -166,7 +166,7 @@ impl McpServer {
     )]
     async fn index_crates(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexCratesRequest>,
     ) -> Result<Json<IndexCratesResponse>, String> {
@@ -182,7 +182,7 @@ impl McpServer {
     )]
     async fn index_status(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexStatusRequest>,
     ) -> Result<Json<IndexStatusResponse>, String> {
@@ -199,7 +199,7 @@ impl McpServer {
     )]
     async fn index_refresh(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<IndexRefreshRequest>,
     ) -> Result<Json<IndexRefreshResponse>, String> {
@@ -217,7 +217,7 @@ impl McpServer {
     )]
     async fn crate_search(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateSearchRequest>,
     ) -> Result<Json<CrateSearchResponse>, String> {
@@ -235,7 +235,7 @@ impl McpServer {
     )]
     async fn crate_intel(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateIntelRequest>,
     ) -> Result<Json<CrateIntelResponse>, String> {
@@ -252,7 +252,7 @@ impl McpServer {
     )]
     async fn crate_features(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateFeaturesRequest>,
     ) -> Result<Json<CrateFeaturesResponse>, String> {
@@ -270,7 +270,7 @@ impl McpServer {
     )]
     async fn crate_api_diff(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiDiffRequest>,
     ) -> Result<Json<CrateApiDiffResponse>, String> {
@@ -289,7 +289,7 @@ impl McpServer {
     )]
     async fn crate_api(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateApiRequest>,
     ) -> Result<Json<CrateApiResponse>, String> {
@@ -308,7 +308,7 @@ impl McpServer {
     )]
     async fn crate_type_info(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTypeInfoRequest>,
     ) -> Result<Json<CrateTypeInfoResponse>, String> {
@@ -327,7 +327,7 @@ impl McpServer {
     )]
     async fn crate_trait_impls(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateTraitImplsRequest>,
     ) -> Result<Json<CrateTraitImplsResponse>, String> {
@@ -345,7 +345,7 @@ impl McpServer {
     )]
     async fn crate_re_exports(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateReExportsRequest>,
     ) -> Result<Json<CrateReExportsResponse>, String> {
@@ -363,7 +363,7 @@ impl McpServer {
     )]
     async fn crate_import_path(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateImportPathRequest>,
     ) -> Result<Json<CrateImportPathResponse>, String> {
@@ -381,7 +381,7 @@ impl McpServer {
     )]
     async fn crate_error_types(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateErrorTypesRequest>,
     ) -> Result<Json<CrateErrorTypesResponse>, String> {
@@ -399,7 +399,7 @@ impl McpServer {
     )]
     async fn crate_deprecated(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateDeprecatedRequest>,
     ) -> Result<Json<CrateDeprecatedResponse>, String> {
@@ -416,7 +416,7 @@ impl McpServer {
     )]
     async fn crate_derive_macros(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateDeriveMacrosRequest>,
     ) -> Result<Json<CrateDeriveMacrosResponse>, String> {
@@ -434,7 +434,7 @@ impl McpServer {
     )]
     async fn crate_compare(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompareRequest>,
     ) -> Result<Json<CrateCompareResponse>, String> {
@@ -452,7 +452,7 @@ impl McpServer {
     )]
     async fn crate_compatibility(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityRequest>,
     ) -> Result<Json<CrateCompatibilityResponse>, String> {
@@ -470,7 +470,7 @@ impl McpServer {
     )]
     async fn crate_compatibility_matrix(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateCompatibilityMatrixRequest>,
     ) -> Result<Json<CrateCompatibilityMatrixResponse>, String> {
@@ -490,7 +490,7 @@ impl McpServer {
     )]
     async fn crate_migration_path(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateMigrationPathRequest>,
     ) -> Result<Json<CrateMigrationPathResponse>, String> {
@@ -508,7 +508,7 @@ impl McpServer {
     )]
     async fn crate_license_check(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateLicenseCheckRequest>,
     ) -> Result<Json<CrateLicenseCheckResponse>, String> {
@@ -527,7 +527,7 @@ impl McpServer {
     )]
     async fn crate_alternatives(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateAlternativesRequest>,
     ) -> Result<Json<CrateAlternativesResponse>, String> {
@@ -545,7 +545,7 @@ impl McpServer {
     )]
     async fn crate_versions(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateVersionsRequest>,
     ) -> Result<Json<CrateVersionsResponse>, String> {
@@ -563,7 +563,7 @@ impl McpServer {
     )]
     async fn crate_graph(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateGraphRequest>,
     ) -> Result<Json<CrateGraphResponse>, String> {
@@ -582,7 +582,7 @@ impl McpServer {
     )]
     async fn crate_hotspots(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateHotspotsRequest>,
     ) -> Result<Json<CrateHotspotsResponse>, String> {
@@ -600,7 +600,7 @@ impl McpServer {
     )]
     async fn dependency_audit(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyAuditRequest>,
     ) -> Result<Json<DependencyAuditResponse>, String> {
@@ -619,7 +619,7 @@ impl McpServer {
     )]
     async fn dependency_resolve(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyResolveRequest>,
     ) -> Result<Json<DependencyResolveResponse>, String> {
@@ -636,7 +636,7 @@ impl McpServer {
     )]
     async fn dependency_feature_impact(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<DependencyFeatureImpactRequest>,
     ) -> Result<Json<DependencyFeatureImpactResponse>, String> {
@@ -658,7 +658,7 @@ impl McpServer {
     )]
     async fn source_search(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceSearchRequest>,
     ) -> Result<Json<SourceSearchResponse>, String> {
@@ -676,7 +676,7 @@ impl McpServer {
     )]
     async fn source_read(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceReadRequest>,
     ) -> Result<Json<SourceReadResponse>, String> {
@@ -694,7 +694,7 @@ impl McpServer {
     )]
     async fn source_context(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<SourceContextRequest>,
     ) -> Result<Json<SourceContextResponse>, String> {
@@ -714,7 +714,7 @@ impl McpServer {
     )]
     async fn symbol_search(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<SymbolSearchRequest>,
     ) -> Result<Json<SymbolSearchResponse>, String> {
@@ -732,7 +732,7 @@ impl McpServer {
     )]
     async fn docs_search(
         &self,
-        _meta: Meta,
+        _meta: RequestMetaObject,
         _client: Peer<RoleServer>,
         Parameters(request): Parameters<DocsSearchRequest>,
     ) -> Result<Json<DocsSearchResponse>, String> {
@@ -749,7 +749,7 @@ impl McpServer {
     )]
     async fn crate_usage_patterns(
         &self,
-        meta: Meta,
+        meta: RequestMetaObject,
         client: Peer<RoleServer>,
         Parameters(request): Parameters<CrateUsagePatternsRequest>,
     ) -> Result<Json<CrateUsagePatternsResponse>, String> {
@@ -760,8 +760,8 @@ impl McpServer {
 }
 
 impl ServerHandler for McpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
@@ -775,11 +775,7 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        std::future::ready(Ok(ListToolsResult {
-            tools: self.tool_router.list_all(),
-            next_cursor: None,
-            meta: None,
-        }))
+        std::future::ready(Ok(ListToolsResult::with_all_items(self.tool_router.list_all())))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
@@ -792,7 +788,7 @@ impl ServerHandler for McpServer {
         &self,
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
+    ) -> impl Future<Output = Result<CallToolResponse, ErrorData>> + Send + '_ {
         let tool_name = request.name.clone();
         async move {
             let tcc = RmcpToolCallContext::new(self, request, context);

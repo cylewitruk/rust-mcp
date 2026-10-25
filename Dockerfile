@@ -1,4 +1,4 @@
-ARG RUST_VERSION=1.93
+ARG RUST_VERSION=1.99
 ARG PROFILE=release
 FROM rust:${RUST_VERSION}-alpine AS build
 
@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     install -D /app/target/"$OUT_DIR"/rust-mcp /out/rust-mcp
 
 # Final runtime image
-FROM alpine:3.23 AS runtime
+FROM alpine:3.24 AS runtime
 
 RUN apk add --no-cache ca-certificates tzdata ripgrep git postgresql18 postgresql18-contrib su-exec tinyproxy && \
     mkdir -p /etc/tinyproxy

@@ -90,7 +90,7 @@ fn collect_deps_set(deps: &DepsSet, merged: &mut BTreeMap<String, ParsedDependen
 fn version_req(dep: &Dependency) -> Option<String> {
     dep.try_req()
         .ok()
-        .map(|r| r.trim().to_string())
+        .map(ToString::to_string)
         .filter(|r| !r.is_empty() && r != "*")
 }
 

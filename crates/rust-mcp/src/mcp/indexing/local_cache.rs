@@ -585,7 +585,7 @@ fn extract_rust_symbols(content: &str) -> Result<IndexedExtractionBatch, String>
                 };
                 let type_name_display = Some(tokens_to_string(&impl_item.self_ty));
                 let (trait_name, trait_name_display, impl_kind) =
-                    if let Some((_, trait_path, _)) = impl_item.trait_ {
+                    if let Some((trait_path, _)) = impl_item.trait_ {
                         (
                             trait_path
                                 .segments

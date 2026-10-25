@@ -6,8 +6,8 @@ use axum::extract::Path;
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use rustdoc_types::{
-    Abi, Crate as RustdocCrate, Function, FunctionHeader, FunctionSignature, Generics, Id, Item,
-    ItemEnum, ItemKind, ItemSummary, Module, Target, Type as RustdocType,
+    Abi, Crate as RustdocCrate, FORMAT_VERSION, Function, FunctionHeader, FunctionSignature,
+    Generics, Id, Item, ItemEnum, ItemKind, ItemSummary, Module, Target, Type as RustdocType,
     Visibility as RustdocVisibility,
 };
 
@@ -39,6 +39,8 @@ fn build_rustdoc_fixture(
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Module(Module {
                 is_crate: true,
                 items: vec![Id(1)],
@@ -67,6 +69,8 @@ fn build_rustdoc_fixture(
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Function(Function {
                 sig: FunctionSignature {
                     inputs: vec![("input".to_string(), RustdocType::Primitive("str".to_string()))],
@@ -84,6 +88,7 @@ fn build_rustdoc_fixture(
                     abi: Abi::Rust,
                 },
                 has_body: true,
+                default_unstable: None,
             }),
         },
     );
@@ -103,7 +108,7 @@ fn build_rustdoc_fixture(
         index,
         paths,
         external_crates: HashMap::new(),
-        format_version: 57,
+        format_version: FORMAT_VERSION,
         target: Target {
             triple: "x86_64-unknown-linux-gnu".to_string(),
             target_features: vec![],

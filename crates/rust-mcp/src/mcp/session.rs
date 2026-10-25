@@ -172,7 +172,7 @@ impl DbSessionManager {
             ClientCapabilities::default(),
             Implementation::new("rust-mcp-session-reconstitution", "internal"),
         )
-        .with_protocol_version(ProtocolVersion::LATEST);
+        .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
         let init_request = rmcp::model::InitializeRequest::new(init_params);
         let init_msg = ClientJsonRpcMessage::request(
             ClientRequest::InitializeRequest(init_request),

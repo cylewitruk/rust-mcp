@@ -1497,7 +1497,11 @@ pub async fn list_crate_impl_rows_for_filters(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<super::models::CrateImplLookupRow>, sqlx::Error> {
-    let mut base = String::from(
+    // `LIMIT NULL` is equivalent to no limit; offset only applies when paginating.
+    let offset = limit
+        .map(|_| offset.unwrap_or(0).max(0))
+        .unwrap_or(0);
+    sqlx::query_as::<_, super::models::CrateImplLookupRow>(
         "SELECT
             ci.type_name,
             ci.type_name_display,
@@ -1541,27 +1545,16 @@ pub async fn list_crate_impl_rows_for_filters(
                 ELSE 2
             END,
             ci.type_name ASC,
-            ci.start_line ASC",
-    );
-
-    if limit.is_some() {
-        base.push_str(" LIMIT $4 OFFSET $5");
-        sqlx::query_as::<_, super::models::CrateImplLookupRow>(&base)
-            .bind(crate_version_id)
-            .bind(trait_name)
-            .bind(type_name)
-            .bind(limit.unwrap_or(1).max(1))
-            .bind(offset.unwrap_or(0).max(0))
-            .fetch_all(db)
-            .await
-    } else {
-        sqlx::query_as::<_, super::models::CrateImplLookupRow>(&base)
-            .bind(crate_version_id)
-            .bind(trait_name)
-            .bind(type_name)
-            .fetch_all(db)
-            .await
-    }
+            ci.start_line ASC
+         LIMIT $4 OFFSET $5",
+    )
+    .bind(crate_version_id)
+    .bind(trait_name)
+    .bind(type_name)
+    .bind(limit.map(|limit| limit.max(1)))
+    .bind(offset)
+    .fetch_all(db)
+    .await
 }
 
 /// Loads the best matching type-info row for a crate type name.
@@ -1846,7 +1839,7 @@ pub struct SymbolSearchFilters<'a> {
 }
 
 fn push_symbol_search_where_clause<'a>(
-    qb: &mut QueryBuilder<'a, Postgres>,
+    qb: &mut QueryBuilder<Postgres>,
     filters: &SymbolSearchFilters<'a>,
 ) {
     let mut has_where = false;

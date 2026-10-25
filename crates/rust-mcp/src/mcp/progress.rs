@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rmcp::RoleServer;
-use rmcp::model::{Meta, ProgressNotificationParam, ProgressToken};
+use rmcp::model::{ProgressNotificationParam, ProgressToken, RequestMetaObject};
 use rmcp::service::Peer;
 
 /// Per-tool-call progress reporter.
@@ -18,7 +18,7 @@ pub struct ToolProgress {
 impl ToolProgress {
     /// Creates a progress reporter if the client supplied a `progressToken` in
     /// the request `_meta`.  Returns `None` when no token is present.
-    fn from_meta(meta: &Meta, peer: &Peer<RoleServer>) -> Option<Self> {
+    fn from_meta(meta: &RequestMetaObject, peer: &Peer<RoleServer>) -> Option<Self> {
         meta.get_progress_token()
             .map(|token| Self {
                 peer: peer.clone(),
@@ -38,12 +38,10 @@ impl ToolProgress {
             .fetch_add(1, Ordering::Relaxed);
         let _ = self
             .peer
-            .notify_progress(ProgressNotificationParam {
-                progress_token: self.token.clone(),
-                progress: f64::from(step + 1),
-                total: None,
-                message: Some(message.to_string()),
-            })
+            .notify_progress(
+                ProgressNotificationParam::new(self.token.clone(), f64::from(step + 1))
+                    .with_message(message),
+            )
             .await;
     }
 }
@@ -77,7 +75,7 @@ pub struct ToolCallContext {
 impl ToolCallContext {
     /// Creates a new context, extracting the progress token from the request
     /// meta if present.
-    pub fn new(meta: &Meta, peer: &Peer<RoleServer>) -> Self {
+    pub fn new(meta: &RequestMetaObject, peer: &Peer<RoleServer>) -> Self {
         Self {
             progress: ToolProgress::from_meta(meta, peer),
         }
@@ -108,7 +106,7 @@ mod tests {
 
     #[test]
     fn from_meta_returns_none_without_token() {
-        let meta = Meta::default();
+        let meta = RequestMetaObject::default();
         // Cannot construct a real Peer in unit tests, but we can verify the
         // None path by checking ToolCallContext construction logic:
         assert!(

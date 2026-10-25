@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rmcp::transport::streamable_http_server::session::SessionManager;
+use rmcp::transport::streamable_http_server::session::SessionManager as _;
 use rmcp::transport::streamable_http_server::session::local::SessionConfig;
 use rust_mcp::mcp::server::McpServer;
 use rust_mcp::mcp::session::{DbSessionManager, ServiceFactory};

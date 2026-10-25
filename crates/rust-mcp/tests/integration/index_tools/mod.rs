@@ -22,9 +22,9 @@ use rust_mcp_testing::fixtures::seed_crate_release;
 use rust_mcp_testing::local_mcp::LocalMcpHttpHarness;
 use rust_mcp_testing::postgres::PostgresTestContainer;
 use rustdoc_types::{
-    Abi, Crate as RustdocCrate, Function, FunctionHeader, FunctionSignature, Generics, Id, Item,
-    ItemEnum, ItemKind, ItemSummary, Module, Struct, StructKind, Target, Type as RustdocType, Use,
-    Visibility as RustdocVisibility,
+    Abi, Crate as RustdocCrate, FORMAT_VERSION, Function, FunctionHeader, FunctionSignature,
+    Generics, Id, Item, ItemEnum, ItemKind, ItemSummary, Module, Struct, StructKind, Target,
+    Type as RustdocType, Use, Visibility as RustdocVisibility,
 };
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
@@ -232,6 +232,8 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Module(Module {
                 is_crate: true,
                 items: vec![Id(1), Id(10), Id(2)],
@@ -260,6 +262,8 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Function(Function {
                 sig: FunctionSignature {
                     inputs: vec![("input".to_string(), RustdocType::Primitive("str".to_string()))],
@@ -277,6 +281,7 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
                     abi: Abi::Rust,
                 },
                 has_body: true,
+                default_unstable: None,
             }),
         },
     );
@@ -301,6 +306,8 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Module(Module {
                 is_crate: false,
                 items: vec![Id(11)],
@@ -329,6 +336,8 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Struct(Struct {
                 kind: StructKind::Unit,
                 generics: Generics {
@@ -360,6 +369,8 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
             links: HashMap::new(),
             attrs: Vec::new(),
             deprecation: None,
+            stability: None,
+            const_stability: None,
             inner: ItemEnum::Use(Use {
                 source: "crate::internal::Parser".to_string(),
                 name: "Parser".to_string(),
@@ -384,7 +395,7 @@ fn build_rustdoc_fixture(crate_name: &str, crate_version: &str) -> RustdocCrate 
         index,
         paths,
         external_crates: HashMap::new(),
-        format_version: 57,
+        format_version: FORMAT_VERSION,
         target: Target {
             triple: "x86_64-unknown-linux-gnu".to_string(),
             target_features: vec![],

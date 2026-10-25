@@ -53,9 +53,10 @@ pub fn router(state: AppState, config: Config, prometheus_handle: PrometheusHand
 /// Rewrites MCP-Protocol-Version headers that rmcp doesn't recognize.
 ///
 /// rmcp's `ProtocolVersion::KNOWN_VERSIONS` may lag behind the latest MCP spec,
-/// so clients sending newer versions (e.g. Claude Code with `2025-11-25`) get a
-/// 400 before our code runs. This middleware maps unknown versions to rmcp's
-/// `ProtocolVersion::LATEST`. The actual protocol negotiation still happens at
+/// so clients sending newer versions get a 400 before our code runs. This
+/// middleware maps unknown versions to rmcp's
+/// `ProtocolVersion::LATEST_WITH_INITIALIZE` (the newest session-based
+/// version). The actual protocol negotiation still happens at
 /// the JSON-RPC `initialize` level, where we report our true
 /// `SUPPORTED_MCP_PROTOCOL_VERSION`.
 async fn rewrite_mcp_protocol_version(
@@ -75,7 +76,8 @@ async fn rewrite_mcp_protocol_version(
         });
 
     if needs_rewrite
-        && let Ok(value) = axum::http::HeaderValue::from_str(ProtocolVersion::LATEST.as_str())
+        && let Ok(value) =
+            axum::http::HeaderValue::from_str(ProtocolVersion::LATEST_WITH_INITIALIZE.as_str())
     {
         request
             .headers_mut()

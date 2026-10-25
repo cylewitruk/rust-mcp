@@ -162,6 +162,7 @@ async fn rust_mcp_container_reports_jsonrpc_error_envelope_for_invalid_request_s
                 lower.contains("error")
                     || lower.contains("invalid")
                     || lower.contains("jsonrpc")
+                    || lower.contains("json-rpc")
                     || lower.contains("method")
                     || lower.contains("unsupported")
                     || lower.contains("media"),
