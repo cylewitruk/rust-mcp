@@ -30,6 +30,7 @@ crates/rust-mcp/
     mcp/
       server.rs                 # tool registration + instrumentation
       transport.rs              # Streamable HTTP service config
+      session.rs                # legacy-protocol session persistence (SessionStore)
       metrics.rs                # DB-backed tool invocation metrics
       query_cache.rs            # short-lived result memoization
       models.rs                 # shared model types
@@ -90,9 +91,11 @@ crates/rust-mcp/
 
 ## Protocol Expectations
 
-- Session flow: `initialize` -> `notifications/initialized` -> `tools/list` / `tools/call`.
+- Default protocol is `2026-07-28` (stateless): `server/discover`, then requests carrying per-request `_meta` plus the `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` headers. Use the helpers in `rust_mcp_types::protocol` rather than hand-building them.
+- Legacy clients (`initialize` -> `notifications/initialized` -> `tools/list` / `tools/call`, propagating `mcp-session-id`) are served by rmcp's `LocalSessionManager`, persisted via `mcp::session::PgSessionStore`.
+- Tool handlers must not depend on session state; anything spanning calls belongs in explicit tool arguments.
 - Streamable HTTP may return JSON or SSE (`text/event-stream`), so tests/harnesses must parse JSON `data:` events for SSE responses.
-- Include/propagate `mcp-session-id` header across requests after initialize.
+- Test harnesses (`rust_mcp_testing::mcp_client::McpHttpClient`) default to stateless; call `initialize()` or `set_protocol(McpProtocol::Legacy)` for legacy-protocol tests.
 
 ## Testing
 

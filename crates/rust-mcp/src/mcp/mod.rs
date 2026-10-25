@@ -19,7 +19,7 @@ pub mod tools;
 /// Parameter validation and pagination utilities.
 pub mod utils;
 
-/// Database-backed MCP session manager.
+/// Legacy-protocol MCP session persistence.
 pub mod session;
 mod transport;
 

@@ -255,6 +255,7 @@ mod tests {
     use crate::integration::crates_io::{
         CratesIoCrateDetailResponse, CratesIoCrateRecord, CratesIoVersionRecord,
     };
+    use crate::mcp::session::McpSessions;
     use crate::state::AppState;
 
     async fn seed_symbol_collapse_fixture(pool: &PgPool, crate_name: &str) -> i64 {
@@ -383,6 +384,7 @@ mod tests {
             indexing_coordinator: Arc::new(
                 crate::mcp::indexing::coordinator::IndexingCoordinator::new(),
             ),
+            sessions: McpSessions::new(pool.clone()),
             config,
             db: pool.clone(),
             http: reqwest::Client::new(),

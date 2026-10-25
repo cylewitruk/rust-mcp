@@ -74,7 +74,7 @@ For clients that only support process-launched MCP servers, use the `rust-mcp-st
 }
 ```
 
-The adapter auto-bootstraps the upstream MCP session and passes all tools through transparently.
+The adapter forwards requests upstream on the stateless `2026-07-28` protocol, adding the required per-request metadata; clients that perform an `initialize` handshake keep a legacy session instead. All tools pass through transparently.
 
 For client-specific setup (VS Code Copilot Chat, Claude Code, Cursor, Gemini CLI, Codex, etc.), see [docs/CLIENT_CONFIGURATION.md](docs/CLIENT_CONFIGURATION.md).
 
@@ -288,7 +288,7 @@ Each external service has per-request burst gating (`_MIN_INTERVAL_MS`) and a ro
 | `RUSTDOC_RETRY_COOLDOWN_SECS` | `86400` | Minimum seconds before retrying a failed rustdoc enrichment |
 | `SECURITY_SYNC_INTERVAL_SECS` | `86400` | Seconds between security advisory syncs (0 = startup only) |
 | `SECURITY_SYNC_BATCH_SIZE` | `50` | Max crates to check per security sync pass |
-| `SESSION_IDLE_TIMEOUT_SECS` | `259200` | Idle timeout for MCP sessions before pruning (0 = no pruning) |
+| `SESSION_IDLE_TIMEOUT_SECS` | `259200` | Idle timeout before persisted legacy-protocol sessions are pruned (0 = no pruning) |
 
 </details>
 
@@ -322,18 +322,17 @@ Each external service has per-request burst gating (`_MIN_INTERVAL_MS`) and a ro
 | `MCP_CONNECT_TIMEOUT_SECS` | `10` | HTTP connect timeout (seconds) |
 | `MCP_REQUEST_TIMEOUT_SECS` | `120` | HTTP request timeout (seconds) |
 | `MCP_PREFLIGHT_SCHEMA` | `true` | Validate upstream tool contracts from `/schemas` before proxying |
-| `MCP_AUTO_BOOTSTRAP_SESSION` | `true` | Auto-run upstream `initialize` + `notifications/initialized` when no session exists |
 
 </details>
 
 ## MCP Protocol
 
 <details>
-<summary><strong>Protocol version and session flow</strong></summary>
+<summary><strong>Protocol versions and request flow</strong></summary>
 
-- Server MCP protocol version: `2025-06-18`
-- Session flow: `initialize` -> `notifications/initialized` -> `tools/list` / `tools/call`
-- Propagate `mcp-session-id` header on all requests after `initialize`
+- Default MCP protocol version: `2026-07-28` (stateless): no `initialize`, no sessions. Clients call `server/discover`, then send every request with `_meta` (`io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientCapabilities`) and the `MCP-Protocol-Version`, `Mcp-Method` and (for `tools/call`) `Mcp-Name` headers.
+- Legacy clients (`2025-11-25` and earlier) are still supported: `initialize` -> `notifications/initialized` -> `tools/list` / `tools/call`, propagating the `mcp-session-id` header. Legacy sessions are persisted in PostgreSQL and transparently restored after a server restart.
+- `tools/list` is static per server build and advertises a 1 hour `public` cache TTL.
 - Responses may be JSON (`application/json`) or SSE (`text/event-stream`)
 - In non-strict mode, JSON-only Accept headers are rewritten for compatibility (with an RFC `Warning` header)
 
@@ -341,6 +340,24 @@ Each external service has per-request burst gating (`_MIN_INTERVAL_MS`) and a ro
 
 <details>
 <summary><strong>Manual protocol check (curl)</strong></summary>
+
+Stateless (`2026-07-28`):
+
+```bash
+MCP_URL="http://127.0.0.1:43173/mcp"
+META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}'
+
+curl -sS \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -H "mcp-protocol-version: 2026-07-28" \
+  -H "mcp-method: tools/call" \
+  -H "mcp-name: ping" \
+  -X POST "$MCP_URL" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"ping\",\"arguments\":{\"message\":\"hello\"},${META}}}"
+```
+
+Legacy session (`2025-11-25`):
 
 ```bash
 MCP_URL="http://127.0.0.1:43173/mcp"
@@ -351,7 +368,7 @@ curl -sS -D "$TMP_HEADERS" \
   -H "content-type: application/json" \
   -H "accept: application/json, text/event-stream" \
   -X POST "$MCP_URL" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-client","version":"0.1.0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-client","version":"0.1.0"}}}'
 
 SESSION_ID="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r","",$2); print $2}' "$TMP_HEADERS")"
 

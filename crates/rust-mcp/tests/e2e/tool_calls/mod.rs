@@ -10,9 +10,8 @@ use super::crates_io_fixtures::{
 };
 use super::docs_rs_fixtures::SEEDED_RUSTDOC_PATH;
 use super::helpers::{
-    first_content_text, initialize_mcp_session, start_ready_rust_mcp,
-    start_ready_rust_mcp_with_env, start_ready_rust_mcp_with_env_and_mounts, structured_content,
-    tool_result,
+    connect_mcp_client, first_content_text, start_ready_rust_mcp, start_ready_rust_mcp_with_env,
+    start_ready_rust_mcp_with_env_and_mounts, structured_content, tool_result,
 };
 
 mod core;
@@ -41,18 +40,18 @@ struct SeededRustdocFallbackContext {
     rust_mcp: RustMcpTestContainer,
 }
 
-async fn initialized_container() -> RustMcpTestContainer {
+async fn connected_container() -> RustMcpTestContainer {
     let rust_mcp = start_ready_rust_mcp().await;
-    let _ = initialize_mcp_session(&rust_mcp).await;
+    let _ = connect_mcp_client(&rust_mcp).await;
     rust_mcp
 }
 
-async fn seeded_initialized_context() -> SeededContext {
+async fn seeded_connected_context() -> SeededContext {
     let mock_server = MockRegistryServer::start()
         .await
         .expect("failed to start mock crates/docs server");
     let rust_mcp = start_ready_rust_mcp_with_env(mock_registry_env(&mock_server)).await;
-    let _ = initialize_mcp_session(&rust_mcp).await;
+    let _ = connect_mcp_client(&rust_mcp).await;
 
     SeededContext {
         _mock_server: mock_server,
@@ -61,7 +60,7 @@ async fn seeded_initialized_context() -> SeededContext {
 }
 
 async fn seeded_indexed_context() -> SeededContext {
-    let context = seeded_initialized_context().await;
+    let context = seeded_connected_context().await;
     seed_index_data(&context.rust_mcp).await;
     context
 }
@@ -94,7 +93,7 @@ async fn seeded_rustdoc_fallback_initialized_context() -> SeededRustdocFallbackC
         )],
     )
     .await;
-    let _ = initialize_mcp_session(&rust_mcp).await;
+    let _ = connect_mcp_client(&rust_mcp).await;
 
     SeededRustdocFallbackContext {
         _mock_server: mock_server,
@@ -217,7 +216,7 @@ async fn seed_docs_index_data(rust_mcp: &RustMcpTestContainer) {
 }
 
 async fn seeded_docs_indexed_context() -> SeededContext {
-    let context = seeded_initialized_context().await;
+    let context = seeded_connected_context().await;
     seed_docs_index_data(&context.rust_mcp).await;
     context
 }

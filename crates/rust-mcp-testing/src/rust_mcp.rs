@@ -3,12 +3,10 @@
 use std::fs::{self, File};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
-use serde_json::{Value, json};
+use anyhow::{Context as _, Result, anyhow, bail};
+use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use testcontainers_modules::testcontainers::core::{
     BuildImageOptions, Host, IntoContainerPort as _, Mount,
@@ -17,17 +15,14 @@ use testcontainers_modules::testcontainers::runners::{AsyncBuilder as _, AsyncRu
 use testcontainers_modules::testcontainers::{
     ContainerAsync, GenericBuildableImage, GenericImage, ImageExt as _,
 };
-use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
 use crate::env;
+use crate::mcp_client::McpHttpClient;
 
 const DEFAULT_IMAGE_NAME: &str = "rust-mcp";
-const DEFAULT_PROTOCOL_VERSION: &str = LATEST_MCP_PROTOCOL_VERSION;
+const CLIENT_NAME: &str = "rust-mcp-e2e";
 const MCP_INTERNAL_PORT: u16 = 43173;
-
-/// MCP session header name per the Streamable HTTP spec.
-const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 
 /// Running rust-mcp container plus endpoint URLs.
 #[derive(Debug)]
@@ -35,9 +30,7 @@ pub struct RustMcpTestContainer {
     container: ContainerAsync<GenericImage>,
     base_url: String,
     mcp_url: String,
-    client: reqwest::Client,
-    next_request_id: AtomicU64,
-    session_id: Mutex<Option<String>>,
+    client: McpHttpClient,
 }
 
 impl RustMcpTestContainer {
@@ -194,10 +187,8 @@ impl RustMcpTestContainer {
         Ok(Self {
             container,
             base_url,
+            client: McpHttpClient::new(mcp_url.clone(), CLIENT_NAME),
             mcp_url,
-            client: reqwest::Client::new(),
-            next_request_id: AtomicU64::new(1),
-            session_id: Mutex::new(None),
         })
     }
 
@@ -216,66 +207,65 @@ impl RustMcpTestContainer {
         &self.container
     }
 
+    /// Returns the MCP client used by this harness.
+    pub fn client(&self) -> &McpHttpClient {
+        &self.client
+    }
+
     /// Clears the locally cached MCP session identifier.
     pub async fn clear_session(&self) {
-        *self.session_id.lock().await = None;
+        self.client
+            .clear_session()
+            .await;
     }
 
-    /// Performs MCP `initialize` and returns the raw JSON-RPC response payload.
+    /// Prepares the client for tool calls (`server/discover` when stateless).
+    pub async fn connect_mcp(&self) -> Result<Value> {
+        self.client.connect().await
+    }
+
+    /// Performs the legacy MCP `initialize` handshake and returns the raw
+    /// JSON-RPC response payload.
     pub async fn initialize_mcp(&self) -> Result<Value> {
-        let result = self
-            .initialize_only_mcp()
-            .await?;
-
-        // The MCP spec requires the client to send `notifications/initialized`
-        // after receiving the initialize result.
-        self.notify("notifications/initialized", json!({}))
-            .await?;
-
-        Ok(result)
+        self.client.initialize().await
     }
 
-    /// Performs MCP `initialize` but does not send
+    /// Performs the legacy MCP `initialize` but does not send
     /// `notifications/initialized`.
     pub async fn initialize_only_mcp(&self) -> Result<Value> {
-        self.rpc_call(
-            "initialize",
-            json!({
-                "protocolVersion": DEFAULT_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "rust-mcp-e2e", "version": "0.1.0"},
-            }),
-        )
-        .await
+        self.client
+            .initialize_only()
+            .await
     }
 
     /// Calls MCP `tools/list` and returns the raw JSON-RPC response.
     pub async fn list_tools_mcp(&self) -> Result<Value> {
-        self.rpc_call("tools/list", json!({}))
-            .await
+        self.client.list_tools().await
     }
 
     /// Calls an MCP tool over JSON-RPC and returns the raw JSON-RPC response.
     pub async fn call_tool(&self, tool_name: &str, arguments: Value) -> Result<Value> {
-        self.rpc_call(
-            "tools/call",
-            json!({
-                "name": tool_name,
-                "arguments": arguments,
-            }),
-        )
-        .await
+        self.client
+            .call_tool(tool_name, arguments)
+            .await
+    }
+
+    /// Sends a JSON-RPC notification (no `id`, no response expected).
+    pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
+        self.client
+            .notify(method, params)
+            .await
     }
 
     /// Polls `/readyz` until the container is ready or times out.
     pub async fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
         let readyz_url = format!("{}/readyz", self.base_url);
+        let http = reqwest::Client::new();
         let started_at = Instant::now();
         let mut last_error = None;
 
         while started_at.elapsed() < timeout {
-            match self
-                .client
+            match http
                 .get(&readyz_url)
                 .send()
                 .await
@@ -298,151 +288,6 @@ impl RustMcpTestContainer {
             None => bail!("timed out waiting for {readyz_url}"),
         }
     }
-
-    /// Sends a JSON-RPC notification (no `id`, no response expected).
-    pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
-
-        let mut request = self
-            .client
-            .post(&self.mcp_url)
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream");
-
-        if let Some(sid) = self
-            .session_id
-            .lock()
-            .await
-            .as_deref()
-        {
-            request = request.header(MCP_SESSION_ID_HEADER, sid);
-        }
-
-        let response = request
-            .json(&payload)
-            .send()
-            .await
-            .with_context(|| format!("MCP notification failed for method `{method}`"))?;
-
-        // Capture session ID if present.
-        if let Some(sid) = response
-            .headers()
-            .get(MCP_SESSION_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session_id.lock().await = Some(sid.to_string());
-        }
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_default();
-            bail!("MCP notification `{method}` failed with HTTP {status}: {body}");
-        }
-
-        Ok(())
-    }
-
-    async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
-        let request_id = self
-            .next_request_id
-            .fetch_add(1, Ordering::Relaxed);
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        });
-
-        let mut request = self
-            .client
-            .post(&self.mcp_url)
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream");
-
-        // Attach session ID if we have one from a prior request.
-        if let Some(sid) = self
-            .session_id
-            .lock()
-            .await
-            .as_deref()
-        {
-            request = request.header(MCP_SESSION_ID_HEADER, sid);
-        }
-
-        let response = request
-            .json(&payload)
-            .send()
-            .await
-            .with_context(|| format!("failed MCP request for method `{method}`"))?;
-
-        let status = response.status();
-
-        // Capture session ID from response headers.
-        if let Some(sid) = response
-            .headers()
-            .get(MCP_SESSION_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session_id.lock().await = Some(sid.to_string());
-        }
-
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let body = response
-            .text()
-            .await
-            .context("failed to read MCP response body")?;
-        if !status.is_success() {
-            bail!("MCP request `{method}` failed with HTTP {status}: {body}");
-        }
-
-        let parsed = if content_type.contains("text/event-stream") {
-            parse_last_sse_json_data(&body).with_context(|| {
-                format!("MCP request `{method}` returned SSE with no JSON data event: {body}")
-            })?
-        } else {
-            serde_json::from_str::<Value>(&body)
-                .with_context(|| format!("MCP request `{method}` returned invalid JSON: {body}"))?
-        };
-
-        if parsed.get("error").is_some() {
-            bail!("MCP request `{method}` returned error payload: {parsed}");
-        }
-
-        Ok(parsed)
-    }
-}
-
-/// Extracts the last JSON-RPC payload from an SSE response body.
-fn parse_last_sse_json_data(body: &str) -> Result<Value> {
-    let mut last_json: Option<Value> = None;
-
-    for line in body.lines() {
-        let Some(payload) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let payload = payload.trim();
-        if payload.is_empty() {
-            continue;
-        }
-        if let Ok(value) = serde_json::from_str::<Value>(payload) {
-            last_json = Some(value);
-        }
-    }
-
-    ensure!(last_json.is_some(), "no JSON data events found in SSE body");
-    Ok(last_json.unwrap())
 }
 
 fn workspace_root() -> Result<PathBuf> {

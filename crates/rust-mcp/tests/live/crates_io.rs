@@ -40,9 +40,7 @@ async fn live_crates_io_context() -> Result<LiveCratesIoContext> {
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(30))
         .await?;
-    let _ = mcp
-        .initialize("live-crates-io-integration")
-        .await?;
+    let _ = mcp.connect().await?;
 
     Ok(LiveCratesIoContext {
         mcp,

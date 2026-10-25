@@ -10,6 +10,7 @@ use tokio::time::sleep;
 use crate::config::Config;
 use crate::db::tools;
 use crate::mcp::indexing::coordinator::IndexingCoordinator;
+use crate::mcp::session::McpSessions;
 
 /// Builds a User-Agent string following SEP-1329 conventions.
 ///
@@ -54,6 +55,8 @@ pub struct AppState {
     /// Bridges tool handlers waiting for on-demand indexing with the
     /// background refresh worker.
     pub indexing_coordinator: Arc<IndexingCoordinator>,
+    /// Live legacy-protocol MCP sessions and their durable store.
+    pub sessions: McpSessions,
 }
 
 /// Identifies a remote data source for outbound rate limiting.
@@ -243,6 +246,7 @@ impl AppState {
 
         let outbound_rate_limiters = Arc::new(OutboundRateLimiters::new(&config));
         let indexing_coordinator = Arc::new(IndexingCoordinator::new());
+        let sessions = McpSessions::new(db.clone());
 
         Ok(Self {
             config,
@@ -250,6 +254,7 @@ impl AppState {
             http,
             outbound_rate_limiters,
             indexing_coordinator,
+            sessions,
         })
     }
 

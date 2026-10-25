@@ -1,3 +1,5 @@
+use rust_mcp_testing::mcp_client::McpProtocol;
+
 use super::{
     BTreeSet, StatusCode, Value, initialize_raw_session, json, jsonrpc_request, notify_initialized,
     parse_mcp_response_from_http, post_mcp_jsonrpc, start_ready_rust_mcp,
@@ -97,7 +99,7 @@ async fn rust_mcp_container_exposes_http_schema_catalog_endpoints() {
 }
 
 #[tokio::test]
-async fn rust_mcp_container_supports_initialize_and_ping_tool() {
+async fn rust_mcp_container_supports_legacy_initialize_and_ping_tool() {
     let rust_mcp = start_ready_rust_mcp().await;
 
     let initialize = rust_mcp
@@ -136,7 +138,7 @@ async fn rust_mcp_container_initialize_response_matches_expected_contract() {
         .expect("initialize result.protocolVersion should be present");
     assert_eq!(
         protocol_version,
-        rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION,
+        rust_mcp::LEGACY_MCP_PROTOCOL_VERSION,
         "initialize should negotiate the server-supported MCP protocol version"
     );
 
@@ -197,7 +199,7 @@ async fn rust_mcp_container_negotiates_initialize_from_newer_protocol_version() 
     );
     assert_eq!(
         negotiated_protocol_version,
-        rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION,
+        rust_mcp::LEGACY_MCP_PROTOCOL_VERSION,
         "initialize should negotiate to server-supported MCP protocol version"
     );
 
@@ -240,17 +242,26 @@ async fn rust_mcp_container_negotiates_initialize_from_newer_protocol_version() 
 }
 
 #[tokio::test]
-async fn rust_mcp_container_supports_tools_list_after_initialize() {
+async fn rust_mcp_container_supports_tools_list() {
     let rust_mcp = start_ready_rust_mcp().await;
     let _ = rust_mcp
-        .initialize_mcp()
+        .connect_mcp()
         .await
-        .expect("MCP initialize failed");
+        .expect("MCP server/discover failed");
 
     let tools_list = rust_mcp
         .list_tools_mcp()
         .await
         .expect("MCP tools/list failed");
+    let result = tools_list
+        .get("result")
+        .expect("MCP tools/list did not include result");
+    assert_eq!(result.get("ttlMs"), Some(&json!(3_600_000)), "tools/list cache TTL: {result}");
+    assert_eq!(
+        result.get("cacheScope"),
+        Some(&json!("public")),
+        "tools/list cache scope: {result}"
+    );
     let tools = tools_list
         .get("result")
         .and_then(|result| result.get("tools"))
@@ -312,9 +323,9 @@ async fn rust_mcp_container_supports_tools_list_after_initialize() {
 async fn rust_mcp_container_tools_list_entries_include_descriptions_and_input_schemas() {
     let rust_mcp = start_ready_rust_mcp().await;
     let _ = rust_mcp
-        .initialize_mcp()
+        .connect_mcp()
         .await
-        .expect("MCP initialize failed");
+        .expect("MCP server/discover failed");
 
     let tools_list = rust_mcp
         .list_tools_mcp()
@@ -378,8 +389,12 @@ async fn rust_mcp_container_tools_list_entries_include_descriptions_and_input_sc
 }
 
 #[tokio::test]
-async fn rust_mcp_container_rejects_tools_list_before_initialize() {
+async fn rust_mcp_container_rejects_legacy_tools_list_before_initialize() {
     let rust_mcp = start_ready_rust_mcp().await;
+    rust_mcp
+        .client()
+        .set_protocol(McpProtocol::Legacy)
+        .await;
 
     let pre_initialize_tools_list = rust_mcp
         .list_tools_mcp()

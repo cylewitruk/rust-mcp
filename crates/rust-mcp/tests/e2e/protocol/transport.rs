@@ -1,5 +1,7 @@
+use rust_mcp_testing::mcp_client::McpProtocol;
+
 use super::{
-    DEFAULT_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_params, initialize_raw_session,
+    LEGACY_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_params, initialize_raw_session,
     json, jsonrpc_notification, jsonrpc_request, notify_initialized, parse_mcp_response_from_http,
     post_mcp_jsonrpc, start_ready_rust_mcp, start_ready_rust_mcp_with_env,
 };
@@ -14,7 +16,7 @@ async fn rust_mcp_container_accepts_json_only_accept_for_initialize() {
         .post(rust_mcp.mcp_url())
         .header("content-type", "application/json")
         .header("accept", "application/json")
-        .json(&jsonrpc_request(1, "initialize", initialize_params(DEFAULT_TEST_PROTOCOL_VERSION)))
+        .json(&jsonrpc_request(1, "initialize", initialize_params(LEGACY_TEST_PROTOCOL_VERSION)))
         .send()
         .await
         .expect("raw initialize request with JSON-only accept failed");
@@ -35,7 +37,7 @@ async fn rust_mcp_container_accepts_json_only_accept_for_initialize() {
     );
 
     let (session_id, initialize_payload) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     assert!(
         initialize_payload
             .get("result")
@@ -86,7 +88,7 @@ async fn rust_mcp_container_rejects_json_only_accept_in_strict_mode() {
         .post(rust_mcp.mcp_url())
         .header("content-type", "application/json")
         .header("accept", "application/json")
-        .json(&jsonrpc_request(1, "initialize", initialize_params(DEFAULT_TEST_PROTOCOL_VERSION)))
+        .json(&jsonrpc_request(1, "initialize", initialize_params(LEGACY_TEST_PROTOCOL_VERSION)))
         .send()
         .await
         .expect("strict-mode initialize request failed");
@@ -135,7 +137,7 @@ async fn rust_mcp_container_initialized_notification_returns_accepted_without_js
 
     let client = reqwest::Client::new();
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert_eq!(
@@ -156,6 +158,10 @@ async fn rust_mcp_container_initialized_notification_returns_accepted_without_js
 #[tokio::test]
 async fn rust_mcp_container_allows_tool_calls_after_initialize_before_initialized_notification() {
     let rust_mcp = start_ready_rust_mcp().await;
+    rust_mcp
+        .client()
+        .set_protocol(McpProtocol::Legacy)
+        .await;
 
     let pre_initialize = rust_mcp
         .call_tool("ping", json!({ "message": "pre-init" }))
@@ -216,7 +222,7 @@ async fn rust_mcp_container_rejects_jsonrpc_batch_requests() {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "initialize",
-                "params": initialize_params(DEFAULT_TEST_PROTOCOL_VERSION)
+                "params": initialize_params(LEGACY_TEST_PROTOCOL_VERSION)
             },
             {
                 "jsonrpc": "2.0",

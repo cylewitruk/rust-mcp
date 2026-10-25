@@ -1,7 +1,6 @@
 use super::{
-    DEFAULT_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_raw_session, json,
-    jsonrpc_request, notify_initialized, parse_mcp_response_from_http, post_mcp_jsonrpc,
-    start_ready_rust_mcp,
+    LEGACY_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_raw_session, json, jsonrpc_request,
+    notify_initialized, parse_mcp_response_from_http, post_mcp_jsonrpc, start_ready_rust_mcp,
 };
 
 #[tokio::test]
@@ -17,7 +16,7 @@ async fn rust_mcp_container_preserves_jsonrpc_ids_across_initialize_and_tools_re
         &client,
         rust_mcp.mcp_url(),
         initialize_id,
-        DEFAULT_TEST_PROTOCOL_VERSION,
+        LEGACY_TEST_PROTOCOL_VERSION,
     )
     .await;
     assert_eq!(initialize_payload.get("id"), Some(&json!(initialize_id)));
@@ -99,7 +98,7 @@ async fn rust_mcp_container_supports_concurrent_requests_on_same_session() {
 
     let client = reqwest::Client::new();
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(
@@ -174,7 +173,7 @@ async fn rust_mcp_container_closes_session_via_delete_and_rejects_follow_up_requ
 
     let client = reqwest::Client::new();
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(
@@ -238,7 +237,7 @@ async fn rust_mcp_container_rejects_unknown_session_id_header() {
 
     let client = reqwest::Client::new();
     let (session_id, initialize_payload) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     assert!(
         initialize_payload
             .get("result")

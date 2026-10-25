@@ -3,6 +3,9 @@
 use std::time::Duration;
 
 use rust_mcp_testing::rust_mcp::RustMcpTestContainer;
+use rust_mcp_types::protocol::{
+    LATEST_MCP_PROTOCOL_VERSION, insert_stateless_request_meta, stateless_request_headers,
+};
 use serde_json::{Value, json};
 
 const MCP_CONTENT_TYPE_JSON: &str = "application/json";
@@ -10,7 +13,9 @@ const MCP_ACCEPT_STREAMABLE: &str = "application/json, text/event-stream";
 const E2E_CLIENT_NAME: &str = "rust-mcp-e2e";
 const E2E_CLIENT_VERSION: &str = "0.1.0";
 
-pub const DEFAULT_TEST_PROTOCOL_VERSION: &str = rust_mcp::LATEST_MCP_PROTOCOL_VERSION;
+/// Protocol version used by the raw session helpers, which exercise the legacy
+/// `initialize` handshake.
+pub const LEGACY_TEST_PROTOCOL_VERSION: &str = rust_mcp::LEGACY_MCP_PROTOCOL_VERSION;
 const DEFAULT_CONTAINER_READY_TIMEOUT: Duration = Duration::from_secs(120);
 
 async fn wait_until_container_ready(rust_mcp: &RustMcpTestContainer) {
@@ -60,18 +65,18 @@ where
     rust_mcp
 }
 
-pub async fn initialize_mcp_session(rust_mcp: &RustMcpTestContainer) -> Value {
-    let initialize = rust_mcp
-        .initialize_mcp()
+pub async fn connect_mcp_client(rust_mcp: &RustMcpTestContainer) -> Value {
+    let discover = rust_mcp
+        .connect_mcp()
         .await
-        .expect("MCP initialize failed");
+        .expect("MCP server/discover failed");
     assert!(
-        initialize
+        discover
             .get("result")
             .is_some(),
-        "MCP initialize returned no result payload: {initialize}"
+        "MCP server/discover returned no result payload: {discover}"
     );
-    initialize
+    discover
 }
 
 pub fn tool_result<'a>(response: &'a Value, tool_name: &str) -> &'a Value {
@@ -185,6 +190,30 @@ pub async fn post_mcp_jsonrpc(
 
     if let Some(session_id) = session_id {
         request = request.header("mcp-session-id", session_id);
+    }
+
+    request
+        .json(&payload)
+        .send()
+        .await
+        .unwrap_or_else(|error| panic!("{error_context}: {error}"))
+}
+
+/// POSTs a JSON-RPC request on the stateless protocol: adds the per-request
+/// `_meta` keys and standard headers, and no session.
+pub async fn post_stateless_jsonrpc(
+    client: &reqwest::Client,
+    mcp_url: &str,
+    mut payload: Value,
+    error_context: &str,
+) -> reqwest::Response {
+    insert_stateless_request_meta(&mut payload, E2E_CLIENT_NAME, E2E_CLIENT_VERSION);
+    let mut request = client
+        .post(mcp_url)
+        .header("content-type", MCP_CONTENT_TYPE_JSON)
+        .header("accept", MCP_ACCEPT_STREAMABLE);
+    for (name, value) in stateless_request_headers(&payload, LATEST_MCP_PROTOCOL_VERSION) {
+        request = request.header(name, value);
     }
 
     request

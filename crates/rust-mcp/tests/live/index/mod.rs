@@ -39,9 +39,7 @@ async fn live_context(cargo_registry_dir: PathBuf) -> Result<LiveContext> {
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(30))
         .await?;
-    let _ = mcp
-        .initialize("live-index-integration")
-        .await?;
+    let _ = mcp.connect().await?;
 
     Ok(LiveContext {
         mcp,

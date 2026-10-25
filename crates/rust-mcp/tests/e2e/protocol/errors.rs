@@ -1,5 +1,5 @@
 use super::{
-    DEFAULT_TEST_PROTOCOL_VERSION, Value, initialize_raw_session, json, jsonrpc_request,
+    LEGACY_TEST_PROTOCOL_VERSION, Value, initialize_raw_session, json, jsonrpc_request,
     notify_initialized, parse_mcp_response, post_mcp_jsonrpc, start_ready_rust_mcp,
 };
 
@@ -9,7 +9,7 @@ async fn rust_mcp_container_reports_invalid_params_for_tools_call() {
 
     let client = reqwest::Client::new();
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(
@@ -75,9 +75,9 @@ async fn rust_mcp_container_reports_invalid_params_for_tools_call() {
 async fn rust_mcp_container_reports_tool_validation_failure_as_error_result() {
     let rust_mcp = start_ready_rust_mcp().await;
     let _ = rust_mcp
-        .initialize_mcp()
+        .connect_mcp()
         .await
-        .expect("MCP initialize failed");
+        .expect("MCP server/discover failed");
 
     let invalid_tool_response = rust_mcp
         .call_tool(
@@ -107,9 +107,9 @@ async fn rust_mcp_container_reports_tool_validation_failure_as_error_result() {
 async fn rust_mcp_container_reports_error_for_unknown_tool_call() {
     let rust_mcp = start_ready_rust_mcp().await;
     let _ = rust_mcp
-        .initialize_mcp()
+        .connect_mcp()
         .await
-        .expect("MCP initialize failed");
+        .expect("MCP server/discover failed");
 
     let unknown_tool = rust_mcp
         .call_tool("tool.does_not_exist", json!({}))
@@ -130,7 +130,7 @@ async fn rust_mcp_container_reports_error_for_unknown_jsonrpc_method() {
 
     let client = reqwest::Client::new();
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(

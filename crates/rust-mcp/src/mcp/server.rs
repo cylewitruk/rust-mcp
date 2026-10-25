@@ -1,13 +1,15 @@
 use std::future::Future;
-use std::time::Instant;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 use metrics::{counter, histogram};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::ToolCallContext as RmcpToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation, ListToolsResult,
-    PaginatedRequestParams, RequestMetaObject, ServerCapabilities, ServerConfig, Tool,
+    CacheScope, CallToolRequestParams, CallToolResponse, ErrorCode, ErrorData, Implementation,
+    ListToolsResult, PaginatedRequestParams, RequestMetaObject, ServerCapabilities, ServerConfig,
+    Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{Json, Peer, RoleServer, ServerHandler, tool, tool_router};
@@ -68,20 +70,28 @@ non-recoverable errors after retrying.
 - Choose between crates: crate_compare → crate_alternatives
 "#;
 
+/// How long clients may cache `tools/list`; the tool set only changes between
+/// server builds.
+const TOOL_LIST_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// Tool routes, built once: stateless requests construct a server per request.
+static TOOL_ROUTER: LazyLock<Arc<ToolRouter<McpServer>>> =
+    LazyLock::new(|| Arc::new(McpServer::tool_router()));
+
 /// MCP protocol server that registers and dispatches tool calls.
 #[derive(Debug, Clone)]
 pub struct McpServer {
     /// Shared application state.
     pub state: AppState,
-    tool_router: ToolRouter<Self>,
+    tool_router: Arc<ToolRouter<Self>>,
 }
 
 impl McpServer {
-    /// Creates a new server instance with tool routes initialized.
+    /// Creates a new server instance sharing the process-wide tool routes.
     pub fn new(state: AppState) -> Self {
         Self {
             state,
-            tool_router: Self::tool_router(),
+            tool_router: TOOL_ROUTER.clone(),
         }
     }
 
@@ -775,7 +785,9 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        std::future::ready(Ok(ListToolsResult::with_all_items(self.tool_router.list_all())))
+        std::future::ready(Ok(ListToolsResult::with_all_items(self.tool_router.list_all())
+            .with_ttl_ms(TOOL_LIST_TTL.as_millis() as u64)
+            .with_cache_scope(CacheScope::Public)))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {

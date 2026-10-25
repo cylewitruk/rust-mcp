@@ -72,6 +72,7 @@ pub fn test_config(database_url: String, cargo_registry_dir: PathBuf) -> Config 
     }
 }
 
+#[allow(dead_code)]
 pub struct SeededMcpContext {
     pub mcp: LocalMcpHttpHarness,
     #[allow(dead_code)]
@@ -88,6 +89,7 @@ impl Drop for SeededMcpContext {
     }
 }
 
+#[allow(dead_code)]
 pub async fn seeded_mcp_context() -> Result<SeededMcpContext> {
     let postgres = PostgresTestContainer::start().await?;
 
@@ -134,9 +136,7 @@ pub async fn seeded_mcp_context() -> Result<SeededMcpContext> {
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(20))
         .await?;
-    let _ = mcp
-        .initialize("mcp-tools-integration")
-        .await?;
+    let _ = mcp.connect().await?;
 
     Ok(SeededMcpContext {
         mcp,

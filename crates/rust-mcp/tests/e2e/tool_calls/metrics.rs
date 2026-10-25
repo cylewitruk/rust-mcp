@@ -1,10 +1,10 @@
 use serde_json::json;
 
-use super::{call_tool_response, initialized_container};
+use super::{call_tool_response, connected_container};
 
 #[tokio::test]
 async fn rust_mcp_container_exports_tool_metrics_after_calls() {
-    let rust_mcp = initialized_container().await;
+    let rust_mcp = connected_container().await;
 
     let _ = call_tool_response(&rust_mcp, "ping", json!({ "message": "metrics" })).await;
     let _ = call_tool_response(&rust_mcp, "index_status", json!({})).await;

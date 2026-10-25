@@ -59,3 +59,22 @@ async fn schema_get_returns_contract_for_known_tool() {
         Some("object")
     );
 }
+
+/// Names needing Base64 header encoding must pass rmcp's standard-header
+/// validation; the call then fails only because the tool is unknown.
+#[tokio::test]
+async fn stateless_call_with_encoded_tool_name_passes_header_validation() {
+    let context = common::seeded_mcp_context()
+        .await
+        .expect("failed to build seeded MCP context");
+
+    let error = context
+        .mcp
+        .call_tool("ツール", json!({}))
+        .await
+        .expect_err("unknown tool should fail")
+        .to_string();
+
+    assert!(!error.contains("-32020"), "Mcp-Name header was rejected: {error}");
+    assert!(error.contains("ツール"), "expected an unknown-tool error: {error}");
+}

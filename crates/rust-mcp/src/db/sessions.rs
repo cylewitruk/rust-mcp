@@ -1,27 +1,40 @@
-/// Database operations for MCP session persistence.
+/// Database operations for legacy-protocol MCP session persistence.
+use serde_json::Value;
 use sqlx::PgPool;
+use sqlx::types::Json;
 
-/// Insert a session ID, ignoring duplicates.
-pub async fn insert_session(db: &PgPool, session_id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO sessions (session_id) VALUES ($1) ON CONFLICT DO NOTHING")
-        .bind(session_id)
-        .execute(db)
-        .await?;
+/// Insert or replace a session's persisted state.
+pub async fn upsert_session(
+    db: &PgPool,
+    session_id: &str,
+    state: &Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO sessions (session_id, state) VALUES ($1, $2)
+         ON CONFLICT (session_id) DO UPDATE SET state = EXCLUDED.state, last_seen_at = NOW()",
+    )
+    .bind(session_id)
+    .bind(Json(state))
+    .execute(db)
+    .await?;
     Ok(())
 }
 
-/// Check whether a session exists in the database.
-pub async fn session_exists(db: &PgPool, session_id: &str) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = $1)")
-        .bind(session_id)
-        .fetch_one(db)
-        .await
+/// Load a session's persisted state, marking it as seen.
+pub async fn load_session(db: &PgPool, session_id: &str) -> Result<Option<Value>, sqlx::Error> {
+    let state: Option<Json<Value>> = sqlx::query_scalar(
+        "UPDATE sessions SET last_seen_at = NOW() WHERE session_id = $1 RETURNING state",
+    )
+    .bind(session_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(state.map(|Json(state)| state))
 }
 
-/// Update `last_seen_at` to the current time.
-pub async fn touch_session(db: &PgPool, session_id: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE sessions SET last_seen_at = NOW() WHERE session_id = $1")
-        .bind(session_id)
+/// Mark the given sessions as seen.
+pub async fn touch_sessions(db: &PgPool, session_ids: &[String]) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE sessions SET last_seen_at = NOW() WHERE session_id = ANY($1)")
+        .bind(session_ids)
         .execute(db)
         .await?;
     Ok(())

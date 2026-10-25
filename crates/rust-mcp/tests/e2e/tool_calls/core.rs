@@ -1,10 +1,10 @@
 use serde_json::{Value, json};
 
-use super::{call_tool_payload, call_tool_response, first_content_text, initialized_container};
+use super::{call_tool_payload, call_tool_response, connected_container, first_content_text};
 
 #[tokio::test]
 async fn tool_ping_returns_pong_with_message() {
-    let rust_mcp = initialized_container().await;
+    let rust_mcp = connected_container().await;
 
     let response =
         call_tool_response(&rust_mcp, "ping", json!({ "message": "one-tool-one-test" })).await;
@@ -19,7 +19,7 @@ async fn tool_ping_returns_pong_with_message() {
 
 #[tokio::test]
 async fn tool_schema_get_returns_single_contract_for_selected_tool() {
-    let rust_mcp = initialized_container().await;
+    let rust_mcp = connected_container().await;
 
     let payload = call_tool_payload(&rust_mcp, "schema_get", json!({ "tool_name": "ping" })).await;
     assert_eq!(

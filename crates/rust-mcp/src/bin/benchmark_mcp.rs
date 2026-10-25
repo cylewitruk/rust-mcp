@@ -5,10 +5,11 @@ use std::time::Instant;
 
 use clap::Parser;
 use reqwest::Client;
-use serde_json::{Value, json};
+use serde_json::json;
 
-const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
-const MCP_ACCEPT_HEADER: &str = "application/json, text/event-stream";
+mod common;
+
+const CLIENT_NAME: &str = "benchmark-mcp";
 
 #[derive(Debug, Parser)]
 #[command(name = "benchmark-mcp", about = "Benchmark rust-mcp tools over HTTP MCP")]
@@ -66,157 +67,17 @@ impl ToolStats {
     }
 }
 
-async fn rpc_call(
-    client: &Client,
-    endpoint: &str,
-    session_id: Option<&str>,
-    id: u64,
-    method: &str,
-    params: Value,
-) -> Result<(Value, Option<String>), String> {
-    let payload = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": params,
-    });
-
-    let mut request = client
-        .post(endpoint)
-        .header("content-type", "application/json")
-        .header("accept", MCP_ACCEPT_HEADER)
-        .json(&payload);
-    if let Some(sid) = session_id {
-        request = request.header(MCP_SESSION_ID_HEADER, sid);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {e}"))?;
-
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let response_session_id = response
-        .headers()
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(ToString::to_string);
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("failed to read response body: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("http status {status}: {body}"));
-    }
-
-    let parsed = if content_type.contains("text/event-stream") {
-        parse_last_sse_json_data(&body)?
-    } else {
-        serde_json::from_str::<Value>(&body).map_err(|e| format!("invalid JSON response: {e}"))?
-    };
-
-    Ok((parsed, response_session_id))
-}
-
-async fn rpc_notify(
-    client: &Client,
-    endpoint: &str,
-    session_id: &str,
-    method: &str,
-    params: Value,
-) -> Result<Option<String>, String> {
-    let payload = json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-    });
-
-    let response = client
-        .post(endpoint)
-        .header("content-type", "application/json")
-        .header("accept", MCP_ACCEPT_HEADER)
-        .header(MCP_SESSION_ID_HEADER, session_id)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("notification request failed: {e}"))?;
-
-    let status = response.status();
-    let response_session_id = response
-        .headers()
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(ToString::to_string);
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("failed to read notification response body: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("notification `{method}` failed with http status {status}: {body}"));
-    }
-
-    Ok(response_session_id)
-}
-
-fn parse_last_sse_json_data(body: &str) -> Result<Value, String> {
-    let mut last_json: Option<Value> = None;
-
-    for line in body.lines() {
-        let Some(payload) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let payload = payload.trim();
-        if payload.is_empty() {
-            continue;
-        }
-        if let Ok(value) = serde_json::from_str::<Value>(payload) {
-            last_json = Some(value);
-        }
-    }
-
-    last_json.ok_or_else(|| format!("no JSON data events found in SSE body: {body}"))
-}
-
-fn is_success_result(value: &Value) -> bool {
-    value.get("error").is_none() && value.get("result").is_some()
-}
-
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args = Args::parse();
     let client = Client::new();
-    let mut session_id: Option<String> = None;
 
-    let (init, init_session_id) = rpc_call(
-        &client,
-        &args.endpoint,
-        None,
-        1,
-        "initialize",
-        json!({
-            "protocolVersion": rust_mcp::LATEST_MCP_PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "benchmark-mcp", "version": "0.1.0"}
-        }),
-    )
-    .await?;
-    session_id = init_session_id.or(session_id);
-
-    if !is_success_result(&init) {
-        return Err(format!("initialize failed: {init}"));
+    let discover =
+        common::rpc_call(&client, &args.endpoint, CLIENT_NAME, 1, "server/discover", json!({}))
+            .await?;
+    if !common::is_success_result(&discover) {
+        return Err(format!("server/discover failed: {discover}"));
     }
-    let sid = session_id
-        .as_deref()
-        .ok_or_else(|| "initialize response missing mcp-session-id header".to_string())?;
-    session_id = rpc_notify(&client, &args.endpoint, sid, "notifications/initialized", json!({}))
-        .await?
-        .or(session_id);
 
     let tools = vec![
         (
@@ -268,10 +129,10 @@ async fn main() -> Result<(), String> {
     for _ in 0..args.iterations {
         for (tool_name, params) in &tools {
             let started = Instant::now();
-            let result = rpc_call(
+            let result = common::rpc_call(
                 &client,
                 &args.endpoint,
-                session_id.as_deref(),
+                CLIENT_NAME,
                 id,
                 "tools/call",
                 params.clone(),
@@ -283,15 +144,7 @@ async fn main() -> Result<(), String> {
                 * 1000.0;
             id = id.saturating_add(1);
 
-            let ok = match result {
-                Ok((value, response_session_id)) => {
-                    if let Some(sid) = response_session_id {
-                        session_id = Some(sid);
-                    }
-                    is_success_result(&value)
-                }
-                Err(_) => false,
-            };
+            let ok = result.is_ok_and(|value| common::is_success_result(&value));
 
             stats
                 .entry((*tool_name).to_string())

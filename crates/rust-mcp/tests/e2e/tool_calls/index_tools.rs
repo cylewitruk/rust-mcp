@@ -3,13 +3,13 @@ use serde_json::{Value, json};
 use super::{
     SEEDED_CRATE_NAME, SEEDED_CRATE_NEXT_VERSION, TOKIO_FALLBACK_CRATE_NAME,
     TOKIO_FALLBACK_CRATE_VERSION, TOKIO_FALLBACK_LOCAL_SOURCE_PATH, call_tool_payload,
-    refresh_seeded_rustdoc_json, seeded_indexed_context, seeded_initialized_context,
+    refresh_seeded_rustdoc_json, seeded_connected_context, seeded_indexed_context,
     seeded_rustdoc_fallback_initialized_context, sync_seeded_demo_crates,
 };
 
 #[tokio::test]
 async fn tool_index_crates_syncs_seeded_fixtures() {
-    let context = seeded_initialized_context().await;
+    let context = seeded_connected_context().await;
 
     let payload = sync_seeded_demo_crates(&context.rust_mcp, true).await;
 
@@ -41,7 +41,7 @@ async fn tool_index_crates_syncs_seeded_fixtures() {
 
 #[tokio::test]
 async fn tool_index_refresh_rustdoc_json_completes_for_seeded_fixtures() {
-    let context = seeded_initialized_context().await;
+    let context = seeded_connected_context().await;
     let _ = sync_seeded_demo_crates(&context.rust_mcp, true).await;
 
     let payload = refresh_seeded_rustdoc_json(&context.rust_mcp).await;

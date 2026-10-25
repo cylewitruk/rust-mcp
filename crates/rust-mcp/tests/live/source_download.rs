@@ -212,9 +212,7 @@ async fn live_source_context() -> Result<LiveSourceContext> {
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(30))
         .await?;
-    let _ = mcp
-        .initialize("live-source-download")
-        .await?;
+    let _ = mcp.connect().await?;
 
     Ok(LiveSourceContext {
         mcp,

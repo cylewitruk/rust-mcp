@@ -1,7 +1,7 @@
 use super::{
-    DEFAULT_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_raw_session, json,
-    jsonrpc_request, notify_initialized, parse_mcp_response, parse_mcp_response_from_http,
-    post_mcp_jsonrpc, start_ready_rust_mcp,
+    LEGACY_TEST_PROTOCOL_VERSION, StatusCode, Value, initialize_raw_session, json, jsonrpc_request,
+    notify_initialized, parse_mcp_response, parse_mcp_response_from_http, post_mcp_jsonrpc,
+    start_ready_rust_mcp,
 };
 
 fn assert_jsonrpc_error_envelope(payload: &Value, expected_id: &Value) {
@@ -44,7 +44,7 @@ async fn rust_mcp_container_rejects_tools_requests_without_session_header_after_
     let client = reqwest::Client::new();
 
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(
@@ -103,7 +103,7 @@ async fn rust_mcp_container_reports_jsonrpc_error_envelope_for_invalid_request_s
     let client = reqwest::Client::new();
 
     let (session_id, _) =
-        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, DEFAULT_TEST_PROTOCOL_VERSION).await;
+        initialize_raw_session(&client, rust_mcp.mcp_url(), 1, LEGACY_TEST_PROTOCOL_VERSION).await;
     let initialized_notification =
         notify_initialized(&client, rust_mcp.mcp_url(), &session_id).await;
     assert!(
@@ -234,10 +234,10 @@ async fn rust_mcp_container_negotiates_initialize_for_all_recognized_protocol_ve
             .expect("initialize result.protocolVersion should be present");
 
         let expected_negotiated =
-            if requested_protocol_version <= rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION {
+            if requested_protocol_version <= rust_mcp::LEGACY_MCP_PROTOCOL_VERSION {
                 requested_protocol_version
             } else {
-                rust_mcp::SUPPORTED_MCP_PROTOCOL_VERSION
+                rust_mcp::LEGACY_MCP_PROTOCOL_VERSION
             };
         assert_eq!(
             negotiated_protocol_version, expected_negotiated,

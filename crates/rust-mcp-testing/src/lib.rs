@@ -4,5 +4,6 @@ pub mod db;
 pub mod env;
 pub mod fixtures;
 pub mod local_mcp;
+pub mod mcp_client;
 pub mod postgres;
 pub mod rust_mcp;

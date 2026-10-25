@@ -14,12 +14,15 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock README.md ./
 COPY crates/rust-mcp/Cargo.toml crates/rust-mcp/Cargo.toml
+COPY crates/rust-mcp-stdio/Cargo.toml crates/rust-mcp-stdio/Cargo.toml
 COPY crates/rust-mcp-testing/Cargo.toml crates/rust-mcp-testing/Cargo.toml
 COPY crates/rust-mcp-types/Cargo.toml crates/rust-mcp-types/Cargo.toml
 
-# Dummy source for dependency caching
-RUN mkdir -p crates/rust-mcp/src crates/rust-mcp-testing/src crates/rust-mcp-types/src && \
+# Dummy source for dependency caching; every workspace member is stubbed so
+# resolution matches Cargo.lock.
+RUN mkdir -p crates/rust-mcp/src crates/rust-mcp-stdio/src crates/rust-mcp-testing/src crates/rust-mcp-types/src && \
     echo 'fn main(){}' > crates/rust-mcp/src/main.rs && \
+    echo 'fn main(){}' > crates/rust-mcp-stdio/src/main.rs && \
     echo 'pub fn _dummy() {}' > crates/rust-mcp-testing/src/lib.rs && \
     echo 'pub fn _dummy() {}' > crates/rust-mcp-types/src/lib.rs
 

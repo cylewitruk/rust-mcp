@@ -1,30 +1,29 @@
 //! In-process MCP HTTP test harness utilities.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail};
 use axum::Router;
-use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep};
 use tracing::debug;
 
-/// MCP session header name per the Streamable HTTP spec.
-const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+use crate::mcp_client::McpHttpClient;
+
+const CLIENT_NAME: &str = "rust-mcp-integration";
 
 /// Local HTTP server harness for MCP JSON-RPC integration tests.
+///
+/// Speaks the stateless protocol unless [`LocalMcpHttpHarness::initialize`]
+/// establishes a legacy session.
 #[derive(Debug)]
 pub struct LocalMcpHttpHarness {
     base_url: String,
-    mcp_url: String,
-    client: reqwest::Client,
-    next_request_id: AtomicU64,
-    session_id: Mutex<Option<String>>,
+    client: McpHttpClient,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     serve_task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -66,14 +65,11 @@ impl LocalMcpHttpHarness {
         });
 
         let base_url = format!("http://{addr}");
-        let mcp_url = format!("{base_url}/mcp");
+        let client = McpHttpClient::new(format!("{base_url}/mcp"), CLIENT_NAME);
 
         Ok(Self {
             base_url,
-            mcp_url,
-            client: reqwest::Client::new(),
-            next_request_id: AtomicU64::new(1),
-            session_id: Mutex::new(None),
+            client,
             shutdown_tx: Mutex::new(Some(shutdown_tx)),
             serve_task: Mutex::new(Some(serve_task)),
         })
@@ -84,33 +80,32 @@ impl LocalMcpHttpHarness {
         &self.base_url
     }
 
-    /// Returns the full MCP endpoint URL.
-    pub fn mcp_url(&self) -> &str {
-        &self.mcp_url
+    /// Returns the MCP client used by this harness.
+    pub fn client(&self) -> &McpHttpClient {
+        &self.client
     }
 
-    /// Returns the current session ID, if one has been established.
+    /// Returns the current legacy session ID, if one has been established.
     pub async fn session_id(&self) -> Option<String> {
-        self.session_id
-            .lock()
-            .await
-            .clone()
+        self.client.session_id().await
     }
 
-    /// Overrides the session ID used for subsequent requests.
+    /// Overrides the legacy session ID used for subsequent requests.
     pub async fn set_session_id(&self, session_id: String) {
-        *self.session_id.lock().await = Some(session_id);
+        self.client
+            .set_session_id(session_id)
+            .await;
     }
 
     /// Waits for `/readyz` to return success or times out.
     pub async fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
         let readyz_url = format!("{}/readyz", self.base_url());
+        let http = reqwest::Client::new();
         let started_at = Instant::now();
         let mut last_error = None;
 
         while started_at.elapsed() < timeout {
-            match self
-                .client
+            match http
                 .get(&readyz_url)
                 .send()
                 .await
@@ -132,34 +127,15 @@ impl LocalMcpHttpHarness {
         }
     }
 
-    /// Sends the MCP `initialize` request followed by the required
-    /// `notifications/initialized` notification. Returns the initialize
-    /// JSON-RPC response.
-    #[tracing::instrument(skip(self))]
-    pub async fn initialize(&self, client_name: &str) -> Result<Value> {
-        debug!("Initializing MCP session");
-        let start = Instant::now();
+    /// Prepares the harness for tool calls (`server/discover` when stateless).
+    pub async fn connect(&self) -> Result<Value> {
+        self.client.connect().await
+    }
 
-        let result = self
-            .rpc_call(
-                "initialize",
-                json!({
-                    "protocolVersion": LATEST_MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": {"name": client_name, "version": "0.1.0"},
-                }),
-            )
-            .await?;
-
-        let elapsed_secs = start.elapsed().as_secs_f32();
-        debug!(%elapsed_secs, "MCP initialize finished");
-
-        // The MCP spec requires the client to send `notifications/initialized`
-        // after receiving the initialize result.
-        self.notify("notifications/initialized", json!({}))
-            .await?;
-
-        Ok(result)
+    /// Performs the legacy `initialize` handshake, switching this harness to a
+    /// session-based protocol.
+    pub async fn initialize(&self) -> Result<Value> {
+        self.client.initialize().await
     }
 
     /// Calls an MCP tool and returns raw JSON-RPC response.
@@ -168,199 +144,54 @@ impl LocalMcpHttpHarness {
         debug!(?arguments, "Calling tool");
         let start = Instant::now();
 
-        let result = self
-            .rpc_call(
-                "tools/call",
-                json!({
-                    "name": tool_name,
-                    "arguments": arguments,
-                }),
-            )
+        let response = self
+            .client
+            .call_tool(tool_name, arguments)
             .await?;
+        ensure_not_tool_error("tools/call", &response)?;
 
         let elapsed_secs = start.elapsed().as_secs_f32();
         debug!(%elapsed_secs, "Tool call finished");
-
-        Ok(result)
+        Ok(response)
     }
 
     /// Sends a JSON-RPC notification (no `id`, no response expected).
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        });
-
-        let mut request = self
-            .client
-            .post(self.mcp_url())
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream");
-
-        if let Some(sid) = self
-            .session_id
-            .lock()
+        self.client
+            .notify(method, params)
             .await
-            .as_deref()
-        {
-            request = request.header(MCP_SESSION_ID_HEADER, sid);
-        }
-
-        let response = request
-            .json(&payload)
-            .send()
-            .await
-            .with_context(|| format!("MCP notification failed for method `{method}`"))?;
-
-        // Capture session ID if present.
-        if let Some(sid) = response
-            .headers()
-            .get(MCP_SESSION_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session_id.lock().await = Some(sid.to_string());
-        }
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_default();
-            bail!("MCP notification `{method}` failed with HTTP {status}: {body}");
-        }
-
-        Ok(())
     }
 
-    /// Sends a JSON-RPC request against the local MCP endpoint.
-    ///
-    /// Handles both plain JSON and SSE (`text/event-stream`) responses
-    /// transparently — the MCP Streamable HTTP transport may use either.
-    /// Automatically captures and reuses the `Mcp-Session-Id` header.
+    /// Sends a JSON-RPC request, failing on JSON-RPC and tool-level errors.
     pub async fn rpc_call(&self, method: &str, params: Value) -> Result<Value> {
-        let request_id = self
-            .next_request_id
-            .fetch_add(1, Ordering::Relaxed);
-        let payload = json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        });
-
-        let mut request = self
+        let response = self
             .client
-            .post(self.mcp_url())
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream");
-
-        // Attach session ID if we have one from a prior request.
-        if let Some(sid) = self
-            .session_id
-            .lock()
-            .await
-            .as_deref()
-        {
-            request = request.header(MCP_SESSION_ID_HEADER, sid);
-        }
-
-        let response = request
-            .json(&payload)
-            .send()
-            .await
-            .with_context(|| format!("MCP request failed for method `{method}`"))?;
-
-        let status = response.status();
-
-        // Capture session ID from response headers.
-        if let Some(sid) = response
-            .headers()
-            .get(MCP_SESSION_ID_HEADER)
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session_id.lock().await = Some(sid.to_string());
-        }
-
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let body = response
-            .text()
-            .await
-            .context("failed to read MCP response body")?;
-        if !status.is_success() {
-            bail!("MCP request `{method}` failed with HTTP {status}: {body}");
-        }
-
-        let parsed = if content_type.contains("text/event-stream") {
-            parse_last_sse_json_data(&body).with_context(|| {
-                format!("MCP request `{method}` returned SSE with no JSON data event: {body}")
-            })?
-        } else {
-            serde_json::from_str::<Value>(&body)
-                .with_context(|| format!("MCP request `{method}` returned invalid JSON: {body}"))?
-        };
-
-        if parsed.get("error").is_some() {
-            bail!("MCP request `{method}` returned JSON-RPC error payload: {parsed}");
-        }
-
-        // Detect tool-level errors: rmcp wraps `Err(String)` as
-        // `result.isError: true` with error text in `result.content`.
-        if let Some(result) = parsed.get("result")
-            && result
-                .get("isError")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        {
-            let message = result
-                .get("content")
-                .and_then(serde_json::Value::as_array)
-                .and_then(|arr| arr.first())
-                .and_then(|item| item.get("text"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<no error text>");
-            bail!("MCP request `{method}` returned tool-level error: {message}");
-        }
-
-        Ok(parsed)
+            .request(method, params)
+            .await?;
+        ensure_not_tool_error(method, &response)?;
+        Ok(response)
     }
 }
 
-/// Extracts the last JSON-RPC payload from an SSE response body.
-///
-/// SSE events look like:
-/// ```text
-/// data:
-/// id: 0
-/// retry: 3000
-///
-/// data: {"jsonrpc":"2.0","id":1,"result":{...}}
-/// ```
-///
-/// We scan for `data:` lines that contain valid JSON and return the last one,
-/// which is the final JSON-RPC response in the stream.
-fn parse_last_sse_json_data(body: &str) -> Result<Value> {
-    let mut last_json: Option<Value> = None;
-
-    for line in body.lines() {
-        let Some(payload) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let payload = payload.trim();
-        if payload.is_empty() {
-            continue;
-        }
-        if let Ok(value) = serde_json::from_str::<Value>(payload) {
-            last_json = Some(value);
-        }
-    }
-
-    ensure!(last_json.is_some(), "no JSON data events found in SSE body");
-    Ok(last_json.unwrap())
+/// Fails when rmcp reported a tool-level error (`result.isError: true`).
+fn ensure_not_tool_error(method: &str, response: &Value) -> Result<()> {
+    let Some(result) = response
+        .get("result")
+        .filter(|result| {
+            result
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+    else {
+        return Ok(());
+    };
+    let message = result
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("<no error text>");
+    bail!("MCP request `{method}` returned tool-level error: {message}")
 }

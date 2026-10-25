@@ -174,9 +174,7 @@ async fn mock_index_sync_context_with_rustdoc_dir(
     let mcp = LocalMcpHttpHarness::spawn(router).await?;
     mcp.wait_until_ready(Duration::from_secs(20))
         .await?;
-    let _ = mcp
-        .initialize("index-tools-integration")
-        .await?;
+    let _ = mcp.connect().await?;
 
     Ok(MockIndexSyncContext {
         mcp,

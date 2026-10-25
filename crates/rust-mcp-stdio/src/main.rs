@@ -4,17 +4,21 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use clap::Parser;
-use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
+use reqwest::StatusCode;
+use rust_mcp_types::protocol::{
+    LATEST_MCP_PROTOCOL_VERSION, MCP_SESSION_ID_HEADER, insert_stateless_request_meta,
+    request_meta_protocol_version, stateless_request_headers,
+};
 use rust_mcp_types::types::schema::ToolSchemasResponse;
 use serde_json::{Value, json};
 use tokio::io::{
-    self, AsyncBufRead, AsyncBufReadExt as _, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _,
-    BufReader, BufWriter,
+    self, AsyncBufRead, AsyncBufReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader, BufWriter,
 };
 use tracing::{debug, error, info, warn};
 
-/// MCP session header name per Streamable HTTP transport behavior.
-const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+/// Client name used for requests the adapter upgrades to the stateless
+/// protocol.
+const ADAPTER_CLIENT_NAME: &str = "rust-mcp-stdio";
 
 /// Runs an stdio MCP proxy that forwards JSON-RPC messages to a remote
 /// Streamable HTTP MCP endpoint.
@@ -41,11 +45,6 @@ struct Args {
     /// traffic.
     #[arg(long, env = "MCP_PREFLIGHT_SCHEMA", default_value_t = true)]
     preflight_schema: bool,
-
-    /// Automatically establish an upstream MCP session for requests that
-    /// require one (for short-lived one-request-per-process clients).
-    #[arg(long, env = "MCP_AUTO_BOOTSTRAP_SESSION", default_value_t = true)]
-    auto_bootstrap_session: bool,
 }
 
 #[tokio::main]
@@ -74,26 +73,30 @@ async fn main() -> Result<()> {
     let stdout = io::stdout();
     let mut reader = BufReader::new(stdin);
     let mut writer = BufWriter::new(stdout);
-    let mut session_id: Option<String> = None;
+    let mut upstream = Upstream::new(client, args.mcp_url);
 
-    while let Some(payload) = read_stdio_jsonrpc_message(&mut reader).await? {
+    while let Some(line) = read_stdio_line(&mut reader).await? {
+        let payload = match serde_json::from_str::<Value>(&line) {
+            Ok(payload) => payload,
+            Err(error) => {
+                let parse_error =
+                    jsonrpc_error(Value::Null, -32700, format!("parse error: {error}"));
+                write_stdio_jsonrpc_message(&mut writer, &parse_error).await?;
+                continue;
+            }
+        };
         let is_request = payload.get("id").is_some();
 
-        let mut upstream_messages = forward_to_http(
-            &client,
-            &args.mcp_url,
-            &mut session_id,
-            &payload,
-            args.auto_bootstrap_session,
-        )
-        .await
-        .unwrap_or_else(|error| {
-            vec![jsonrpc_error_for_payload(
-                &payload,
-                -32000,
-                format!("stdio proxy upstream call failed: {error}"),
-            )]
-        });
+        let mut upstream_messages = upstream
+            .forward(&payload)
+            .await
+            .unwrap_or_else(|error| {
+                vec![jsonrpc_error_for_payload(
+                    &payload,
+                    -32000,
+                    format!("stdio proxy upstream call failed: {error}"),
+                )]
+            });
 
         if upstream_messages.is_empty() && is_request {
             upstream_messages.push(jsonrpc_error_for_payload(
@@ -126,76 +129,41 @@ fn init_tracing(level: &str) -> Result<()> {
         .map_err(|error| anyhow!("failed to initialize tracing subscriber: {error}"))
 }
 
-async fn read_stdio_jsonrpc_message<R>(reader: &mut R) -> Result<Option<Value>>
+/// Reads the next newline-delimited message from stdin, skipping blank lines.
+/// Returns `None` at end of input.
+async fn read_stdio_line<R>(reader: &mut R) -> Result<Option<String>>
 where
     R: AsyncBufRead + Unpin,
 {
-    let mut content_length: Option<usize> = None;
-    let mut saw_any_header_line = false;
-
     loop {
         let mut line = String::new();
         let bytes = reader
             .read_line(&mut line)
             .await
-            .context("failed to read stdio header line")?;
-
+            .context("failed to read stdio message")?;
         if bytes == 0 {
-            if !saw_any_header_line {
-                return Ok(None);
-            }
-            bail!("unexpected EOF while reading stdio message headers")
+            return Ok(None);
         }
-
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if trimmed.is_empty() {
-            break;
-        }
-
-        saw_any_header_line = true;
-
-        let Some((name, value)) = trimmed.split_once(':') else {
-            continue;
-        };
-
-        if name.eq_ignore_ascii_case("content-length") {
-            let parsed = value
-                .trim()
-                .parse::<usize>()
-                .with_context(|| format!("invalid Content-Length header value: `{value}`"))?;
-            content_length = Some(parsed);
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
         }
     }
-
-    let content_length = content_length.ok_or_else(|| anyhow!("missing Content-Length header"))?;
-    let mut body = vec![0_u8; content_length];
-    reader
-        .read_exact(&mut body)
-        .await
-        .context("failed to read stdio JSON-RPC payload")?;
-
-    let payload = serde_json::from_slice::<Value>(&body).with_context(|| {
-        format!("invalid JSON-RPC payload on stdio: {}", String::from_utf8_lossy(&body))
-    })?;
-    Ok(Some(payload))
 }
 
+/// Writes one JSON-RPC message as a single line; `serde_json` escapes any
+/// newlines inside strings, so the encoding never contains a raw newline.
 async fn write_stdio_jsonrpc_message<W>(writer: &mut W, payload: &Value) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    let encoded = serde_json::to_vec(payload).context("failed to encode JSON-RPC payload")?;
-    let header =
-        format!("Content-Length: {}\r\nContent-Type: application/json\r\n\r\n", encoded.len());
+    let mut encoded = serde_json::to_vec(payload).context("failed to encode JSON-RPC payload")?;
+    encoded.push(b'\n');
 
-    writer
-        .write_all(header.as_bytes())
-        .await
-        .context("failed to write stdio JSON-RPC headers")?;
     writer
         .write_all(&encoded)
         .await
-        .context("failed to write stdio JSON-RPC body")?;
+        .context("failed to write stdio JSON-RPC message")?;
     writer
         .flush()
         .await
@@ -204,140 +172,206 @@ where
     Ok(())
 }
 
-async fn forward_to_http(
-    client: &reqwest::Client,
-    mcp_url: &str,
-    session_id: &mut Option<String>,
-    payload: &Value,
-    auto_bootstrap_session: bool,
-) -> Result<Vec<Value>> {
-    if auto_bootstrap_session && should_auto_bootstrap_session(session_id, payload) {
-        bootstrap_upstream_session(client, mcp_url, session_id).await?;
-    }
-
-    send_upstream_http(client, mcp_url, session_id, payload).await
+/// Upstream connection state for one adapter process.
+struct Upstream {
+    http: reqwest::Client,
+    mcp_url: String,
+    /// Legacy session established by the downstream client's `initialize`.
+    session_id: Option<String>,
+    /// The downstream client's `initialize`, replayed if its session expires
+    /// upstream (e.g. after a server restart).
+    initialize: Option<Value>,
 }
 
-fn should_auto_bootstrap_session(session_id: &Option<String>, payload: &Value) -> bool {
-    if session_id.is_some() {
-        return false;
+impl Upstream {
+    fn new(http: reqwest::Client, mcp_url: String) -> Self {
+        Self {
+            http,
+            mcp_url,
+            session_id: None,
+            initialize: None,
+        }
     }
 
-    let Some(method) = payload
-        .get("method")
-        .and_then(Value::as_str)
-    else {
-        return false;
-    };
+    /// Forwards one downstream message and returns the upstream messages to
+    /// relay back.
+    ///
+    /// A client that sent `initialize` stays on the legacy protocol for the
+    /// life of the process. When its upstream session is gone (HTTP 404, or a
+    /// previous recovery failed), the saved handshake is replayed before the
+    /// request is sent (again); if that fails the request errors rather than
+    /// silently switching protocols.
+    async fn forward(&mut self, payload: &Value) -> Result<Vec<Value>> {
+        let is_initialize = payload
+            .get("method")
+            .and_then(Value::as_str)
+            == Some("initialize");
+        if is_initialize {
+            self.session_id = None;
+            self.initialize = Some(payload.clone());
+        }
 
-    !matches!(method, "initialize" | "notifications/initialized")
-}
+        let legacy = self.initialize.is_some();
+        if legacy && !is_initialize && self.session_id.is_none() {
+            self.reestablish_session()
+                .await?;
+        }
 
-async fn bootstrap_upstream_session(
-    client: &reqwest::Client,
-    mcp_url: &str,
-    session_id: &mut Option<String>,
-) -> Result<()> {
-    let initialize_payload = json!({
-        "jsonrpc": "2.0",
-        "id": "rust-mcp-stdio-bootstrap-init",
-        "method": "initialize",
-        "params": {
-            "protocolVersion": LATEST_MCP_PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {
-                "name": "rust-mcp-stdio",
-                "version": env!("CARGO_PKG_VERSION")
+        let had_session = self.session_id.is_some();
+        let (upstream_payload, stateless_version) = prepare_upstream(payload, legacy);
+        let reply = self
+            .send(&upstream_payload, stateless_version.as_deref())
+            .await?;
+
+        if had_session && reply.status == StatusCode::NOT_FOUND {
+            self.reestablish_session()
+                .await?;
+            return self
+                .send(payload, None)
+                .await?
+                .into_messages();
+        }
+        reply.into_messages()
+    }
+
+    /// Replays the downstream client's `initialize` handshake to obtain a new
+    /// upstream session.
+    async fn reestablish_session(&mut self) -> Result<()> {
+        self.session_id = None;
+        let Some(initialize) = self.initialize.clone() else {
+            bail!("no legacy `initialize` handshake to replay");
+        };
+
+        let reply = self
+            .send(&initialize, None)
+            .await?;
+        if !reply.status.is_success() || self.session_id.is_none() {
+            bail!(
+                "upstream MCP session expired and could not be re-established (HTTP {}); retry \
+                 the request",
+                reply.status
+            );
+        }
+
+        let initialized =
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}});
+        self.send(&initialized, None)
+            .await?;
+        info!("re-established upstream MCP session");
+        Ok(())
+    }
+
+    /// POSTs one message upstream: with standard headers when
+    /// `stateless_version` is set, otherwise with the legacy session (if any).
+    async fn send(
+        &mut self,
+        payload: &Value,
+        stateless_version: Option<&str>,
+    ) -> Result<UpstreamReply> {
+        let mut request = self
+            .http
+            .post(&self.mcp_url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream");
+
+        if let Some(version) = stateless_version {
+            for (name, value) in stateless_request_headers(payload, version) {
+                request = request.header(name, value);
             }
+        } else if let Some(session_id) = self.session_id.as_deref() {
+            request = request.header(MCP_SESSION_ID_HEADER, session_id);
         }
-    });
 
-    let initialize_response =
-        send_upstream_http(client, mcp_url, session_id, &initialize_payload).await?;
-    let initialize_ok = initialize_response
-        .iter()
-        .any(|message| {
-            message
-                .get("result")
-                .is_some()
-        });
-    if !initialize_ok {
-        bail!("failed to bootstrap MCP session: upstream initialize returned no result payload");
+        let response = request
+            .json(payload)
+            .send()
+            .await
+            .context("failed to send upstream MCP HTTP request")?;
+
+        if let Some(session_id) = response
+            .headers()
+            .get(MCP_SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+        {
+            self.session_id = Some(session_id.to_string());
+        }
+
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body = response
+            .text()
+            .await
+            .context("failed to read upstream MCP response body")?;
+
+        Ok(UpstreamReply { status, content_type, body })
     }
-
-    let initialized_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/initialized",
-        "params": {}
-    });
-
-    let _ = send_upstream_http(client, mcp_url, session_id, &initialized_payload).await?;
-    Ok(())
 }
 
-async fn send_upstream_http(
-    client: &reqwest::Client,
-    mcp_url: &str,
-    session_id: &mut Option<String>,
-    payload: &Value,
-) -> Result<Vec<Value>> {
-    let mut request = client
-        .post(mcp_url)
-        .header("content-type", "application/json")
-        .header("accept", "application/json, text/event-stream");
+/// Raw upstream HTTP response.
+struct UpstreamReply {
+    status: StatusCode,
+    content_type: String,
+    body: String,
+}
 
-    if let Some(existing_session) = session_id.as_deref() {
-        request = request.header(MCP_SESSION_ID_HEADER, existing_session);
+impl UpstreamReply {
+    /// Extracts the JSON-RPC messages to relay downstream.
+    fn into_messages(self) -> Result<Vec<Value>> {
+        let Self { status, content_type, body } = self;
+
+        if !status.is_success() {
+            if let Ok(json) = serde_json::from_str::<Value>(&body) {
+                return Ok(vec![json]);
+            }
+            return Err(anyhow!("upstream MCP request returned HTTP {status} with body: {body}"));
+        }
+
+        if body.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if content_type.contains("text/event-stream") {
+            let events = parse_sse_json_events(&body);
+            if events.is_empty() {
+                warn!("upstream returned SSE response with no JSON data events");
+            }
+            return Ok(events);
+        }
+
+        let parsed = serde_json::from_str::<Value>(&body)
+            .with_context(|| format!("upstream returned invalid JSON: {body}"))?;
+        Ok(vec![parsed])
+    }
+}
+
+/// Prepares a downstream message for upstream delivery.
+///
+/// Messages from legacy clients (those that performed `initialize`) pass
+/// through unchanged. Everything else goes upstream on the stateless protocol:
+/// requests without per-request `_meta` get the adapter's, and the returned
+/// protocol version selects the standard headers to send.
+fn prepare_upstream(payload: &Value, legacy: bool) -> (Value, Option<String>) {
+    let method = payload
+        .get("method")
+        .and_then(Value::as_str);
+    if legacy || matches!(method, Some("initialize" | "notifications/initialized")) {
+        return (payload.clone(), None);
     }
 
-    let response = request
-        .json(payload)
-        .send()
-        .await
-        .context("failed to send upstream MCP HTTP request")?;
-
-    if let Some(new_session_id) = response
-        .headers()
-        .get(MCP_SESSION_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-    {
-        *session_id = Some(new_session_id.to_string());
+    let mut payload = payload.clone();
+    let is_request = method.is_some() && payload.get("id").is_some();
+    if is_request && request_meta_protocol_version(&payload).is_none() {
+        insert_stateless_request_meta(&mut payload, ADAPTER_CLIENT_NAME, env!("CARGO_PKG_VERSION"));
     }
-
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
+    let version = request_meta_protocol_version(&payload)
+        .unwrap_or(LATEST_MCP_PROTOCOL_VERSION)
         .to_string();
-    let body = response
-        .text()
-        .await
-        .context("failed to read upstream MCP response body")?;
-
-    if !status.is_success() {
-        if let Ok(json) = serde_json::from_str::<Value>(&body) {
-            return Ok(vec![json]);
-        }
-        return Err(anyhow!("upstream MCP request returned HTTP {status} with body: {body}"));
-    }
-
-    if body.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    if content_type.contains("text/event-stream") {
-        let events = parse_sse_json_events(&body);
-        if events.is_empty() {
-            warn!("upstream returned SSE response with no JSON data events");
-        }
-        return Ok(events);
-    }
-
-    let parsed = serde_json::from_str::<Value>(&body)
-        .with_context(|| format!("upstream returned invalid JSON: {body}"))?;
-    Ok(vec![parsed])
+    (payload, Some(version))
 }
 
 fn parse_sse_json_events(body: &str) -> Vec<Value> {
@@ -381,6 +415,10 @@ fn jsonrpc_error_for_payload(payload: &Value, code: i64, message: String) -> Val
         error!(%message, "upstream call failed for notification; emitting synthetic null-id error");
     }
 
+    jsonrpc_error(id, code, message)
+}
+
+fn jsonrpc_error(id: Value, code: i64, message: String) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -438,11 +476,12 @@ fn schemas_url_from_mcp_url(mcp_url: &str) -> Result<reqwest::Url> {
 
 #[cfg(test)]
 mod tests {
+    use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
     use serde_json::json;
 
     use super::{
-        jsonrpc_error_for_payload, parse_sse_json_events, schemas_url_from_mcp_url,
-        should_auto_bootstrap_session,
+        jsonrpc_error_for_payload, parse_sse_json_events, prepare_upstream, read_stdio_line,
+        schemas_url_from_mcp_url, write_stdio_jsonrpc_message,
     };
 
     #[test]
@@ -480,17 +519,75 @@ mod tests {
         assert_eq!(url.as_str(), "http://127.0.0.1:43173/schemas");
     }
 
-    #[test]
-    fn bootstrap_required_for_non_initialize_requests_without_session() {
-        let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}});
-        assert!(should_auto_bootstrap_session(&None, &payload));
+    #[tokio::test]
+    async fn reads_newline_delimited_messages_skipping_blank_lines() {
+        let mut input: &[u8] = b"{\"id\":1}\n\n  \r\n{\"id\":2}";
+        assert_eq!(
+            read_stdio_line(&mut input)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("{\"id\":1}")
+        );
+        assert_eq!(
+            read_stdio_line(&mut input)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("{\"id\":2}")
+        );
+        assert_eq!(
+            read_stdio_line(&mut input)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn writes_one_message_per_line() {
+        let mut output = Vec::new();
+        let message = json!({"jsonrpc": "2.0", "id": 1, "result": {"text": "a\nb"}});
+        write_stdio_jsonrpc_message(&mut output, &message)
+            .await
+            .unwrap();
+
+        let encoded = String::from_utf8(output).unwrap();
+        assert_eq!(encoded.matches('\n').count(), 1, "exactly one trailing newline: {encoded:?}");
+        assert!(encoded.ends_with('\n'));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(encoded.trim()).unwrap(), message);
     }
 
     #[test]
-    fn bootstrap_not_required_for_initialize_messages() {
+    fn sessionless_requests_are_upgraded_to_stateless() {
+        let payload =
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ping"}});
+        let (upstream, version) = prepare_upstream(&payload, false);
+        assert_eq!(version.as_deref(), Some(LATEST_MCP_PROTOCOL_VERSION));
+        assert_eq!(
+            upstream["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"],
+            json!(LATEST_MCP_PROTOCOL_VERSION)
+        );
+    }
+
+    #[test]
+    fn stateless_client_meta_is_preserved() {
+        let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{
+            "io.modelcontextprotocol/protocolVersion":"2099-01-01",
+            "io.modelcontextprotocol/clientCapabilities":{}
+        }}});
+        let (upstream, version) = prepare_upstream(&payload, false);
+        assert_eq!(version.as_deref(), Some("2099-01-01"));
+        assert_eq!(upstream, payload);
+    }
+
+    #[test]
+    fn legacy_messages_pass_through() {
         let initialize = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}});
         let initialized = json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}});
-        assert!(!should_auto_bootstrap_session(&None, &initialize));
-        assert!(!should_auto_bootstrap_session(&None, &initialized));
+        let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{}});
+        assert_eq!(prepare_upstream(&initialize, false), (initialize.clone(), None));
+        assert_eq!(prepare_upstream(&initialized, false), (initialized.clone(), None));
+        assert_eq!(prepare_upstream(&call, true), (call.clone(), None));
     }
 }

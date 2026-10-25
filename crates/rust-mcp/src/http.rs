@@ -11,6 +11,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use metrics_exporter_prometheus::PrometheusHandle;
 use rmcp::model::ProtocolVersion;
+use rust_mcp_types::protocol::LATEST_MCP_PROTOCOL_VERSION;
 use serde::Serialize;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::trace::TraceLayer;
@@ -27,8 +28,7 @@ pub fn router(state: AppState, config: Config, prometheus_handle: PrometheusHand
     let strict_accept = config.mcp_strict_accept;
     let mcp_router = Router::new()
         .route_service("/", mcp_service)
-        .layer(middleware::from_fn_with_state(strict_accept, relax_mcp_accept_header))
-        .layer(middleware::from_fn(rewrite_mcp_protocol_version));
+        .layer(middleware::from_fn_with_state(strict_accept, relax_mcp_accept_header));
 
     Router::new()
         .route("/healthz", get(healthz))
@@ -48,43 +48,6 @@ pub fn router(state: AppState, config: Config, prometheus_handle: PrometheusHand
                 .max(1) as usize,
         ))
         .layer(TraceLayer::new_for_http())
-}
-
-/// Rewrites MCP-Protocol-Version headers that rmcp doesn't recognize.
-///
-/// rmcp's `ProtocolVersion::KNOWN_VERSIONS` may lag behind the latest MCP spec,
-/// so clients sending newer versions get a 400 before our code runs. This
-/// middleware maps unknown versions to rmcp's
-/// `ProtocolVersion::LATEST_WITH_INITIALIZE` (the newest session-based
-/// version). The actual protocol negotiation still happens at
-/// the JSON-RPC `initialize` level, where we report our true
-/// `SUPPORTED_MCP_PROTOCOL_VERSION`.
-async fn rewrite_mcp_protocol_version(
-    mut request: axum::http::Request<Body>,
-    next: Next,
-) -> impl IntoResponse {
-    const HEADER_NAME: &str = "mcp-protocol-version";
-
-    let needs_rewrite = request
-        .headers()
-        .get(HEADER_NAME)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| {
-            !ProtocolVersion::KNOWN_VERSIONS
-                .iter()
-                .any(|known| known.as_str() == v)
-        });
-
-    if needs_rewrite
-        && let Ok(value) =
-            axum::http::HeaderValue::from_str(ProtocolVersion::LATEST_WITH_INITIALIZE.as_str())
-    {
-        request
-            .headers_mut()
-            .insert(axum::http::HeaderName::from_static(HEADER_NAME), value);
-    }
-
-    next.run(request).await
 }
 
 async fn relax_mcp_accept_header(
@@ -146,7 +109,8 @@ async fn mcp_server_card() -> impl IntoResponse {
     let body = serde_json::json!({
         "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
         "version": "1.0",
-        "protocolVersion": rust_mcp_types::protocol::SUPPORTED_MCP_PROTOCOL_VERSION,
+        "protocolVersion": LATEST_MCP_PROTOCOL_VERSION,
+        "supportedProtocolVersions": ProtocolVersion::KNOWN_VERSIONS,
         "serverInfo": {
             "name": "rust-mcp",
             "title": "Rust MCP",

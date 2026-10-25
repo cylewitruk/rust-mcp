@@ -1,5 +1,8 @@
 set dotenv-load := false
 
+# Feature-gated test targets, so lints also cover integration/e2e/live tests.
+test_features := "rust-mcp/integration-tests,rust-mcp/e2e-tests,rust-mcp/live-tests"
+
 default:
   @just --list
 
@@ -10,12 +13,12 @@ fmt:
     cargo +nightly --locked fmt --all
 
 lint:
-    RUST_LOG=warn cargo --locked clippy --all-targets -- -D warnings
-    cargo check --locked --all-targets
+    RUST_LOG=warn cargo --locked clippy --all-targets --features {{test_features}} -- -D warnings
+    cargo check --locked --all-targets --features {{test_features}}
     cargo +nightly --locked fmt --all -- --check
 
 fix:
-    RUST_LOG=warn cargo --locked clippy --fix --all-targets --allow-dirty
+    RUST_LOG=warn cargo --locked clippy --fix --all-targets --features {{test_features}} --allow-dirty
     cargo +nightly --locked fmt --all
 
 test:
