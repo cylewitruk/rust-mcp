@@ -20,7 +20,7 @@ use metrics::{counter, histogram};
 use tokio::time::{Duration, sleep};
 use tracing::{info, warn};
 
-use crate::db::indexing::stamp_security_checked_at;
+use crate::db::indexing::{fetch_security_crates_page, stamp_security_checked_at};
 use crate::mcp::indexing::security::SecuritySyncOutcome;
 use crate::mcp::server::McpServer;
 use crate::state::AppState;
@@ -92,56 +92,20 @@ pub async fn run_security_sync_scan(
         .max(1);
     let server = McpServer::new(state.clone());
     let mut run_outcome = SecuritySyncRunOutcome::default();
-    let mut offset: u32 = 0;
-
-    loop {
-        let osv_result = server
-            .sync_osv_security(batch_size, offset, max_age_secs)
-            .await;
-        let rustsec_result = server
-            .sync_rustsec_db_security(batch_size, offset, max_age_secs)
-            .await;
-        let ghsa_result = server
-            .sync_ghsa_security(batch_size, offset, max_age_secs)
-            .await;
-
-        let mut page_outcome = match (osv_result, rustsec_result) {
-            (Ok(mut osv), Ok(rustsec)) => {
-                osv.merge(rustsec);
-                osv
-            }
-            (Ok(mut osv), Err(error)) => {
-                warn!(%error, "security sync: RustSec DB sync failed for page");
-                osv.errors.push(error);
-                osv
-            }
-            (Err(error), Ok(mut rustsec)) => {
-                warn!(%error, "security sync: OSV sync failed for page");
-                rustsec.errors.push(error);
-                rustsec
-            }
-            (Err(osv_error), Err(rustsec_error)) => {
-                warn!(
-                    osv_error = %osv_error,
-                    rustsec_error = %rustsec_error,
-                    "security sync: both OSV and RustSec sync failed for page"
-                );
-                counter!("rust_mcp_security_sync_errors_total").increment(1);
-                run_outcome.errors += 2;
-                run_outcome.pages += 1;
-                break;
-            }
-        };
-
-        match ghsa_result {
-            Ok(ghsa) => page_outcome.merge(ghsa),
-            Err(error) => {
-                warn!(%error, "security sync: GHSA sync failed for page");
-                page_outcome
-                    .errors
-                    .push(error);
-            }
+    // Snapshot before stamping: changing freshness during offset pagination
+    // would skip crates, including legacy advisory rows awaiting repair.
+    let crates = match fetch_security_crates_page(&state.db, i64::MAX, 0, max_age_secs).await {
+        Ok(crates) => crates,
+        Err(error) => {
+            warn!(%error, "failed to select crates for security sync");
+            run_outcome.errors += 1;
+            return run_outcome;
         }
+    };
+    for crates in crates.chunks(batch_size as usize) {
+        let page_outcome = server
+            .sync_security_crates(crates)
+            .await;
 
         // Stamp successfully checked crates so they're skipped until stale.
         for crate_id in &page_outcome.checked_crate_ids {
@@ -150,15 +114,7 @@ pub async fn run_security_sync_scan(
             }
         }
 
-        let page_crates = page_outcome.crates_processed;
         run_outcome.accumulate(&page_outcome);
-
-        // If we got fewer crates than the batch size, we've reached the end.
-        if page_crates < batch_size as usize {
-            break;
-        }
-
-        offset += batch_size;
     }
 
     let elapsed_ms = scan_started

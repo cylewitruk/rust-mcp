@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
     CrateIntelAdvisory, CrateIntelDependency, CrateIntelDependent, CrateIntelGitHub,
@@ -6,6 +8,7 @@ pub use rust_mcp_types::types::krate::{
 
 use crate::db::indexing::fetch_github_metadata;
 use crate::db::tools;
+use crate::mcp::advisories::{self, Applicability};
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
@@ -26,6 +29,9 @@ impl McpServer {
         let versions_limit = version_limit(request.versions_limit);
         let dependents_limit = dependents_limit(request.dependents_limit);
         let readme_max_chars = readme_limit(request.readme_max_chars);
+        let include_advisory_details = request
+            .include_advisory_details
+            .unwrap_or(false);
 
         let ctx = self
             .fetch_crate_context(&crate_name, &tcx)
@@ -85,13 +91,16 @@ impl McpServer {
         .await
         .map_err(|e| format!("dependent crate query failed for {}: {e}", ctx.crate_row.name))?;
 
-        let advisory_rows = tools::fetch_crate_advisories_for_version(
-            &self.state.db,
-            ctx.crate_row.id,
-            resolution.selected_version.id,
-        )
-        .await
-        .map_err(|e| format!("advisory query failed for {}: {e}", ctx.crate_row.name))?;
+        let advisory_rows = tools::fetch_advisory_rows(&self.state.db, &[ctx.crate_row.id])
+            .await
+            .map_err(|e| format!("advisory query failed for {}: {e}", ctx.crate_row.name))?;
+
+        let dependencies_synced =
+            tools::fetch_dependencies_synced(&self.state.db, resolution.selected_version.id)
+                .await
+                .map_err(|e| {
+                    format!("dependency coverage lookup failed for {}: {e}", ctx.crate_row.name)
+                })?;
 
         let github = match fetch_github_metadata(&self.state.db, ctx.crate_row.id).await {
             Ok(Some(meta)) => Some(CrateIntelGitHub {
@@ -119,7 +128,8 @@ impl McpServer {
             Some(max_chars) => truncate_optional_text(
                 resolution
                     .selected_version
-                    .readme,
+                    .readme
+                    .clone(),
                 max_chars,
             ),
             None => (None, false),
@@ -127,13 +137,18 @@ impl McpServer {
 
         let version_history = version_history_rows
             .into_iter()
-            .map(|row| CrateIntelVersion {
-                version: row.version,
-                rust_version: row.rust_version,
-                published_at: row.published_at,
-                yanked: row.yanked,
-                downloads: row.total_downloads,
-                has_advisory: row.has_advisory,
+            .map(|row| {
+                let counts =
+                    advisories::advisory_counts(&advisory_rows, row.version_id, &row.version);
+                CrateIntelVersion {
+                    has_advisory: counts.affected > 0,
+                    advisory_unknown_count: counts.unknown,
+                    version: row.version,
+                    rust_version: row.rust_version,
+                    published_at: row.published_at,
+                    yanked: row.yanked,
+                    downloads: row.total_downloads,
+                }
             })
             .collect::<Vec<_>>();
 
@@ -157,19 +172,41 @@ impl McpServer {
             })
             .collect::<Vec<_>>();
 
-        let advisories = advisory_rows
+        let selected = &resolution.selected_version;
+        let applicable =
+            advisories::advisories_for_version(&advisory_rows, selected.id, &selected.version);
+        let advisory_ids = advisory_rows
+            .iter()
+            .map(|row| row.advisory_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let advisories_not_affecting = advisory_ids.len() - applicable.len();
+        let unknown_advisories = applicable
+            .iter()
+            .filter(|advisory| advisory.applicability == Applicability::Unknown)
+            .count();
+        let advisories = applicable
             .into_iter()
-            .map(|row| CrateIntelAdvisory {
-                advisory_id: row.advisory_id,
-                title: row.title,
-                severity: row.severity,
-                url: row.url,
-                affected_range: row.affected_range,
-                fixed_versions: value_to_string_vec(&row.fixed_versions),
-                source: row.source,
-                details: row.details,
-                affected_functions: row.affected_functions,
-                cwe_ids: row.cwe_ids,
+            .map(|advisory| {
+                let row = advisory.row;
+                CrateIntelAdvisory {
+                    advisory_id: row.advisory_id.clone(),
+                    title: row.title.clone(),
+                    severity: row.severity.clone(),
+                    url: row.url.clone(),
+                    affected_range: row.affected_range.clone(),
+                    fixed_versions: value_to_string_vec(&row.fixed_versions),
+                    source: row.source.clone(),
+                    applicability: advisory
+                        .applicability
+                        .as_str()
+                        .to_string(),
+                    details: row
+                        .details
+                        .clone()
+                        .filter(|_| include_advisory_details),
+                    affected_functions: row.affected_functions.clone(),
+                    cwe_ids: row.cwe_ids.clone(),
+                }
             })
             .collect::<Vec<_>>();
 
@@ -177,23 +214,38 @@ impl McpServer {
             .freshness_outcome
             .freshness_check_result
             .clone();
-        let confidence_assessment = ConfidenceAssessment {
-            level: ConfidenceLevel::High,
-            reason: "crate intelligence assembled from indexed versions, deps, dependents, and \
-                     advisories"
-                .to_string(),
+        let mut gaps = Vec::new();
+        if !dependencies_synced {
+            gaps.push(format!(
+                "dependencies for {} have not been synced (index_crates with this version fetches \
+                 them)",
+                selected.version
+            ));
+        }
+        if unknown_advisories > 0 {
+            gaps.push(format!(
+                "{unknown_advisories} advisories could not be evaluated against {}",
+                selected.version
+            ));
+        }
+        let confidence_assessment = if gaps.is_empty() {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::High,
+                reason: "versions, dependencies and advisory applicability resolved from the index"
+                    .to_string(),
+            }
+        } else {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: gaps.join("; "),
+            }
         };
 
-        let suggested_next_tools = if dependencies.is_empty() && dependents.is_empty() {
-            vec![
-                "index_crates".to_string(),
-                "crate_features".to_string(),
-                "crate_api".to_string(),
-                "index_refresh".to_string(),
-            ]
-        } else {
-            vec!["crate_features".to_string(), "crate_api".to_string(), "crate_graph".to_string()]
-        };
+        let mut suggested_next_tools =
+            vec!["crate_features".to_string(), "crate_api".to_string(), "crate_graph".to_string()];
+        if !dependencies_synced {
+            suggested_next_tools.insert(0, "index_crates".to_string());
+        }
 
         Ok(Json(CrateIntelResponse {
             crate_name: ctx.crate_row.name,
@@ -223,10 +275,13 @@ impl McpServer {
             readme_truncated,
             version_history,
             dependencies,
+            dependency_coverage: if dependencies_synced { "synced" } else { "not_synced" }
+                .to_string(),
             dependents,
             dependent_crate_count,
             github,
             advisories,
+            advisories_not_affecting,
             freshness_check_performed: ctx
                 .freshness_outcome
                 .freshness_check_performed,

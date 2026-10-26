@@ -1,3 +1,5 @@
+/// Advisory applicability for crate versions.
+pub mod advisories;
 /// Background indexing pipeline and refresh worker.
 pub mod indexing;
 /// DB-backed tool invocation metrics.

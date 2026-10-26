@@ -7,14 +7,9 @@ use semver::{Version, VersionReq};
 
 use super::manifest::parse_manifest;
 use crate::db::tools;
+use crate::mcp::advisories::{self, AdvisoryCounts, parse_semver_for_matching};
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, ResponseFreshnessSource};
 use crate::mcp::server::McpServer;
-
-fn parse_semver_for_matching(version: &str) -> Option<Version> {
-    Version::parse(version)
-        .ok()
-        .or_else(|| Version::parse(version.trim_start_matches('v')).ok())
-}
 
 fn parse_rust_version_floor(version: &str) -> Option<Version> {
     let trimmed = version.trim();
@@ -42,6 +37,7 @@ fn evaluate_confidence(
     dependency_count: usize,
     unresolved_count: usize,
     no_requirement_count: usize,
+    unknown_advisory_count: usize,
 ) -> ConfidenceAssessment {
     if dependency_count == 0 {
         return ConfidenceAssessment {
@@ -53,7 +49,16 @@ fn evaluate_confidence(
     if unresolved_count > 0 {
         return ConfidenceAssessment {
             level: ConfidenceLevel::Medium,
-            reason: format!("{unresolved_count} dependencies were not found in the local index"),
+            reason: format!(
+                "{unresolved_count} dependencies could not be resolved against indexed versions"
+            ),
+        };
+    }
+
+    if unknown_advisory_count > 0 {
+        return ConfidenceAssessment {
+            level: ConfidenceLevel::Medium,
+            reason: format!("{unknown_advisory_count} advisories have unknown applicability"),
         };
     }
 
@@ -93,6 +98,7 @@ impl McpServer {
         let mut issues = Vec::<DependencyAuditIssue>::new();
         let mut unresolved_count = 0usize;
         let mut no_requirement_count = 0usize;
+        let mut unknown_advisory_count = 0usize;
 
         for dep in &parsed_manifest.dependencies {
             let crate_row = tools::fetch_dependency_crate_by_name(&self.state.db, &dep.name)
@@ -165,17 +171,15 @@ impl McpServer {
                 });
             }
 
-            let advisory_count = if let Some(ref selected_row) = selected {
-                tools::count_advisories_for_crate_version(
-                    &self.state.db,
-                    crate_row.id,
-                    selected_row.id,
-                )
-                .await
-                .map_err(|e| format!("advisory lookup failed for {}: {e}", dep.name))?
+            let advisory_counts = if let Some(ref selected_row) = selected {
+                let rows = tools::fetch_advisory_rows(&self.state.db, &[crate_row.id])
+                    .await
+                    .map_err(|e| format!("advisory lookup failed for {}: {e}", dep.name))?;
+                advisories::advisory_counts(&rows, selected_row.id, &selected_row.version)
             } else {
-                0
+                AdvisoryCounts::default()
             };
+            let advisory_count = advisory_counts.affected;
 
             let mut status_markers = Vec::<String>::new();
             if dep.requirement.is_none() {
@@ -204,6 +208,24 @@ impl McpServer {
                         severity: DependencyAuditSeverity::High,
                         message: format!(
                             "{advisory_count} indexed advisories affect selected version"
+                        ),
+                        selected_version: Some(selected_row.version.clone()),
+                        latest_version: latest
+                            .as_ref()
+                            .map(|row| row.version.clone()),
+                    });
+                }
+
+                unknown_advisory_count += advisory_counts.unknown;
+                if advisory_counts.unknown > 0 {
+                    status_markers.push("advisory_applicability_unknown".to_string());
+                    issues.push(DependencyAuditIssue {
+                        dependency_name: dep.name.clone(),
+                        category: DependencyAuditIssueCategory::Advisory,
+                        severity: DependencyAuditSeverity::Low,
+                        message: format!(
+                            "{} indexed advisories could not be evaluated against selected version",
+                            advisory_counts.unknown
                         ),
                         selected_version: Some(selected_row.version.clone()),
                         latest_version: latest
@@ -277,7 +299,7 @@ impl McpServer {
                     .as_ref()
                     .map(|row| row.yanked)
                     .unwrap_or(false),
-                advisory_count,
+                advisory_count: advisory_count as i64,
                 status_markers,
             });
         }
@@ -295,8 +317,12 @@ impl McpServer {
                 })
         });
 
-        let confidence_assessment =
-            evaluate_confidence(dependencies.len(), unresolved_count, no_requirement_count);
+        let confidence_assessment = evaluate_confidence(
+            dependencies.len(),
+            unresolved_count,
+            no_requirement_count,
+            unknown_advisory_count,
+        );
 
         Ok(Json(DependencyAuditResponse {
             package_name: parsed_manifest.package_name,

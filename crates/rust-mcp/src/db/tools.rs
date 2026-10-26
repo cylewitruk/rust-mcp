@@ -374,6 +374,16 @@ pub async fn fetch_crate_last_published_at(
     .await
 }
 
+/// Whether a crate version's dependency list has been synced from crates.io.
+pub async fn fetch_dependencies_synced(db: &PgPool, version_id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT dependencies_synced_at IS NOT NULL FROM crate_versions WHERE id = $1",
+    )
+    .bind(version_id)
+    .fetch_one(db)
+    .await
+}
+
 /// Loads a limited newest-first version timeline for `crate_intel`.
 pub async fn fetch_crate_version_history(
     db: &PgPool,
@@ -382,16 +392,12 @@ pub async fn fetch_crate_version_history(
 ) -> Result<Vec<CrateVersionHistoryRow>, sqlx::Error> {
     sqlx::query_as::<_, CrateVersionHistoryRow>(
         "SELECT
+            cv.id AS version_id,
             cv.version,
             cv.rust_version,
             cv.published_at::TEXT AS published_at,
             cv.yanked,
-            cv.total_downloads,
-            EXISTS(
-                SELECT 1
-                FROM advisory_matches am
-                WHERE am.version_id = cv.id
-            ) AS has_advisory
+            cv.total_downloads
          FROM crate_versions cv
          WHERE cv.crate_id = $1
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
@@ -475,14 +481,17 @@ pub async fn fetch_dependent_crates(
     .await
 }
 
-/// Loads advisories that match either a crate version or crate-level scope.
-pub async fn fetch_crate_advisories_for_version(
+/// Loads every stored advisory row for the given crates, explicit version
+/// matches first within each advisory.
+pub async fn fetch_advisory_rows(
     db: &PgPool,
-    crate_id: i64,
-    crate_version_id: i64,
+    crate_ids: &[i64],
 ) -> Result<Vec<CrateAdvisoryRow>, sqlx::Error> {
     sqlx::query_as::<_, CrateAdvisoryRow>(
-        "SELECT DISTINCT ON (advisory_id)
+        "SELECT
+            requires_resync,
+            crate_id,
+            version_id,
             advisory_id,
             title,
             severity,
@@ -494,11 +503,10 @@ pub async fn fetch_crate_advisories_for_version(
             affected_functions,
             cwe_ids
          FROM advisory_matches
-         WHERE crate_id = $1 AND (version_id = $2 OR version_id IS NULL)
-         ORDER BY advisory_id ASC, source ASC",
+         WHERE crate_id = ANY($1::BIGINT[])
+         ORDER BY crate_id, advisory_id, version_id NULLS LAST, source",
     )
-    .bind(crate_id)
-    .bind(crate_version_id)
+    .bind(crate_ids)
     .fetch_all(db)
     .await
 }
@@ -1040,20 +1048,18 @@ pub async fn list_crate_version_timeline(
 ) -> Result<Vec<CrateVersionTimelineRow>, sqlx::Error> {
     sqlx::query_as::<_, CrateVersionTimelineRow>(
         "SELECT
+            cv.id AS version_id,
             cv.version,
             cv.rust_version,
             cv.published_at::TEXT AS published_at,
             cv.yanked,
             COALESCE(cv.total_downloads, 0)::BIGINT AS total_downloads,
-            COUNT(am.id)::BIGINT AS advisory_count,
             CASE
                 WHEN cv.published_at IS NULL THEN NULL
                 ELSE EXTRACT(EPOCH FROM (NOW() - cv.published_at))::BIGINT / 86400
             END AS release_age_days
          FROM crate_versions cv
-         LEFT JOIN advisory_matches am ON am.version_id = cv.id
          WHERE cv.crate_id = $1
-         GROUP BY cv.id, cv.version, cv.published_at, cv.yanked, cv.total_downloads
          ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
          LIMIT $2
          OFFSET $3",
@@ -1076,6 +1082,8 @@ pub async fn list_alternatives_candidates(
 ) -> Result<Vec<AlternativesCandidateRow>, sqlx::Error> {
     sqlx::query_as::<_, AlternativesCandidateRow>(
         "SELECT
+            c.id AS crate_id,
+            lv.id AS latest_version_id,
             c.name AS crate_name,
             c.description,
             c.categories,
@@ -1084,23 +1092,20 @@ pub async fn list_alternatives_candidates(
             lv.published_at::TEXT AS published_at,
             COALESCE(lv.total_downloads, 0)::BIGINT AS total_downloads,
             COALESCE(lv.yanked, false) AS yanked,
-            COALESCE(lv.advisory_count, 0)::BIGINT AS advisory_count,
             lv.license_expression,
             COALESCE(dep.dependent_count, 0)::BIGINT AS dependent_count,
             similarity(c.name, $2)::DOUBLE PRECISION AS name_similarity
          FROM crates c
          LEFT JOIN LATERAL (
              SELECT
+                 cv.id,
                  cv.version,
                  cv.published_at,
                  cv.total_downloads,
                  cv.yanked,
-                 cv.license_expression,
-                 COUNT(am.id)::BIGINT AS advisory_count
+                 cv.license_expression
              FROM crate_versions cv
-             LEFT JOIN advisory_matches am ON am.version_id = cv.id
              WHERE cv.crate_id = c.id
-             GROUP BY cv.id
              ORDER BY cv.published_at DESC NULLS LAST, cv.id DESC
              LIMIT 1
          ) lv ON true
@@ -1222,10 +1227,6 @@ pub async fn fetch_compare_counts(
             (SELECT COUNT(*)::BIGINT
              FROM crate_version_features cvf
              WHERE cvf.crate_version_id = $1) AS feature_count,
-            (SELECT COUNT(*)::BIGINT
-             FROM advisory_matches am
-             WHERE am.crate_id = $2
-               AND (am.version_id = $1 OR am.version_id IS NULL)) AS advisory_count,
             (SELECT COUNT(DISTINCT cv_from.crate_id)::BIGINT
              FROM dependency_edges de2
              JOIN crate_versions cv_from ON cv_from.id = de2.from_version_id
@@ -1360,25 +1361,6 @@ pub async fn list_dependency_versions_by_lower_name(
     )
     .bind(crate_name_lower)
     .fetch_all(db)
-    .await
-}
-
-/// Counts advisories applying to a crate version (including crate-level
-/// advisories).
-pub async fn count_advisories_for_crate_version(
-    db: &PgPool,
-    crate_id: i64,
-    version_id: i64,
-) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*)::BIGINT
-         FROM advisory_matches
-         WHERE crate_id = $1
-           AND (version_id = $2 OR version_id IS NULL)",
-    )
-    .bind(crate_id)
-    .bind(version_id)
-    .fetch_one(db)
     .await
 }
 

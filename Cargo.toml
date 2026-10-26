@@ -33,6 +33,7 @@ tower-http = { version = "0.7.1", features = ["trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 rustdoc-types = "0.61.0"
+rustsec = { version = "0.33.0", default-features = false }
 zstd = "0.14.3"
 testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
 rust-mcp-types = { path = "crates/rust-mcp-types" }

@@ -53,5 +53,5 @@ async fn security_sync_scan_handles_empty_database() {
     assert_eq!(outcome.crates_processed, 0, "no crates should be processed");
     assert_eq!(outcome.advisories_written, 0, "no advisories should be written");
     assert_eq!(outcome.errors, 0, "no errors expected on empty DB");
-    assert_eq!(outcome.pages, 1, "should still run one page (which returns 0 rows)");
+    assert_eq!(outcome.pages, 0, "empty snapshot needs no source queries");
 }

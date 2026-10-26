@@ -5,6 +5,7 @@ pub use rust_mcp_types::types::krate::{
 
 use crate::db::models::{CrateCompareCountsRow, CrateCompareVersionRow};
 use crate::db::tools;
+use crate::mcp::advisories::{self, AdvisoryCounts};
 use crate::mcp::indexing::freshness::InteractionRefreshOutcome;
 use crate::mcp::models::{
     ConfidenceAssessment, ConfidenceLevel, CrateCoreRow, ResponseFreshnessSource,
@@ -19,6 +20,7 @@ struct CompareSnapshot {
     latest_version: CrateCompareVersionRow,
     selected_version: CrateCompareVersionRow,
     counts: CrateCompareCountsRow,
+    advisories: AdvisoryCounts,
     freshness_outcome: InteractionRefreshOutcome,
 }
 
@@ -54,9 +56,17 @@ fn compare_recommendation(
     left: &CrateCompareSide,
     right: &CrateCompareSide,
 ) -> (Option<String>, Vec<String>) {
+    let uncertain = left.advisory_unknown_count > 0 || right.advisory_unknown_count > 0;
+    let mut reasons = Vec::<String>::new();
+    if uncertain {
+        reasons.push(
+            "advisory applicability is incomplete; scores exclude unknown advisories".to_string(),
+        );
+    }
     let score_gap = (left.maintenance_score - right.maintenance_score).abs();
     if score_gap < 3.0 {
-        return (None, vec!["both crates score similarly on available local signals".to_string()]);
+        reasons.push("both crates score similarly on available local signals".to_string());
+        return (None, reasons);
     }
 
     let (winner, loser) = if left.maintenance_score > right.maintenance_score {
@@ -65,9 +75,22 @@ fn compare_recommendation(
         (right, left)
     };
 
-    let mut reasons = Vec::<String>::new();
-    if winner.advisory_count < loser.advisory_count {
-        reasons.push("fewer indexed advisories".to_string());
+    if uncertain {
+        let mut worst_winner = winner.clone();
+        worst_winner.advisory_count = worst_winner
+            .advisory_count
+            .saturating_add(worst_winner.advisory_unknown_count);
+        if maintenance_score(&worst_winner) - loser.maintenance_score < 3.0 {
+            reasons.push(
+                "recommendation withheld because unknown advisories could change the outcome"
+                    .to_string(),
+            );
+            return (None, reasons);
+        }
+    }
+
+    if !uncertain && winner.advisory_count < loser.advisory_count {
+        reasons.push("fewer confirmed affecting advisories".to_string());
     }
     if !winner.yanked && loser.yanked {
         reasons.push("selected version is not yanked".to_string());
@@ -112,6 +135,15 @@ fn confidence_assessment(
         return ConfidenceAssessment {
             level: ConfidenceLevel::Low,
             reason: "both crates have sparse local adoption signals".to_string(),
+        };
+    }
+
+    if left.advisory_unknown_count > 0 || right.advisory_unknown_count > 0 {
+        return ConfidenceAssessment {
+            level: ConfidenceLevel::Medium,
+            reason: "some advisory applicability is unknown; scores include only confirmed \
+                     affected advisories"
+                .to_string(),
         };
     }
 
@@ -230,11 +262,21 @@ impl McpServer {
                     )
                 })?;
 
+        let advisory_rows = tools::fetch_advisory_rows(&self.state.db, &[ctx.crate_row.id])
+            .await
+            .map_err(|e| format!("advisory query failed for {}: {e}", ctx.crate_row.name))?;
+        let advisories = advisories::advisory_counts(
+            &advisory_rows,
+            selected_version.id,
+            &selected_version.version,
+        );
+
         Ok(CompareSnapshot {
             crate_row: ctx.crate_row,
             latest_version,
             selected_version,
             counts,
+            advisories,
             freshness_outcome: ctx.freshness_outcome,
         })
     }
@@ -294,8 +336,11 @@ impl McpServer {
                 .counts
                 .feature_count,
             advisory_count: left_snapshot
-                .counts
-                .advisory_count,
+                .advisories
+                .affected as i64,
+            advisory_unknown_count: left_snapshot
+                .advisories
+                .unknown as i64,
             yanked: left_snapshot
                 .selected_version
                 .yanked,
@@ -336,8 +381,11 @@ impl McpServer {
                 .counts
                 .feature_count,
             advisory_count: right_snapshot
-                .counts
-                .advisory_count,
+                .advisories
+                .affected as i64,
+            advisory_unknown_count: right_snapshot
+                .advisories
+                .unknown as i64,
             yanked: right_snapshot
                 .selected_version
                 .yanked,
@@ -435,9 +483,34 @@ mod tests {
             dependency_count: 12,
             feature_count: 8,
             advisory_count: 0,
+            advisory_unknown_count: 0,
             yanked: false,
             maintenance_score: 0.0,
         }
+    }
+
+    #[test]
+    fn recommendation_requires_a_winner_under_independent_unknown_outcomes() {
+        let mut left = side("left");
+        let mut right = side("right");
+        // Keep scores below the cap so the advisory contribution is visible.
+        left.total_downloads = 1;
+        left.dependent_crate_count = 0;
+        right.total_downloads = 1;
+        right.dependent_crate_count = 0;
+        left.advisory_count = 1;
+        right.advisory_unknown_count = 2;
+        left.maintenance_score = maintenance_score(&left);
+        right.maintenance_score = maintenance_score(&right);
+        assert_eq!(compare_recommendation(&left, &right).0, None);
+        // Assuming both sides' unknowns apply would still choose right, but
+        // right's worst case against left's best case does not justify it.
+        left.advisory_unknown_count = 2;
+        assert_eq!(compare_recommendation(&left, &right).0, None);
+        // A sufficiently strong non-security signal can still justify a choice.
+        left.yanked = true;
+        left.maintenance_score = maintenance_score(&left);
+        assert_eq!(compare_recommendation(&left, &right).0, Some("right".to_string()));
     }
 
     #[test]

@@ -512,7 +512,7 @@ async fn mock_crate_detail(Path(crate_name): Path<String>) -> impl IntoResponse 
     if crate_name == PINNED_SOURCE_CRATE {
         return (StatusCode::OK, Json(pinned_source_crate_detail())).into_response();
     }
-    if crate_name != "demo_crate" {
+    if crate_name != "demo_crate" && crate_name != "deps_fail_crate" {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({ "errors": [ { "detail": "crate not found" } ] })),
@@ -524,7 +524,7 @@ async fn mock_crate_detail(Path(crate_name): Path<String>) -> impl IntoResponse 
         StatusCode::OK,
         Json(json!({
             "crate": {
-                "name": "demo_crate",
+                "name": crate_name,
                 "description": "Integration test crate",
                 "repository": "https://example.test/demo",
                 "documentation": "https://docs.rs/demo_crate",
@@ -587,6 +587,13 @@ async fn mock_crate_readme(
 async fn mock_crate_dependencies(
     Path((crate_name, version)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    if crate_name == "deps_fail_crate" {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "dependency service unavailable"})),
+        )
+            .into_response();
+    }
     if crate_name == PINNED_SOURCE_CRATE || (crate_name == "demo_crate" && version == "1.1.0") {
         return (StatusCode::OK, Json(json!({ "dependencies": [] }))).into_response();
     }
@@ -648,6 +655,7 @@ async fn mock_rustdoc_json_gzip(
     StatusCode::NOT_FOUND.into_response()
 }
 
+mod advisory_sources;
 mod cache_watcher;
 mod discovery;
 mod failure_paths;

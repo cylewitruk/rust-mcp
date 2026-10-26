@@ -380,6 +380,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cargo-lock"
+version = "11.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50524592e6bfbb1bf6f94e8184a786f637faeaf1cf37bbe65502b9a2c5c48939"
+dependencies = [
+ "semver",
+ "serde",
+ "toml",
+ "url",
+]
+
+[[package]]
 name = "cargo_toml"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -625,6 +637,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cvss"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7fb220d3ce1b565af39cee5b89e47fd8dd1dab162900ee4363c8ee4169ee8a2"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "darling"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -782,7 +803,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -883,6 +904,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c95b673b8f6f7235229ae11c5642d81b04c2e64c1e2fb417bc0cf73ca45f29"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
@@ -2019,6 +2049,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "platforms"
+version = "3.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9245c6e7c5a6bcdd7977fdf6d1e1c67f4cc2d0d58c041df0ea5940953033e6ca"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2181,7 +2220,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2464,6 +2503,7 @@ dependencies = [
  "rust-mcp-testing",
  "rust-mcp-types",
  "rustdoc-types",
+ "rustsec",
  "semver",
  "serde",
  "serde_json",
@@ -2561,7 +2601,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2620,7 +2660,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2639,6 +2679,24 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted",
+]
+
+[[package]]
+name = "rustsec"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c60fd662f245fd3d6ae7ee2371f59042c4e9dc00a02183c0b1735f4da2aa5ed"
+dependencies = [
+ "cargo-lock",
+ "cvss",
+ "fs-err",
+ "jiff",
+ "platforms",
+ "semver",
+ "serde",
+ "thiserror",
+ "toml",
+ "url",
 ]
 
 [[package]]
@@ -4011,7 +4069,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

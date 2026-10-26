@@ -172,7 +172,7 @@ pub mod index {
         pub version: Option<String>,
         /// Number of versions synchronized.
         pub synced_versions: usize,
-        /// Number of dependency edges synchronized.
+        /// Number of dependency edges synchronized for the returned version.
         pub synced_dependencies: usize,
         /// Error message if this crate failed to index.
         pub error: Option<String>,
@@ -929,7 +929,8 @@ pub mod dependency {
         pub selected_rust_version: Option<String>,
         /// Whether the selected version is yanked.
         pub yanked: bool,
-        /// Number of advisory matches for the selected version.
+        /// Number of advisories affecting this version (advisories whose
+        /// applicability is unknown are not counted).
         pub advisory_count: i64,
         /// Status markers describing notable conditions.
         pub status_markers: Vec<String>,
@@ -1255,6 +1256,9 @@ pub mod krate {
         /// omits the readme).
         #[serde(default, deserialize_with = "super::lenient_u32::deserialize")]
         pub readme_max_chars: Option<u32>,
+        /// Include each advisory's full write-up in `details` (can be long;
+        /// default: false).
+        pub include_advisory_details: Option<bool>,
     }
 
     /// Response payload for `crate_intel`.
@@ -1294,17 +1298,27 @@ pub mod krate {
         pub readme_truncated: bool,
         /// Version history entries.
         pub version_history: Vec<CrateIntelVersion>,
-        /// Dependency entries for selected version.
+        /// Dependency entries for the selected version (see
+        /// `dependency_coverage`).
         pub dependencies: Vec<CrateIntelDependency>,
-        /// Dependent crate entries.
+        /// `synced` when the selected version's dependency list was fetched
+        /// from crates.io (an empty list then means it has none), otherwise
+        /// `not_synced` (`index_crates` with this version fetches it).
+        pub dependency_coverage: String,
+        /// Crates in the local index that depend on this crate (not all of
+        /// crates.io).
         pub dependents: Vec<CrateIntelDependent>,
-        /// Total dependent crate count.
+        /// Number of locally indexed crates that depend on this crate.
         pub dependent_crate_count: i64,
         /// GitHub repository health metadata (if available).
         #[serde(skip_serializing_if = "Option::is_none")]
         pub github: Option<CrateIntelGitHub>,
-        /// Advisory matches for selected version.
+        /// Advisories that affect the selected version, or whose applicability
+        /// could not be determined (see each entry's `applicability`).
         pub advisories: Vec<CrateIntelAdvisory>,
+        /// Advisories for this crate that do not affect the selected version
+        /// (omitted from `advisories`).
+        pub advisories_not_affecting: usize,
         /// Freshness check done.
         pub freshness_check_performed: bool,
         /// Freshness result.
@@ -1338,8 +1352,10 @@ pub mod krate {
         pub yanked: bool,
         /// Download count for this version.
         pub downloads: i64,
-        /// Whether advisories were matched.
+        /// Whether any advisory affects this version.
         pub has_advisory: bool,
+        /// Number of advisories whose applicability to this version is unknown.
+        pub advisory_unknown_count: usize,
     }
 
     /// Dependency entry in `crate_intel`.
@@ -1385,8 +1401,11 @@ pub mod krate {
         pub fixed_versions: Vec<String>,
         /// Advisory source label.
         pub source: String,
-        /// Full vulnerability description (markdown). Use for detailed
-        /// analysis; may be long.
+        /// `affected`, or `unknown` when the stored range could not be
+        /// evaluated against the selected version.
+        pub applicability: String,
+        /// Full vulnerability write-up (markdown); only with
+        /// `include_advisory_details`.
         #[serde(skip_serializing_if = "Option::is_none")]
         pub details: Option<String>,
         /// Affected function paths from the advisory. When non-empty, the
@@ -1523,7 +1542,8 @@ pub mod krate {
         pub yanked: bool,
         /// Download count for this version.
         pub downloads: i64,
-        /// Number of advisory matches.
+        /// Number of advisories affecting this version (advisories whose
+        /// applicability is unknown are not counted).
         pub advisory_count: i64,
         /// Age in days since publication.
         pub release_age_days: Option<i64>,
@@ -2515,11 +2535,13 @@ pub mod krate {
         pub dependency_count: i64,
         /// Number of feature flags.
         pub feature_count: i64,
-        /// Number of security advisories.
+        /// Number of advisories confirmed to affect this version.
         pub advisory_count: i64,
+        /// Advisories whose applicability is unknown; excluded from the score.
+        pub advisory_unknown_count: i64,
         /// Whether the selected version is yanked.
         pub yanked: bool,
-        /// Computed maintenance health score (0.0 - 1.0).
+        /// Computed maintenance health score (0.0 - 100.0).
         pub maintenance_score: f64,
     }
 
@@ -2901,8 +2923,10 @@ pub mod krate {
         pub total_downloads: i64,
         /// Number of dependent crates.
         pub dependent_crates: i64,
-        /// Number of security advisories.
+        /// Number of advisories confirmed to affect this version.
         pub advisory_count: i64,
+        /// Advisories whose applicability is unknown; excluded from the score.
+        pub advisory_unknown_count: i64,
         /// Whether the latest version is yanked.
         pub yanked: bool,
         /// SPDX license expression.

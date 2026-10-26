@@ -137,6 +137,8 @@ pub struct CrateVersionSelectionRow {
 /// Version timeline row used by `crate_intel`.
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateVersionHistoryRow {
+    /// Crate version row ID.
+    pub version_id: i64,
     /// Semver version string.
     pub version: String,
     /// Optional declared Rust version.
@@ -147,8 +149,6 @@ pub struct CrateVersionHistoryRow {
     pub yanked: bool,
     /// Download count for this version.
     pub total_downloads: i64,
-    /// Whether at least one advisory matches this version.
-    pub has_advisory: bool,
 }
 
 /// Dependency edge row used by `crate_intel`.
@@ -177,9 +177,15 @@ pub struct CrateDependentRow {
     pub total_downloads: i64,
 }
 
-/// Advisory row used by `crate_intel`.
+/// Stored advisory match row (see `mcp::advisories` for applicability).
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateAdvisoryRow {
+    /// Stored evidence predates package-scoped advisory matching.
+    pub requires_resync: bool,
+    /// Crate the advisory concerns.
+    pub crate_id: i64,
+    /// Explicitly matched crate version; `None` for crate-level rows.
+    pub version_id: Option<i64>,
     /// Advisory identifier.
     pub advisory_id: String,
     /// Advisory title.
@@ -992,12 +998,12 @@ pub struct FeatureImpactDependencyRow {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct CrateVersionTimelineRow {
+    pub version_id: i64,
     pub version: String,
     pub rust_version: Option<String>,
     pub published_at: Option<String>,
     pub yanked: bool,
     pub total_downloads: i64,
-    pub advisory_count: i64,
     pub release_age_days: Option<i64>,
 }
 
@@ -1005,6 +1011,8 @@ pub struct CrateVersionTimelineRow {
 #[allow(missing_docs)]
 #[derive(Debug, Clone, FromRow)]
 pub struct AlternativesCandidateRow {
+    pub crate_id: i64,
+    pub latest_version_id: Option<i64>,
     pub crate_name: String,
     pub description: Option<String>,
     pub categories: Vec<String>,
@@ -1013,7 +1021,12 @@ pub struct AlternativesCandidateRow {
     pub published_at: Option<String>,
     pub total_downloads: i64,
     pub yanked: bool,
+    /// Advisories affecting the latest version; filled in after loading.
+    #[sqlx(default)]
     pub advisory_count: i64,
+    /// Advisories of unknown applicability; filled in after loading.
+    #[sqlx(default)]
+    pub advisory_unknown_count: i64,
     pub license_expression: Option<String>,
     pub dependent_count: i64,
     pub name_similarity: f64,
@@ -1049,7 +1062,6 @@ pub struct CrateCompareVersionRow {
 pub struct CrateCompareCountsRow {
     pub dependency_count: i64,
     pub feature_count: i64,
-    pub advisory_count: i64,
     pub dependent_count: i64,
 }
 

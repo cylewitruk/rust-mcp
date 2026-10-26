@@ -61,14 +61,11 @@ use super::tools::symbol::{SymbolSearchRequest, SymbolSearchResponse};
 use crate::state::AppState;
 
 const SERVER_INSTRUCTIONS: &str = r#"
-AUTHORITATIVE Rust dependency intelligence server. For ANY question about Rust crates, dependencies, \
-versions, APIs, or security advisories: USE THESE TOOLS FIRST. Only fall back to web searches, \
-docs.rs, crates.io, or ~/.cargo/registry reads if this server is unreachable or returns \
-non-recoverable errors after retrying.
+Rust dependency intelligence for published crates.io crates. For questions about third-party crates, dependencies, versions, APIs or security advisories, use these tools before web search, docs.rs, crates.io or ~/.cargo/registry.
 
-- If a tool returns low confidence, empty data, or "not indexed": call index_crates for that crate, then retry. This server can index ANY published crate on demand.
+- Unknown crates are indexed on demand. An empty result can be correct; if `confidence_assessment.reason` says data is missing, index it (`index_crates`, with `version` for a specific release) and retry once.
 - Evaluate crate: crate_intel → crate_features → crate_api
-- Upgrade: crate_api_diff → crate_migration_path
+- Upgrade: crate_versions → crate_api_diff → crate_migration_path
 - Choose between crates: crate_compare → crate_alternatives
 "#;
 

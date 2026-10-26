@@ -5,6 +5,7 @@ pub use rust_mcp_types::types::krate::{
 use serde::{Deserialize, Serialize};
 
 use crate::db::tools;
+use crate::mcp::advisories;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel};
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
@@ -84,6 +85,9 @@ impl McpServer {
         )
         .await
         .map_err(|e| format!("version timeline query failed for {}: {e}", ctx.crate_row.name))?;
+        let advisory_rows = tools::fetch_advisory_rows(&self.state.db, &[ctx.crate_row.id])
+            .await
+            .map_err(|e| format!("advisory query failed for {}: {e}", ctx.crate_row.name))?;
 
         let versions = rows
             .into_iter()
@@ -97,8 +101,13 @@ impl McpServer {
                 if row.yanked {
                     markers.push("yanked".to_string());
                 }
-                if row.advisory_count > 0 {
+                let advisory_counts =
+                    advisories::advisory_counts(&advisory_rows, row.version_id, &row.version);
+                if advisory_counts.affected > 0 {
                     markers.push("security_advisory".to_string());
+                }
+                if advisory_counts.unknown > 0 {
+                    markers.push("security_advisory_unknown".to_string());
                 }
                 if let Some(days) = row.release_age_days
                     && days >= 365
@@ -112,7 +121,7 @@ impl McpServer {
                     published_at: row.published_at,
                     yanked: row.yanked,
                     downloads: row.total_downloads,
-                    advisory_count: row.advisory_count,
+                    advisory_count: advisory_counts.affected as i64,
                     release_age_days: row.release_age_days,
                     is_latest,
                     adoption_signal: adoption_signal(row.total_downloads, row.yanked),
@@ -140,6 +149,20 @@ impl McpServer {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Low,
                 reason: "no versions were returned from local index for selected crate".to_string(),
+            }
+        } else if paginated
+            .items
+            .iter()
+            .any(|version| {
+                version
+                    .markers
+                    .iter()
+                    .any(|marker| marker == "security_advisory_unknown")
+            })
+        {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "some listed versions have advisories of unknown applicability".to_string(),
             }
         } else {
             ConfidenceAssessment {

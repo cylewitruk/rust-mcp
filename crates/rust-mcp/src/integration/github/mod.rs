@@ -261,6 +261,8 @@ pub struct GitHubLicense {
 #[allow(dead_code)]
 pub struct GitHubAdvisory {
     pub ghsa_id: String,
+    /// Withdrawal timestamp, when the advisory has been withdrawn.
+    pub withdrawn_at: Option<String>,
     pub cve_id: Option<String>,
     pub summary: Option<String>,
     pub description: Option<String>,

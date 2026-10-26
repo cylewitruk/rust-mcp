@@ -4,7 +4,7 @@ Most crate tools index unknown crates on demand. Use these only when a response 
 
 ## `index_crates`
 
-Syncs crates from crates.io and enriches them with source and rustdoc (`crates: [{"name": "serde"}]`). Add `version` to an entry to enrich that exact release, e.g. an older version for `crate_api_diff`; the entry fails if the version does not exist. Rustdoc for older releases may be unavailable from docs.rs, in which case source-derived data is used. Can take a while; progress is streamed.
+Syncs crates from crates.io and enriches them with source and rustdoc (`crates: [{"name": "serde"}]`). Add `version` to an entry to enrich that exact release (dependencies, source, rustdoc), e.g. an older version for `crate_api_diff` or a `not_synced` dependency list; the entry fails if the version does not exist or requested dependency synchronization fails. `synced_dependencies` counts edges for the returned version; inspect each entry’s `error`. Rustdoc for older releases may be unavailable from docs.rs, in which case source-derived data is used. Can take a while; progress is streamed.
 
 ## `index_status`
 
@@ -12,7 +12,7 @@ Index freshness, coverage and queue state: whether background indexing is still 
 
 ## `index_refresh`
 
-Re-syncs already-indexed data for a `scope`: `crate`, `all`, `security`, `docs` (docs.rs pages for `docs_search`), `local_cache` (source) or `rustdoc_json`. Optionally limited to one `crate_name`.
+Re-syncs already-indexed data for a `scope`: `crate`, `all`, `security`, `docs` (docs.rs pages for `docs_search`), `local_cache` (source) or `rustdoc_json`. Some scopes can be limited to one `crate_name`; `security` processes a page of indexed crates across OSV, GHSA and configured RustSec sources. Legacy advisory matches stay unknown until their source is refreshed successfully. Queued security jobs retry source failures; inline refreshes report `completed_with_errors`.
 
 ## `ping`
 

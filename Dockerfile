@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
     OUT_DIR=$([ "$PROFILE" = "dev" ] && echo "debug" || echo "$PROFILE") && \
-    cargo build --profile "$PROFILE" --locked && \
+    cargo build --profile "$PROFILE" --locked -p rust-mcp --bin rust-mcp && \
     install -D /app/target/"$OUT_DIR"/rust-mcp /out/rust-mcp
 
 # Final runtime image

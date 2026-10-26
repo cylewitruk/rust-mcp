@@ -12,7 +12,8 @@ use crate::db::indexing::{
     RustdocCandidateFilter, enqueue_or_get_refresh_job_id, fetch_index_coverage_counts,
     fetch_index_failures_by_scope, fetch_index_freshness, fetch_index_operational_metrics_24h,
     fetch_index_queue_counts, fetch_recent_refresh_job_errors, fetch_refresh_eta_stats,
-    fetch_refresh_job_retry_distribution, persist_crate_sync,
+    fetch_refresh_job_retry_distribution, fetch_security_crates_page, persist_crate_sync,
+    persist_version_dependencies,
 };
 use crate::integration::crates_io::{CratesIoClient, CratesIoCrateDetailResponse};
 use crate::mcp::models::ResponseFreshnessSource;
@@ -31,6 +32,16 @@ pub struct SyncCrateOutcome {
     pub dependencies_synced: usize,
     /// The primary version selected for detailed indexing, if any.
     pub selected_version: Option<String>,
+}
+
+/// Result of indexing the explicitly requested release.
+struct VersionIndexOutcome {
+    /// Release selected for indexing.
+    version: String,
+    /// Dependency edges persisted for this release.
+    dependencies_synced: usize,
+    /// Failure of the requested dependency synchronization, if any.
+    error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -197,17 +208,19 @@ impl McpServer {
         Ok(format!("refresh-job-{}", outcome.job_id))
     }
 
-    /// Indexes source and rustdoc for one requested version of an already
-    /// synced crate, returning the resolved version.
+    /// Indexes dependencies (when `include_dependencies`), source and rustdoc
+    /// for one requested version of an already synced crate, returning the
+    /// resolved version.
     ///
-    /// Fails if the version does not exist; source and rustdoc enrichment are
-    /// best-effort (older releases have no docs.rs rustdoc JSON).
+    /// Fails if the version does not exist; enrichment is best-effort (older
+    /// releases have no docs.rs rustdoc JSON).
     async fn index_crate_version(
         &self,
         crate_name: &str,
         version: &str,
+        include_dependencies: bool,
         tcx: &ToolCallContext,
-    ) -> Result<String, String> {
+    ) -> Result<VersionIndexOutcome, String> {
         let ctx = self
             .fetch_crate_context(crate_name, tcx)
             .await?;
@@ -218,6 +231,30 @@ impl McpServer {
 
         tcx.notify_progress(&format!("Enriching {crate_name}@{}", selected.version))
             .await;
+        let mut dependencies_synced = 0;
+        let mut dependency_error = None;
+        if include_dependencies {
+            let persisted = match CratesIoClient::new(&self.state)
+                .fetch_crate_dependencies(crate_name, &selected.version)
+                .await
+            {
+                Ok(dependencies) => {
+                    persist_version_dependencies(&self.state.db, selected.id, &dependencies)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+                Err(error) => Err(error),
+            };
+            match persisted {
+                Ok(count) => dependencies_synced = count,
+                Err(error) => {
+                    dependency_error = Some(format!(
+                        "dependency sync failed for {crate_name}@{}: {error}",
+                        selected.version
+                    ))
+                }
+            }
+        }
         let source = match self
             .ensure_source_on_disk(crate_name, &selected.version, selected.id, tcx)
             .await
@@ -254,7 +291,11 @@ impl McpServer {
             warn!(crate_name, version = %selected.version, %error, "pinned rustdoc enrichment failed");
         }
 
-        Ok(selected.version)
+        Ok(VersionIndexOutcome {
+            version: selected.version,
+            dependencies_synced,
+            error: dependency_error,
+        })
     }
 
     /// Handles the `index_crates` tool call.
@@ -293,35 +334,35 @@ impl McpServer {
                 .filter(|version| !version.is_empty());
 
             match self
-                .sync_single_crate(crate_name, include_dependencies)
+                .sync_single_crate(crate_name, include_dependencies && pinned_version.is_none())
                 .await
             {
                 Ok(outcome) => {
-                    let version = match pinned_version {
-                        Some(version) => self
-                            .index_crate_version(crate_name, version, &tcx)
+                    let (version, synced_dependencies, error) = match pinned_version {
+                        Some(version) => match self
+                            .index_crate_version(crate_name, version, include_dependencies, &tcx)
                             .await
-                            .map(Some),
+                        {
+                            Ok(indexed) => {
+                                (Some(indexed.version), indexed.dependencies_synced, indexed.error)
+                            }
+                            Err(error) => (None, 0, Some(error)),
+                        },
                         None => {
                             enriched_crates.push(crate_name.to_string());
-                            Ok(outcome.selected_version)
+                            (outcome.selected_version, outcome.dependencies_synced, None)
                         }
                     };
-                    let (version, error) = match version {
-                        Ok(version) => {
-                            succeeded += 1;
-                            (version, None)
-                        }
-                        Err(error) => {
-                            failed += 1;
-                            (None, Some(error))
-                        }
-                    };
+                    if error.is_some() {
+                        failed += 1;
+                    } else {
+                        succeeded += 1;
+                    }
                     results.push(IndexCrateResult {
                         name: crate_name.to_string(),
                         version,
                         synced_versions: outcome.versions_synced,
-                        synced_dependencies: outcome.dependencies_synced,
+                        synced_dependencies,
                         error,
                     });
                 }
@@ -761,18 +802,22 @@ impl McpServer {
                 let page = sync_page(request.page);
                 let per_page = sync_per_page(request.per_page);
                 let offset = page.saturating_sub(1) * per_page;
-                let mut outcome = self
-                    .sync_osv_security(per_page, offset, None)
-                    .await?;
-                let rustsec_outcome = self
-                    .sync_rustsec_db_security(per_page, offset, None)
-                    .await?;
+                let crates = fetch_security_crates_page(
+                    &self.state.db,
+                    i64::from(per_page),
+                    i64::from(offset),
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                let outcome = self
+                    .sync_security_crates(&crates)
+                    .await;
                 let rustsec_enabled = self
                     .state
                     .config
                     .rustsec_db_dir
                     .is_some();
-                outcome.merge(rustsec_outcome);
 
                 Ok(Json(IndexRefreshResponse {
                     job_id,

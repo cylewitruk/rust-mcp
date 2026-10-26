@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use sqlx::postgres::PgPoolOptions;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner as _;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt as _};
@@ -102,14 +103,11 @@ async fn wait_until_pg_ready(
     max_attempts: u32,
     delay: Duration,
 ) -> Result<()> {
-    use sqlx::postgres::PgPoolOptions;
-
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(5))
-        .connect(connection_string)
-        .await
-        .context("initial PG pool connect failed")?;
+        .connect_lazy(connection_string)
+        .context("invalid PG connection options")?;
 
     for attempt in 1..=max_attempts {
         match sqlx::query_scalar::<_, i32>("SELECT 1")

@@ -1,22 +1,24 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::{debug, info};
 
 use crate::db::indexing::{
     clear_ghsa_advisory_matches, clear_osv_advisory_matches, clear_rustsec_db_advisory_matches,
-    fetch_security_crates_page, fetch_security_versions_for_crate,
-    insert_crate_level_advisory_match, upsert_version_advisory_match,
+    fetch_security_versions_for_crate, insert_crate_level_advisory_match,
+    upsert_version_advisory_match,
 };
-use crate::db::models::{CrateLevelAdvisoryMatchInsert, VersionAdvisoryMatchInsert};
+use crate::db::models::{
+    CrateLevelAdvisoryMatchInsert, SecurityCrateRow, VersionAdvisoryMatchInsert,
+};
 use crate::integration::github::GitHubClient;
 use crate::integration::osv::{
     OsvAffected, OsvDatabaseSpecific, OsvDevClient, OsvQueryResponse, OsvSeverity, OsvVulnerability,
 };
+use crate::mcp::advisories::{self, Applicability, ghsa_version_in_range};
 use crate::mcp::server::McpServer;
 
 /// Outcome of a security advisory synchronization.
@@ -98,6 +100,16 @@ fn affected_range_text(affected: &[OsvAffected]) -> String {
         for range in &item.ranges {
             let mut parts = Vec::new();
             for event in &range.events {
+                if [&event.introduced, &event.fixed, &event.last_affected, &event.limit]
+                    .iter()
+                    .filter(|value| value.is_some())
+                    .count()
+                    != 1
+                {
+                    ranges.push("osv_invalid_event".to_string());
+                    parts.clear();
+                    break;
+                }
                 if let Some(v) = &event.introduced {
                     parts.push(format!("introduced={v}"));
                 }
@@ -152,7 +164,16 @@ fn first_rustsec_alias(aliases: &[String]) -> Option<String> {
 }
 
 fn advisory_identity(vuln: &OsvVulnerability) -> (String, String) {
-    if let Some(rustsec_id) = first_rustsec_alias(&vuln.aliases) {
+    if vuln
+        .id
+        .starts_with("RUSTSEC-")
+    {
+        return (vuln.id.clone(), "rustsec_osv".to_string());
+    }
+    // Aliases share affected evidence, but cannot transfer withdrawal authority.
+    if vuln.withdrawn.is_none()
+        && let Some(rustsec_id) = first_rustsec_alias(&vuln.aliases)
+    {
         return (rustsec_id, "rustsec_osv".to_string());
     }
     (vuln.id.clone(), "osv".to_string())
@@ -270,39 +291,6 @@ fn rustsec_title_from_body(body: &str) -> Option<String> {
         })
 }
 
-fn parse_semver_for_matching(version: &str) -> Option<Version> {
-    Version::parse(version)
-        .ok()
-        .or_else(|| Version::parse(version.trim_start_matches('v')).ok())
-}
-
-fn parse_version_reqs(requirements: &[String]) -> Vec<VersionReq> {
-    requirements
-        .iter()
-        .filter_map(|req| VersionReq::parse(req).ok())
-        .collect()
-}
-
-fn is_version_affected(
-    version: &str,
-    patched_reqs: &[VersionReq],
-    unaffected_reqs: &[VersionReq],
-) -> Option<bool> {
-    let parsed = parse_semver_for_matching(version)?;
-
-    if patched_reqs.is_empty() && unaffected_reqs.is_empty() {
-        return Some(true);
-    }
-
-    let patched = patched_reqs
-        .iter()
-        .any(|req| req.matches(&parsed));
-    let unaffected = unaffected_reqs
-        .iter()
-        .any(|req| req.matches(&parsed));
-    Some(!(patched || unaffected))
-}
-
 fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(crate_dir) else {
         return Vec::new();
@@ -326,25 +314,60 @@ fn advisory_markdown_files(crate_dir: &Path) -> Vec<PathBuf> {
 }
 
 impl McpServer {
+    /// Refreshes all configured advisory sources for a stable crate snapshot.
+    /// A crate is checked only when every configured source succeeded.
+    pub async fn sync_security_crates(&self, crates: &[SecurityCrateRow]) -> SecuritySyncOutcome {
+        let mut outcome = SecuritySyncOutcome::default();
+        let mut checked: HashSet<i64> = crates
+            .iter()
+            .map(|krate| krate.id)
+            .collect();
+        let mut results = vec![
+            self.sync_osv_security(crates)
+                .await,
+            self.sync_ghsa_security(crates)
+                .await,
+        ];
+        if self
+            .state
+            .config
+            .rustsec_db_dir
+            .is_some()
+        {
+            results.push(
+                self.sync_rustsec_db_security(crates)
+                    .await,
+            );
+        }
+        for result in results {
+            match result {
+                Ok(source) => {
+                    checked.retain(|id| {
+                        source
+                            .checked_crate_ids
+                            .contains(id)
+                    });
+                    outcome.merge(source);
+                }
+                Err(error) => {
+                    checked.clear();
+                    outcome.errors.push(error);
+                }
+            }
+        }
+        outcome.checked_crate_ids = checked.into_iter().collect();
+        outcome
+            .checked_crate_ids
+            .sort();
+        outcome.crates_processed = crates.len();
+        outcome
+    }
+
     /// Synchronizes OSV vulnerability data for indexed crates.
-    ///
-    /// `max_age_secs` controls staleness filtering — crates checked more
-    /// recently than this are skipped. Pass `None` to check all.
     pub async fn sync_osv_security(
         &self,
-        limit: u32,
-        offset: u32,
-        max_age_secs: Option<i64>,
+        crate_rows: &[SecurityCrateRow],
     ) -> Result<SecuritySyncOutcome, String> {
-        let crate_rows = fetch_security_crates_page(
-            &self.state.db,
-            i64::from(limit),
-            i64::from(offset),
-            max_age_secs,
-        )
-        .await
-        .map_err(|e| format!("failed to fetch crates for security sync: {e}"))?;
-
         let mut outcome = SecuritySyncOutcome::default();
         let osv_client = OsvDevClient::new(&self.state);
 
@@ -383,11 +406,32 @@ impl McpServer {
                 .touched_crates
                 .push(krate.name.clone());
 
-            clear_osv_advisory_matches(&self.state.db, krate.id)
+            let mut tx = self
+                .state
+                .db
+                .begin()
+                .await
+                .map_err(|e| e.to_string())?;
+            clear_osv_advisory_matches(&mut *tx, krate.id)
                 .await
                 .map_err(|e| format!("failed to clear OSV advisories for {}: {e}", krate.name))?;
 
-            for vuln in osv.vulns {
+            for mut vuln in osv.vulns {
+                vuln.affected
+                    .retain(|affected| {
+                        affected
+                            .package
+                            .as_ref()
+                            .is_some_and(|package| {
+                                package.ecosystem == "crates.io"
+                                    && (package.name == krate.name || package.name == "*")
+                            })
+                    });
+                if vuln.withdrawn.is_some() {
+                    vuln.affected.clear();
+                } else if vuln.affected.is_empty() {
+                    continue;
+                }
                 let (advisory_id, advisory_source) = advisory_identity(&vuln);
                 let title = vuln
                     .summary
@@ -403,7 +447,10 @@ impl McpServer {
                     .references
                     .first()
                     .map(|r| r.url.clone());
-                let affected_range = affected_range_text(&vuln.affected);
+                let affected_range = match &vuln.withdrawn {
+                    Some(date) => format!("withdrawn={date}"),
+                    None => affected_range_text(&vuln.affected),
+                };
                 let fixed_versions_json = fixed_versions(&vuln.affected);
                 let details = vuln.details.as_deref();
                 let affected_functions = collect_affected_functions(&vuln.affected);
@@ -435,7 +482,7 @@ impl McpServer {
                                 affected_functions: &affected_functions,
                                 cwe_ids: &cwe_ids,
                             };
-                            upsert_version_advisory_match(&self.state.db, &insert)
+                            upsert_version_advisory_match(&mut *tx, &insert)
                                 .await
                                 .map_err(|e| {
                                     format!(
@@ -462,7 +509,7 @@ impl McpServer {
                         affected_functions: &affected_functions,
                         cwe_ids: &cwe_ids,
                     };
-                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                    insert_crate_level_advisory_match(&mut *tx, &insert)
                         .await
                         .map_err(|e| {
                             format!(
@@ -474,6 +521,11 @@ impl McpServer {
                 }
             }
 
+            tx.commit()
+                .await
+                .map_err(|e| e.to_string())?;
+            self.query_cache_invalidate_crate(&krate.name)
+                .await?;
             outcome
                 .checked_crate_ids
                 .push(krate.id);
@@ -483,14 +535,9 @@ impl McpServer {
     }
 
     /// Synchronizes RustSec advisory-db data for indexed crates.
-    ///
-    /// `max_age_secs` controls staleness filtering — crates checked more
-    /// recently than this are skipped. Pass `None` to check all.
     pub async fn sync_rustsec_db_security(
         &self,
-        limit: u32,
-        offset: u32,
-        max_age_secs: Option<i64>,
+        crate_rows: &[SecurityCrateRow],
     ) -> Result<SecuritySyncOutcome, String> {
         let Some(db_dir) = self
             .state
@@ -501,39 +548,33 @@ impl McpServer {
             return Ok(SecuritySyncOutcome::default());
         };
 
-        let crate_rows = fetch_security_crates_page(
-            &self.state.db,
-            i64::from(limit),
-            i64::from(offset),
-            max_age_secs,
-        )
-        .await
-        .map_err(|e| format!("failed to fetch crates for RustSec DB sync: {e}"))?;
-
+        if !db_dir.join("crates").is_dir() {
+            return Err("RustSec database is unavailable: missing crates directory".to_string());
+        }
         let mut outcome = SecuritySyncOutcome::default();
 
         for krate in crate_rows {
             let crate_advisories_dir = db_dir
                 .join("crates")
                 .join(&krate.name);
-            if !crate_advisories_dir.exists() {
-                continue;
-            }
 
             let version_rows = fetch_security_versions_for_crate(&self.state.db, krate.id)
                 .await
                 .map_err(|e| format!("failed to load versions for {}: {e}", krate.name))?;
 
-            clear_rustsec_db_advisory_matches(&self.state.db, krate.id)
+            let mut tx = self
+                .state
+                .db
+                .begin()
+                .await
+                .map_err(|e| e.to_string())?;
+            clear_rustsec_db_advisory_matches(&mut *tx, krate.id)
                 .await
                 .map_err(|e| {
                     format!("failed to clear RustSec advisories for {}: {e}", krate.name)
                 })?;
 
             let advisory_files = advisory_markdown_files(&crate_advisories_dir);
-            if advisory_files.is_empty() {
-                continue;
-            }
 
             info!(
                 crate_name = %krate.name,
@@ -542,13 +583,13 @@ impl McpServer {
             );
 
             outcome.crates_processed += 1;
-            outcome
-                .checked_crate_ids
-                .push(krate.id);
+
             outcome
                 .touched_crates
                 .push(krate.name.clone());
 
+            let errors_before = outcome.errors.len();
+            let written_before = outcome.advisories_written;
             for advisory_file in advisory_files {
                 let raw = match fs::read_to_string(&advisory_file) {
                     Ok(value) => value,
@@ -703,8 +744,6 @@ impl McpServer {
                         .join("; ")
                 };
 
-                let patched_reqs = parse_version_reqs(&parsed.versions.patched);
-                let unaffected_reqs = parse_version_reqs(&parsed.versions.unaffected);
                 let fixed_versions_json = json!(parsed.versions.patched);
 
                 // Use advisory body as details; description is a short
@@ -738,13 +777,12 @@ impl McpServer {
 
                 let mut matched_any = false;
                 for version_row in &version_rows {
-                    let Some(affected) =
-                        is_version_affected(&version_row.version, &patched_reqs, &unaffected_reqs)
-                    else {
-                        continue;
-                    };
-
-                    if !affected {
+                    if advisories::range_applicability(
+                        "rustsec_db",
+                        &affected_range,
+                        &version_row.version,
+                    ) != Applicability::Affected
+                    {
                         continue;
                     }
 
@@ -763,7 +801,7 @@ impl McpServer {
                         affected_functions: &affected_functions,
                         cwe_ids: &cwe_ids,
                     };
-                    upsert_version_advisory_match(&self.state.db, &insert)
+                    upsert_version_advisory_match(&mut *tx, &insert)
                         .await
                         .map_err(|e| {
                             format!(
@@ -788,7 +826,7 @@ impl McpServer {
                         affected_functions: &affected_functions,
                         cwe_ids: &cwe_ids,
                     };
-                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                    insert_crate_level_advisory_match(&mut *tx, &insert)
                         .await
                         .map_err(|e| {
                             format!(
@@ -799,6 +837,18 @@ impl McpServer {
                     outcome.advisories_written += 1;
                 }
             }
+            if outcome.errors.len() != errors_before {
+                outcome.advisories_written = written_before;
+                continue;
+            }
+            tx.commit()
+                .await
+                .map_err(|e| e.to_string())?;
+            self.query_cache_invalidate_crate(&krate.name)
+                .await?;
+            outcome
+                .checked_crate_ids
+                .push(krate.id);
         }
 
         outcome.touched_crates.sort();
@@ -807,24 +857,10 @@ impl McpServer {
     }
 
     /// Synchronizes GHSA (GitHub Security Advisories) for indexed crates.
-    ///
-    /// `max_age_secs` controls staleness filtering — crates checked more
-    /// recently than this are skipped. Pass `None` to check all.
     pub async fn sync_ghsa_security(
         &self,
-        limit: u32,
-        offset: u32,
-        max_age_secs: Option<i64>,
+        crate_rows: &[SecurityCrateRow],
     ) -> Result<SecuritySyncOutcome, String> {
-        let crate_rows = fetch_security_crates_page(
-            &self.state.db,
-            i64::from(limit),
-            i64::from(offset),
-            max_age_secs,
-        )
-        .await
-        .map_err(|e| format!("failed to fetch crates for GHSA sync: {e}"))?;
-
         let mut outcome = SecuritySyncOutcome::default();
         let github = GitHubClient::new(&self.state);
 
@@ -839,14 +875,6 @@ impl McpServer {
                     continue;
                 }
             };
-
-            if advisories.is_empty() {
-                outcome.crates_processed += 1;
-                outcome
-                    .checked_crate_ids
-                    .push(krate.id);
-                continue;
-            }
 
             debug!(
                 crate_name = %krate.name,
@@ -868,7 +896,13 @@ impl McpServer {
                 .touched_crates
                 .push(krate.name.clone());
 
-            clear_ghsa_advisory_matches(&self.state.db, krate.id)
+            let mut tx = self
+                .state
+                .db
+                .begin()
+                .await
+                .map_err(|e| e.to_string())?;
+            clear_ghsa_advisory_matches(&mut *tx, krate.id)
                 .await
                 .map_err(|e| format!("failed to clear GHSA advisories for {}: {e}", krate.name))?;
 
@@ -892,69 +926,74 @@ impl McpServer {
                     .filter_map(|c| c.cwe_id.clone())
                     .collect();
 
-                // Find the vulnerability entry matching this crate's ecosystem.
-                let crate_vuln = advisory
+                let crate_vulns = advisory
                     .vulnerabilities
                     .iter()
-                    .find(|v| {
+                    .filter(|v| {
                         v.package
                             .as_ref()
-                            .and_then(|p| p.name.as_deref())
-                            == Some(&krate.name)
-                    });
-
-                let affected_range = crate_vuln
-                    .and_then(|v| {
-                        v.vulnerable_version_range
-                            .as_deref()
+                            .is_some_and(|p| {
+                                p.ecosystem.as_deref() == Some("rust")
+                                    && p.name.as_deref() == Some(&krate.name)
+                            })
                     })
-                    .unwrap_or("unknown");
-
-                let fixed_version = crate_vuln
-                    .and_then(|v| {
-                        v.first_patched_version
-                            .as_ref()
-                    })
-                    .and_then(|v| v.identifier.as_deref());
-                let fixed_versions_json = match fixed_version {
-                    Some(v) => json!([v]),
-                    None => json!([]),
-                };
-
-                // Try to match against indexed versions.
-                let mut matched_any = false;
-                if let Some(vuln) = crate_vuln
-                    && let Some(range_str) = vuln
-                        .vulnerable_version_range
-                        .as_deref()
+                    .collect::<Vec<_>>();
+                if crate_vulns.is_empty()
+                    && advisory
+                        .withdrawn_at
+                        .is_none()
                 {
-                    for (version, &version_id) in &version_map {
-                        if ghsa_version_in_range(version, range_str) {
-                            matched_any = true;
-                            let insert = VersionAdvisoryMatchInsert {
-                                crate_id: krate.id,
-                                version_id,
-                                advisory_id,
-                                severity: severity.as_deref(),
-                                title,
-                                url,
-                                affected_range,
-                                fixed_versions: &fixed_versions_json,
-                                source: "ghsa",
-                                details,
-                                affected_functions: &[],
-                                cwe_ids: &cwe_ids,
-                            };
-                            upsert_version_advisory_match(&self.state.db, &insert)
-                                .await
-                                .map_err(|e| {
-                                    format!(
-                                        "failed to upsert GHSA {} for {}@{}: {e}",
-                                        advisory_id, krate.name, version
-                                    )
-                                })?;
-                            outcome.advisories_written += 1;
-                        }
+                    continue;
+                }
+                let affected_range = match &advisory.withdrawn_at {
+                    Some(date) => format!("withdrawn={date}"),
+                    None => crate_vulns
+                        .iter()
+                        .map(|v| {
+                            v.vulnerable_version_range
+                                .as_deref()
+                                .unwrap_or("unknown")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" || "),
+                };
+                let fixed_versions_json = json!(
+                    crate_vulns
+                        .iter()
+                        .filter_map(|v| v
+                            .first_patched_version
+                            .as_ref()?
+                            .identifier
+                            .as_deref())
+                        .collect::<Vec<_>>()
+                );
+                let mut matched_any = false;
+                for (version, &version_id) in &version_map {
+                    if ghsa_version_in_range(version, &affected_range) {
+                        matched_any = true;
+                        let insert = VersionAdvisoryMatchInsert {
+                            crate_id: krate.id,
+                            version_id,
+                            advisory_id,
+                            severity: severity.as_deref(),
+                            title,
+                            url,
+                            affected_range: &affected_range,
+                            fixed_versions: &fixed_versions_json,
+                            source: "ghsa",
+                            details,
+                            affected_functions: &[],
+                            cwe_ids: &cwe_ids,
+                        };
+                        upsert_version_advisory_match(&mut *tx, &insert)
+                            .await
+                            .map_err(|e| {
+                                format!(
+                                    "failed to upsert GHSA {} for {}@{}: {e}",
+                                    advisory_id, krate.name, version
+                                )
+                            })?;
+                        outcome.advisories_written += 1;
                     }
                 }
 
@@ -965,14 +1004,14 @@ impl McpServer {
                         severity: severity.as_deref(),
                         title,
                         url,
-                        affected_range,
+                        affected_range: &affected_range,
                         fixed_versions: &fixed_versions_json,
                         source: "ghsa",
                         details,
                         affected_functions: &[],
                         cwe_ids: &cwe_ids,
                     };
-                    insert_crate_level_advisory_match(&self.state.db, &insert)
+                    insert_crate_level_advisory_match(&mut *tx, &insert)
                         .await
                         .map_err(|e| {
                             format!(
@@ -984,6 +1023,11 @@ impl McpServer {
                 }
             }
 
+            tx.commit()
+                .await
+                .map_err(|e| e.to_string())?;
+            self.query_cache_invalidate_crate(&krate.name)
+                .await?;
             outcome
                 .checked_crate_ids
                 .push(krate.id);
@@ -991,23 +1035,6 @@ impl McpServer {
 
         Ok(outcome)
     }
-}
-
-/// Checks if a semver version falls within a GHSA vulnerable version range.
-///
-/// GHSA ranges use comma-separated constraints like `>= 1.0.0, < 1.5.0`.
-fn ghsa_version_in_range(version: &str, range_str: &str) -> bool {
-    let Some(parsed) = Version::parse(version)
-        .ok()
-        .or_else(|| Version::parse(version.trim_start_matches('v')).ok())
-    else {
-        return false;
-    };
-
-    // GHSA uses comma-separated semver constraints which VersionReq handles.
-    VersionReq::parse(range_str)
-        .map(|req| req.matches(&parsed))
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -1066,13 +1093,6 @@ Some details.
         assert_eq!(parsed.versions.patched, vec![">=1.2.0"]);
         assert_eq!(parsed.versions.unaffected, vec!["<0.8.0"]);
         assert_eq!(rustsec_title_from_body(body).as_deref(), Some("Demo advisory body"));
-
-        let patched_reqs = parse_version_reqs(&parsed.versions.patched);
-        let unaffected_reqs = parse_version_reqs(&parsed.versions.unaffected);
-
-        assert_eq!(is_version_affected("1.0.0", &patched_reqs, &unaffected_reqs), Some(true));
-        assert_eq!(is_version_affected("1.2.0", &patched_reqs, &unaffected_reqs), Some(false));
-        assert_eq!(is_version_affected("0.7.9", &patched_reqs, &unaffected_reqs), Some(false));
     }
 
     #[test]
@@ -1114,6 +1134,7 @@ Some details.
 
         let affected = vec![
             OsvAffected {
+                package: None,
                 versions: vec![],
                 ranges: vec![],
                 ecosystem_specific: Some(OsvEcosystemSpecific {
@@ -1124,6 +1145,7 @@ Some details.
                 }),
             },
             OsvAffected {
+                package: None,
                 versions: vec![],
                 ranges: vec![],
                 ecosystem_specific: None,

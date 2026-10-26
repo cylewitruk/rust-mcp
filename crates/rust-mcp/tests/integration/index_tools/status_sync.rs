@@ -242,7 +242,7 @@ async fn index_crates_honors_pinned_version() {
             "index_crates",
             json!({
                 "crates": [{ "name": "demo_crate", "version": "1.1.0" }],
-                "include_dependencies": false
+                "include_dependencies": true
             }),
         )
         .await
@@ -262,6 +262,11 @@ async fn index_crates_honors_pinned_version() {
         Some("1.1.0")
     );
 
+    assert_eq!(
+        payload["results"][0]["synced_dependencies"], 0,
+        "count must describe the pinned release"
+    );
+
     let attempted = sqlx::query_scalar::<_, bool>(
         "SELECT cv.rustdoc_last_attempt_at IS NOT NULL
          FROM crate_versions cv
@@ -272,6 +277,19 @@ async fn index_crates_honors_pinned_version() {
     .await
     .expect("failed to load pinned version row");
     assert!(attempted, "rustdoc enrichment should target the pinned version");
+
+    // The mock lists no dependencies for 1.1.0: it must count as synced (empty),
+    // not as never synced.
+    let dependencies_synced = sqlx::query_scalar::<_, bool>(
+        "SELECT cv.dependencies_synced_at IS NOT NULL
+         FROM crate_versions cv
+         JOIN crates c ON c.id = cv.crate_id
+         WHERE c.name = 'demo_crate' AND cv.version = '1.1.0'",
+    )
+    .fetch_one(&context.state.db)
+    .await
+    .expect("failed to load pinned version row");
+    assert!(dependencies_synced, "pinned version dependencies should be synced");
 }
 
 #[tokio::test]
@@ -374,4 +392,41 @@ async fn index_crates_indexes_source_for_old_pinned_version() {
         common::first_content_text(&read).contains(PINNED_SOURCE_OLDEST_VERSION),
         "expected the pinned release's own source: {read}"
     );
+}
+
+#[tokio::test]
+async fn pinned_dependency_failure_is_reported_without_marking_coverage() {
+    let context = mock_index_sync_context()
+        .await
+        .expect("mock context");
+    let response = context
+        .mcp
+        .call_tool(
+            "index_crates",
+            json!({
+                "crates": [{"name": "deps_fail_crate", "version": "1.1.0"}],
+                "include_dependencies": true
+            }),
+        )
+        .await
+        .expect("index_crates");
+    let payload = common::structured_content(&response);
+    assert_eq!(payload["failed"], 1, "{payload}");
+    assert_eq!(payload["succeeded"], 0);
+    assert_eq!(payload["results"][0]["version"], "1.1.0");
+    assert_eq!(payload["results"][0]["synced_dependencies"], 0);
+    assert!(
+        payload["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("dependency sync failed for deps_fail_crate@1.1.0")
+    );
+    let synced: bool = sqlx::query_scalar(
+        "SELECT dependencies_synced_at IS NOT NULL FROM crate_versions v JOIN crates c ON \
+         c.id=v.crate_id WHERE c.name='deps_fail_crate' AND v.version='1.1.0'",
+    )
+    .fetch_one(&context.state.db)
+    .await
+    .expect("coverage");
+    assert!(!synced);
 }

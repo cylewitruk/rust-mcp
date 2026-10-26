@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Executor, PgPool, Postgres, Transaction};
 
 use super::models::{
     CrateLevelAdvisoryMatchInsert, GitHubCandidateRow, GitHubMetadataInsert, GitHubMetadataRow,
@@ -360,6 +360,8 @@ pub async fn fetch_security_crates_page(
          FROM crates
          WHERE ($3::BIGINT IS NULL
                 OR security_checked_at IS NULL
+                OR EXISTS (SELECT 1 FROM advisory_matches a WHERE a.crate_id = crates.id AND \
+         a.requires_resync)
                 OR security_checked_at < NOW() - make_interval(secs => $3::BIGINT::DOUBLE \
          PRECISION))
          ORDER BY security_checked_at ASC NULLS FIRST, id DESC
@@ -398,7 +400,10 @@ pub async fn fetch_security_versions_for_crate(
 }
 
 /// Deletes OSV-derived advisory matches for a crate.
-pub async fn clear_osv_advisory_matches(db: &PgPool, crate_id: i64) -> Result<(), sqlx::Error> {
+pub async fn clear_osv_advisory_matches<'e>(
+    db: impl Executor<'e, Database = Postgres>,
+    crate_id: i64,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "DELETE FROM advisory_matches
          WHERE crate_id = $1 AND source IN ('osv', 'rustsec_osv')",
@@ -410,8 +415,8 @@ pub async fn clear_osv_advisory_matches(db: &PgPool, crate_id: i64) -> Result<()
 }
 
 /// Deletes RustSec DB advisory matches for a crate.
-pub async fn clear_rustsec_db_advisory_matches(
-    db: &PgPool,
+pub async fn clear_rustsec_db_advisory_matches<'e>(
+    db: impl Executor<'e, Database = Postgres>,
     crate_id: i64,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -425,8 +430,8 @@ pub async fn clear_rustsec_db_advisory_matches(
 }
 
 /// Upserts a version-scoped advisory match row.
-pub async fn upsert_version_advisory_match(
-    db: &PgPool,
+pub async fn upsert_version_advisory_match<'e>(
+    db: impl Executor<'e, Database = Postgres>,
     advisory: &VersionAdvisoryMatchInsert<'_>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -437,14 +442,14 @@ pub async fn upsert_version_advisory_match(
          ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
          )
-         ON CONFLICT (crate_id, version_id, advisory_id)
+         ON CONFLICT (crate_id, version_id, advisory_id, source)
          DO UPDATE SET
             severity = EXCLUDED.severity,
             title = EXCLUDED.title,
             url = EXCLUDED.url,
             affected_range = EXCLUDED.affected_range,
             fixed_versions = EXCLUDED.fixed_versions,
-            source = EXCLUDED.source,
+            requires_resync = FALSE,
             details = EXCLUDED.details,
             affected_functions = EXCLUDED.affected_functions,
             cwe_ids = EXCLUDED.cwe_ids,
@@ -469,8 +474,8 @@ pub async fn upsert_version_advisory_match(
 
 /// Inserts a crate-level advisory match row when no version-specific match
 /// exists.
-pub async fn insert_crate_level_advisory_match(
-    db: &PgPool,
+pub async fn insert_crate_level_advisory_match<'e>(
+    db: impl Executor<'e, Database = Postgres>,
     advisory: &CrateLevelAdvisoryMatchInsert<'_>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -480,7 +485,13 @@ pub async fn insert_crate_level_advisory_match(
             affected_functions, cwe_ids, created_at
          ) VALUES (
              $1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()
-         )",
+         )
+         ON CONFLICT (crate_id, version_id, advisory_id, source)
+         DO UPDATE SET severity = EXCLUDED.severity, title = EXCLUDED.title,
+            url = EXCLUDED.url, affected_range = EXCLUDED.affected_range,
+            fixed_versions = EXCLUDED.fixed_versions, details = EXCLUDED.details,
+            affected_functions = EXCLUDED.affected_functions, cwe_ids = EXCLUDED.cwe_ids,
+            requires_resync = FALSE, created_at = NOW()",
     )
     .bind(advisory.crate_id)
     .bind(advisory.advisory_id)
@@ -569,6 +580,79 @@ async fn ensure_crate_stub_tx(
     .bind(crate_name)
     .fetch_one(&mut **tx)
     .await
+}
+
+/// Replaces a crate version's dependency edges and marks its dependencies as
+/// synced. Returns the number of edges written.
+async fn replace_dependency_edges_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    version_id: i64,
+    dependencies: &[CratesIoDependency],
+) -> Result<usize, sqlx::Error> {
+    sqlx::query("DELETE FROM dependency_edges WHERE from_version_id = $1")
+        .bind(version_id)
+        .execute(&mut **tx)
+        .await?;
+
+    let mut written = 0_usize;
+    for dependency in dependencies {
+        let dependency_name = dependency.crate_id.trim();
+        if dependency_name.is_empty() {
+            continue;
+        }
+
+        let to_crate_id = ensure_crate_stub_tx(tx, dependency_name).await?;
+        let features = Value::Array(
+            dependency
+                .features
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect::<Vec<_>>(),
+        );
+        let dependency_kind = dependency
+            .kind
+            .as_deref()
+            .unwrap_or("normal");
+
+        sqlx::query(
+            "INSERT INTO dependency_edges (
+                from_version_id, to_crate_id, requirement, dependency_kind, optional,
+                features, created_at
+             ) VALUES (
+                $1, $2, $3, $4, $5, $6, NOW()
+             )",
+        )
+        .bind(version_id)
+        .bind(to_crate_id)
+        .bind(&dependency.req)
+        .bind(dependency_kind)
+        .bind(dependency.optional)
+        .bind(features)
+        .execute(&mut **tx)
+        .await?;
+
+        written += 1;
+    }
+
+    sqlx::query("UPDATE crate_versions SET dependencies_synced_at = NOW() WHERE id = $1")
+        .bind(version_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(written)
+}
+
+/// Replaces one crate version's dependency edges from crates.io data and marks
+/// them as synced. Returns the number of edges written.
+pub async fn persist_version_dependencies(
+    db: &PgPool,
+    version_id: i64,
+    dependencies: &[CratesIoDependency],
+) -> Result<usize, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    let written = replace_dependency_edges_tx(&mut tx, version_id, dependencies).await?;
+    tx.commit().await?;
+    Ok(written)
 }
 
 /// Persists crate metadata, versions, features, readme, and dependencies in one
@@ -743,50 +827,8 @@ pub async fn persist_crate_sync(
         }
 
         if let Some(dependencies) = dependencies {
-            sqlx::query("DELETE FROM dependency_edges WHERE from_version_id = $1")
-                .bind(selected_version_id)
-                .execute(&mut *tx)
-                .await?;
-
-            for dependency in dependencies {
-                let dependency_name = dependency.crate_id.trim();
-                if dependency_name.is_empty() {
-                    continue;
-                }
-
-                let to_crate_id = ensure_crate_stub_tx(&mut tx, dependency_name).await?;
-                let features = Value::Array(
-                    dependency
-                        .features
-                        .iter()
-                        .cloned()
-                        .map(Value::String)
-                        .collect::<Vec<_>>(),
-                );
-                let dependency_kind = dependency
-                    .kind
-                    .as_deref()
-                    .unwrap_or("normal");
-
-                sqlx::query(
-                    "INSERT INTO dependency_edges (
-                        from_version_id, to_crate_id, requirement, dependency_kind, optional,
-                        features, created_at
-                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, NOW()
-                     )",
-                )
-                .bind(selected_version_id)
-                .bind(to_crate_id)
-                .bind(&dependency.req)
-                .bind(dependency_kind)
-                .bind(dependency.optional)
-                .bind(features)
-                .execute(&mut *tx)
-                .await?;
-
-                dependencies_synced += 1;
-            }
+            dependencies_synced =
+                replace_dependency_edges_tx(&mut tx, selected_version_id, dependencies).await?;
         }
     }
 
@@ -1721,7 +1763,10 @@ pub async fn fetch_crates_needing_github_metadata(
 
 /// Clears GHSA-sourced advisory matches for a crate before re-inserting fresh
 /// data.
-pub async fn clear_ghsa_advisory_matches(db: &PgPool, crate_id: i64) -> Result<(), sqlx::Error> {
+pub async fn clear_ghsa_advisory_matches<'e>(
+    db: impl Executor<'e, Database = Postgres>,
+    crate_id: i64,
+) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM advisory_matches WHERE crate_id = $1 AND source = 'ghsa'")
         .bind(crate_id)
         .execute(db)

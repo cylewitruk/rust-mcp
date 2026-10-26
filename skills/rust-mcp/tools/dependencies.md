@@ -5,6 +5,7 @@
 Checks a manifest for yanked versions, advisories, outdated requirements and MSRV conflicts. Pass Cargo.toml **file text** (`cargo_toml`), not a path.
 
 - Each declared requirement is checked against the highest indexed version that satisfies it. Cargo.lock, transitive dependencies, `workspace = true` inheritance and `package` renames are **not** covered.
+- Advisories with unknown applicability get a separate marker and lower confidence; they are not counted as confirmed affected.
 - Inspect `unresolved` findings: either the crate is not indexed (index it with `index_crates` and re-run) or no indexed version satisfies the requirement (check the requirement itself, and `index_refresh` the crate if the index may be stale).
 
 ## `dependency_resolve`

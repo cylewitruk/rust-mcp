@@ -6,11 +6,16 @@ Find crates by free text, crates.io category or keyword, sortable by relevance, 
 
 ## `crate_intel`
 
-Start here for any crate: versions, dependencies, dependents, advisories (for the selected `version`), README excerpt. Set `readme_max_chars: 0` to skip the README.
+Start here for any crate: versions, dependencies, dependents, advisories and a README excerpt. Set `readme_max_chars: 0` to skip the README.
+
+- `advisories` lists only advisories that affect the selected `version` (`applicability: "affected"`) or could not be evaluated (`"unknown"`); `advisories_not_affecting` counts the rest. Full write-ups need `include_advisory_details: true`. Counts deduplicate stored advisory IDs, not all cross-database aliases.
+- `dependency_coverage: "not_synced"` means the dependency list is missing, not empty; `index_crates` with that `version` fetches it.
+- `version_history[].advisory_unknown_count` distinguishes unevaluated advisories from confirmed affected versions (`has_advisory`).
+- `dependents` covers crates in the local index only, not all of crates.io.
 
 ## `crate_versions`
 
-Version timeline with yanked, security and adoption markers. Use it to pick an upgrade target or check a locked version.
+Version timeline with yanked, security and adoption markers. `security_advisory_unknown` lowers confidence and means applicability is unresolved. Use it to pick an upgrade target or check a locked version.
 
 ## `crate_features`
 

@@ -13,6 +13,8 @@ pub struct OsvQueryResponse {
 #[derive(Debug, Deserialize)]
 pub struct OsvVulnerability {
     pub id: String,
+    /// Withdrawal timestamp supplied by the advisory authority.
+    pub withdrawn: Option<String>,
     pub summary: Option<String>,
     pub details: Option<String>,
     #[serde(default)]
@@ -29,12 +31,23 @@ pub struct OsvVulnerability {
 
 #[derive(Debug, Deserialize)]
 pub struct OsvAffected {
+    /// Package identity; absent for repository-only ranges.
+    pub package: Option<OsvPackage>,
     #[serde(default)]
     pub versions: Vec<String>,
     #[serde(default)]
     pub ranges: Vec<OsvRange>,
     #[serde(default)]
     pub ecosystem_specific: Option<OsvEcosystemSpecific>,
+}
+
+/// Package to which an OSV affected entry applies.
+#[derive(Debug, Deserialize)]
+pub struct OsvPackage {
+    /// Package ecosystem (for example, `crates.io`).
+    pub ecosystem: String,
+    /// Package name, or `*` for ecosystem-wide advisories.
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize)]

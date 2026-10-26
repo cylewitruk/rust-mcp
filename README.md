@@ -40,6 +40,14 @@ curl -sS http://127.0.0.1:43173/readyz
 
 The container mounts `~/.cargo/registry` (read-only) and uses two Docker volumes for database and server state.
 
+### Advisory data after upgrading
+
+Startup synchronization refreshes advisory sources. Legacy matches are reported as unknown until
+successfully refreshed; failed fetches preserve that uncertainty. `index_refresh(scope: "security")`
+can retry a page immediately. If existing data came from a local RustSec checkout, configure
+`RUSTSEC_DB_DIR` to refresh it. Scores count confirmed affected advisories only; unknown applicability
+is reported separately. Advisory counts deduplicate stored IDs, not all cross-database aliases.
+
 ## Client Configuration
 
 ### Direct HTTP (preferred)

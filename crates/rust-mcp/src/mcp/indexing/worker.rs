@@ -7,8 +7,8 @@ use tracing::{error, info, warn};
 use crate::db::indexing::{
     RustdocCandidateFilter, claim_next_refresh_job, enqueue_or_get_refresh_job_id,
     fetch_refresh_job_gauge_counts, fetch_refresh_job_scope_pending_counts,
-    mark_crate_refresh_error, mark_refresh_job_failed_or_requeued, mark_refresh_job_finished,
-    mark_versions_locally_present,
+    fetch_security_crates_page, mark_crate_refresh_error, mark_refresh_job_failed_or_requeued,
+    mark_refresh_job_finished, mark_versions_locally_present,
 };
 use crate::db::tools::delete_query_cache_for_crate;
 use crate::mcp::indexing::coordinator::{JobOutcome, PRIORITY_PROACTIVE_ENRICH};
@@ -161,23 +161,32 @@ pub async fn run_refresh_worker(state: AppState) {
                 let page = sync_page(payload.page);
                 let per_page = sync_per_page(payload.per_page);
                 let offset = page.saturating_sub(1) * per_page;
-                match server
-                    .sync_osv_security(per_page, offset, None)
-                    .await
+                match fetch_security_crates_page(
+                    &state.db,
+                    i64::from(per_page),
+                    i64::from(offset),
+                    None,
+                )
+                .await
                 {
-                    Ok(mut osv) => match server
-                        .sync_rustsec_db_security(per_page, offset, None)
-                        .await
-                    {
-                        Ok(rustsec) => {
-                            osv.merge(rustsec);
-                            Ok(RefreshJobOutcome::Security(osv))
+                    Ok(crates) => {
+                        let outcome = server
+                            .sync_security_crates(&crates)
+                            .await;
+                        if outcome.errors.is_empty() {
+                            Ok(RefreshJobOutcome::Security(outcome))
+                        } else {
+                            // Retry partial failures too: successful source replacements
+                            // are idempotent, and failed sources must remain observable.
+                            Err(outcome.errors.join("; "))
                         }
-                        Err(error) => Err(error),
-                    },
-                    Err(error) => Err(error),
+                    }
+                    Err(error) => {
+                        Err(format!("failed to load crates for security refresh: {error}"))
+                    }
                 }
             }
+
             "docs" => server
                 .sync_docs_pages(
                     optional_job_crate_name(&job.crate_name, payload.crate_name),

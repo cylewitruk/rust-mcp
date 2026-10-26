@@ -228,6 +228,7 @@ async fn seed_type_intelligence_fixture(context: &common::SeededMcpContext) {
     .expect("failed to seed parse symbol with Result signature");
 }
 
+mod advisories;
 mod analysis;
 mod compatibility;
 mod discovery;

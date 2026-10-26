@@ -2,11 +2,11 @@
 
 ## `crate_compare`
 
-Two different crates (`left_crate`, `right_crate`) side by side on adoption, risk and maintenance, with a recommendation.
+Two different crates (`left_crate`, `right_crate`) side by side on adoption, risk and maintenance, with a recommendation. Scores count confirmed affecting advisories; `advisory_unknown_count` reports unevaluated advisories and lowers confidence. A recommendation is withheld if unknowns could change the winning score.
 
 ## `crate_alternatives`
 
-Ranked alternatives to a crate by category/keyword overlap and adoption. Accepts `allow_licenses`/`deny_licenses` (SPDX ids).
+Ranked alternatives to a crate by category/keyword overlap and adoption. Accepts `allow_licenses`/`deny_licenses` (SPDX ids). Unknown advisory applicability is reported separately and lowers confidence; it is not a clean security assessment.
 
 ## `crate_compatibility`
 

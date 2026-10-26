@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use rmcp::Json;
 pub use rust_mcp_types::types::krate::{
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::models::AlternativesCandidateRow;
 use crate::db::tools;
+use crate::mcp::advisories;
 use crate::mcp::models::{ConfidenceAssessment, ConfidenceLevel, LicensePolicyResult};
 use crate::mcp::progress::ToolCallContext;
 use crate::mcp::server::McpServer;
@@ -246,6 +247,13 @@ fn score_candidate(
         reasons.push(format!("advisory_penalty=-{penalty:.2}"));
     }
 
+    if candidate.advisory_unknown_count > 0 {
+        reasons.push(format!(
+            "advisory_applicability_unknown={}; excluded from score",
+            candidate.advisory_unknown_count
+        ));
+    }
+
     if candidate.yanked {
         score -= 5.0;
         reasons.push("yanked_penalty=-5.00".to_string());
@@ -303,7 +311,7 @@ impl McpServer {
             .resolve_version_or_latest(&ctx, requested_version.as_deref(), &tcx)
             .await?;
 
-        let candidates = tools::list_alternatives_candidates(
+        let mut candidates = tools::list_alternatives_candidates(
             &self.state.db,
             ctx.crate_row.id,
             &ctx.crate_row.name,
@@ -318,6 +326,34 @@ impl McpServer {
         )
         .await
         .map_err(|e| format!("crate_alternatives candidate query failed: {e}"))?;
+        let candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.crate_id)
+            .collect::<Vec<_>>();
+        let mut advisory_rows_by_crate = HashMap::<i64, Vec<_>>::new();
+        for row in tools::fetch_advisory_rows(&self.state.db, &candidate_ids)
+            .await
+            .map_err(|e| format!("crate_alternatives advisory query failed: {e}"))?
+        {
+            advisory_rows_by_crate
+                .entry(row.crate_id)
+                .or_default()
+                .push(row);
+        }
+        for candidate in &mut candidates {
+            let (Some(version_id), Some(version), Some(rows)) = (
+                candidate.latest_version_id,
+                candidate
+                    .latest_version
+                    .as_deref(),
+                advisory_rows_by_crate.get(&candidate.crate_id),
+            ) else {
+                continue;
+            };
+            let counts = advisories::advisory_counts(rows, version_id, version);
+            candidate.advisory_count = counts.affected as i64;
+            candidate.advisory_unknown_count = counts.unknown as i64;
+        }
 
         let mut alternatives = candidates
             .into_iter()
@@ -359,6 +395,7 @@ impl McpServer {
                     total_downloads: candidate.total_downloads,
                     dependent_crates: candidate.dependent_count,
                     advisory_count: candidate.advisory_count,
+                    advisory_unknown_count: candidate.advisory_unknown_count,
                     yanked: candidate.yanked,
                     license_expression: candidate.license_expression,
                     policy_result,
@@ -410,6 +447,17 @@ impl McpServer {
             ConfidenceAssessment {
                 level: ConfidenceLevel::Low,
                 reason: "no alternatives matched similarity, taxonomy, and policy constraints"
+                    .to_string(),
+            }
+        } else if paginated
+            .items
+            .iter()
+            .any(|candidate| candidate.advisory_unknown_count > 0)
+        {
+            ConfidenceAssessment {
+                level: ConfidenceLevel::Medium,
+                reason: "some alternatives have unknown advisory applicability; scores include \
+                         only confirmed affected advisories"
                     .to_string(),
             }
         } else if ctx
@@ -523,6 +571,8 @@ mod tests {
         published_at: Option<&str>,
     ) -> AlternativesCandidateRow {
         AlternativesCandidateRow {
+            crate_id: 1,
+            latest_version_id: Some(1),
             crate_name: "test_crate".to_string(),
             description: None,
             categories: vec![],
@@ -532,6 +582,7 @@ mod tests {
             total_downloads,
             yanked: false,
             advisory_count: 0,
+            advisory_unknown_count: 0,
             license_expression: Some("MIT".to_string()),
             dependent_count,
             name_similarity,
